@@ -34,11 +34,10 @@ use crate::{
 };
 use alloc::{boxed::Box, fmt, sync::Arc};
 use core::{
-    any::TypeId,
+    any::{Any, TypeId},
     cell::{Cell, RefCell},
     marker::PhantomData,
     ops::Deref,
-    ptr,
 };
 use std::thread_local;
 use tracing_core::{
@@ -871,23 +870,13 @@ where
 
     #[doc(hidden)]
     #[inline]
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): preserve Filtered<Layer>::downcast_raw until safe Any references replace it."
-    )]
-    unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
+    fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
         match id {
-            id if id == TypeId::of::<Self>() => Some(ptr::from_ref(self).cast::<()>()),
-            id if id == TypeId::of::<L>() => Some(ptr::from_ref(&self.layer).cast::<()>()),
-            id if id == TypeId::of::<F>() => Some(ptr::from_ref(&self.filter).cast::<()>()),
-            id if id == TypeId::of::<MagicPlfDowncastMarker>() => {
-                Some(ptr::from_ref(&self.id).cast::<()>())
-            }
-            _ => unsafe {
-                // SAFETY: This forwards the existing raw downcast
-                // compatibility hook. A safe `Any` replacement should cover this.
-                self.layer.downcast_raw(id)
-            },
+            id if id == TypeId::of::<Self>() => Some(self),
+            id if id == TypeId::of::<L>() => Some(&self.layer),
+            id if id == TypeId::of::<F>() => Some(&self.filter),
+            id if id == TypeId::of::<MagicPlfDowncastMarker>() => Some(&self.id),
+            _ => self.layer.downcast_ref_by_id(id),
         }
     }
 }
@@ -1316,18 +1305,9 @@ where
     L: Layer<S>,
     S: Subscriber,
 {
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): preserve per-layer filter marker probing through Layer::downcast_raw."
-    )]
-    unsafe {
-        // SAFETY: we're not actually *doing* anything with this pointer --- we
-        // only care about the `Option`, which we're turning into a `bool`. So
-        // even if the layer decides to be evil and give us some kind of invalid
-        // pointer, we don't ever dereference it, so this is always safe.
-        layer.downcast_raw(TypeId::of::<MagicPlfDowncastMarker>())
-    }
-    .is_some()
+    layer
+        .downcast_ref_by_id(TypeId::of::<MagicPlfDowncastMarker>())
+        .is_some()
 }
 
 struct FmtBitset(u64);

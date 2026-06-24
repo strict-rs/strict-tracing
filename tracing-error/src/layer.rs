@@ -1,7 +1,6 @@
-use std::any::{TypeId, type_name};
+use std::any::{Any, TypeId, type_name};
 use std::fmt;
 use std::marker::PhantomData;
-use std::ptr;
 use tracing::{Dispatch, Metadata, Subscriber, span};
 use tracing_subscriber::fmt::format::{DefaultFields, FormatFields};
 use tracing_subscriber::{
@@ -52,20 +51,10 @@ where
         }
     }
 
-    // SAFETY: This preserves the current `Layer::downcast_raw` compatibility
-    // hook by returning pointers to `self` or to the embedded `WithContext`,
-    // both of which are valid for the lifetime of `self`. The raw-pointer hook
-    // should be removed once `Layer` exposes a safe `Any` downcast hook.
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): preserve Layer::downcast_raw compatibility until safe Any downcasting replaces it"
-    )]
-    unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
+    fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
         match id {
-            id if id == TypeId::of::<Self>() => Some(ptr::from_ref(self).cast::<()>()),
-            id if id == TypeId::of::<WithContext>() => {
-                Some(ptr::from_ref(&self.get_context).cast::<()>())
-            }
+            id if id == TypeId::of::<Self>() => Some(self),
+            id if id == TypeId::of::<WithContext>() => Some(&self.get_context),
             _ => None,
         }
     }

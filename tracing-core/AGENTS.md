@@ -29,5 +29,5 @@ Data flow: instrumentation builds a static `Callsite`+`Metadata`; first use regi
 ## Gotchas
 
 - This is the workspace's stability anchor: changing the `Subscriber`/`Callsite` trait surface or `Metadata`/`Field` layout breaks every downstream crate and external implementors. Treat additions as default-method/additive only unless a break is intended.
-- `Subscriber::downcast_raw` is the existing compatibility hook for object-safe downcasting. The workspace lint policy denies `unsafe_code`, so every remaining raw downcast implementation is locally allowed with an explicit `TODO(unsafe-forbid)` reason. Do not add new raw-pointer downcast paths when a safe `Any`-style reference can do the job.
+- `Subscriber` extends the hidden `subscriber::AsAny` helper and exposes `downcast_ref_by_id` as the object-safe component downcast hook. Composition wrappers should forward safe `&dyn Any` references; do not add raw-pointer downcast paths.
 - `lib.rs` enables crate-level warnings and the manifest inherits `[lints] workspace = true`: every new public item needs docs, `Debug`/visibility need to satisfy the workspace lint policy, and intentionally ignored return values should use named `_foo` bindings rather than bare `let _ = ...`.

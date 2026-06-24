@@ -58,7 +58,7 @@ cargo test --no-default-features -p tracing
 cargo nextest run --profile ci --all-features -p tracing-subscriber
 ```
 
-Linting is part of the workspace contract, not a per-crate afterthought. Every member manifest inherits `[lints] workspace = true`; the root `Cargo.toml` carries the rustc/rustdoc/Clippy levels, and `clippy.toml` carries thresholds plus disallowed macros, methods, and types. Prefer structural fixes over new `#[allow]`s. When a legacy compatibility hook still needs an allow, keep it local, include a `reason = "..."`, and preserve the existing `TODO(unsafe-forbid)` breadcrumbs instead of broadening the exception.
+Linting is part of the workspace contract, not a per-crate afterthought. Every member manifest inherits `[lints] workspace = true`; the root `Cargo.toml` carries the rustc/rustdoc/Clippy levels, and `clippy.toml` carries thresholds plus disallowed macros, methods, and types. The workspace forbids compiled local `unsafe_code`; prefer structural safe APIs, safe wrappers, and ownership changes over new `#[allow]`s or compatibility escape hatches.
 
 ## Feature-flag conventions
 

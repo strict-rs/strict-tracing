@@ -700,7 +700,7 @@ use tracing_core::{
     subscriber::{Interest, Subscriber},
 };
 
-use core::{any::TypeId, ptr};
+use core::any::{Any, TypeId};
 
 feature! {
     #![feature = "alloc"]
@@ -725,7 +725,7 @@ pub(crate) mod tests;
 ///
 /// [`Subscriber`]: tracing_core::Subscriber
 #[cfg_attr(docsrs, doc(notable_trait))]
-pub trait Layer<S>
+pub trait Layer<S>: AsAny
 where
     S: Subscriber,
     Self: 'static,
@@ -1242,16 +1242,26 @@ where
     }
 
     #[doc(hidden)]
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): preserve Layer::downcast_raw until safe Any references replace it."
-    )]
-    unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
-        if id == TypeId::of::<Self>() {
-            Some(ptr::from_ref(self).cast::<()>())
+    fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
+        let this = self.as_any();
+        if this.type_id() == id {
+            Some(this)
         } else {
             None
         }
+    }
+}
+
+/// Provides `Any` access for type-erased [`Layer`] downcasting.
+#[doc(hidden)]
+pub trait AsAny: Any {
+    /// Returns this value as `dyn Any`.
+    fn as_any(&self) -> &dyn Any;
+}
+
+impl<T: Any> AsAny for T {
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -1522,7 +1532,7 @@ pub struct Identity {
 
 #[derive(Clone, Copy)]
 pub(crate) struct NoneLayerMarker(());
-static NONE_LAYER_MARKER: NoneLayerMarker = NoneLayerMarker(());
+pub(crate) static NONE_LAYER_MARKER: NoneLayerMarker = NoneLayerMarker(());
 
 /// Is a type implementing `Layer` `Option::<_>::None`?
 pub(crate) fn layer_is_none<L, S>(layer: &L) -> bool
@@ -1530,21 +1540,9 @@ where
     L: Layer<S>,
     S: Subscriber,
 {
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): preserve None layer marker probing through Layer::downcast_raw."
-    )]
-    unsafe {
-        // SAFETY: we're not actually *doing* anything with this pointer ---
-        // this only care about the `Option`, which is essentially being used
-        // as a bool. We can rely on the pointer being valid, because it is
-        // a crate-private type, and is only returned by the `Layer` impl
-        // for `Option`s. However, even if the layer *does* decide to be
-        // evil and give us an invalid pointer here, that's fine, because we'll
-        // never actually dereference it.
-        layer.downcast_raw(TypeId::of::<NoneLayerMarker>())
-    }
-    .is_some()
+    layer
+        .downcast_ref_by_id(TypeId::of::<NoneLayerMarker>())
+        .is_some()
 }
 
 /// Is a type implementing `Subscriber` `Option::<_>::None`?
@@ -1552,21 +1550,9 @@ pub(crate) fn subscriber_is_none<S>(subscriber: &S) -> bool
 where
     S: Subscriber,
 {
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): preserve None subscriber marker probing through Subscriber::downcast_raw."
-    )]
-    unsafe {
-        // SAFETY: we're not actually *doing* anything with this pointer ---
-        // this only care about the `Option`, which is essentially being used
-        // as a bool. We can rely on the pointer being valid, because it is
-        // a crate-private type, and is only returned by the `Layer` impl
-        // for `Option`s. However, even if the subscriber *does* decide to be
-        // evil and give us an invalid pointer here, that's fine, because we'll
-        // never actually dereference it.
-        subscriber.downcast_raw(TypeId::of::<NoneLayerMarker>())
-    }
-    .is_some()
+    subscriber
+        .downcast_ref_by_id(TypeId::of::<NoneLayerMarker>())
+        .is_some()
 }
 
 impl<L, S> Layer<S> for Option<L>
@@ -1681,21 +1667,13 @@ where
 
     #[doc(hidden)]
     #[inline]
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): preserve Option<Layer>::downcast_raw until safe Any references replace it."
-    )]
-    unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
+    fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
         if id == TypeId::of::<Self>() {
-            Some(ptr::from_ref(self).cast::<()>())
+            Some(self)
         } else if id == TypeId::of::<NoneLayerMarker>() && self.is_none() {
-            Some(ptr::from_ref(&NONE_LAYER_MARKER).cast::<()>())
+            Some(&NONE_LAYER_MARKER)
         } else {
-            self.as_ref().and_then(|inner| unsafe {
-                // SAFETY: This forwards the existing raw downcast
-                // compatibility hook. A safe `Any` replacement should cover this.
-                inner.downcast_raw(id)
-            })
+            self.as_ref().and_then(|inner| inner.downcast_ref_by_id(id))
         }
     }
 }
@@ -1778,14 +1756,13 @@ feature! {
 
             #[doc(hidden)]
             #[inline]
-            #[allow(
-                unsafe_code,
-                reason = "TODO(unsafe-forbid): preserve Box<Layer>::downcast_raw forwarding until safe Any references replace it."
-            )]
-            unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
-                // SAFETY: This forwards the existing raw downcast
-                // compatibility hook. A safe `Any` replacement should cover this.
-                unsafe { self.deref().downcast_raw(id) }
+            fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
+                let this = self.as_any();
+                if this.type_id() == id {
+                    return Some(this);
+                }
+
+                self.deref().downcast_ref_by_id(id)
             }
         };
     }
@@ -1903,14 +1880,9 @@ feature! {
         }
 
         #[doc(hidden)]
-        #[allow(
-            unsafe_code,
-            reason = "TODO(unsafe-forbid): preserve Vec<Layer>::downcast_raw forwarding until safe Any references replace it."
-        )]
-        unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
-            // If downcasting to `Self`, return a pointer to `self`.
+        fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
             if id == TypeId::of::<Self>() {
-                return Some(ptr::from_ref(self).cast::<()>());
+                return Some(self);
             }
 
             // Someone is looking for per-layer filters. But, this `Vec`
@@ -1922,11 +1894,7 @@ feature! {
             // time. It would be nice if this could be cached, but that would
             // require replacing the `Vec` impl with an impl for a newtype...
             if filter::is_plf_downcast_marker(id)
-                && self.iter().any(|s| unsafe {
-                    // SAFETY: this marker probe is used only as a boolean
-                    // compatibility signal.
-                    s.downcast_raw(id).is_none()
-                })
+                && self.iter().any(|s| s.downcast_ref_by_id(id).is_none())
             {
                 return None;
             }
@@ -1934,11 +1902,7 @@ feature! {
             // Otherwise, return the first child of `self` that downcaasts to
             // the selected type, if any.
             // XXX(eliza): hope this is reasonable lol
-            self.iter().find_map(|l| unsafe {
-                // SAFETY: This forwards the raw downcast compatibility
-                // hook. A safe `Any` replacement should cover this.
-                l.downcast_raw(id)
-            })
+            self.iter().find_map(|l| l.downcast_ref_by_id(id))
         }
     }
 }

@@ -5,7 +5,7 @@ use crate::{
     registry::{self, LookupSpan, SpanRef},
 };
 use alloc::{fmt, format, string::String};
-use core::{any::TypeId, marker::PhantomData, ops::Deref, ptr};
+use core::{any::{Any, TypeId}, marker::PhantomData, ops::Deref};
 use format::{FmtSpan, TimingDisplay};
 use std::{cell::RefCell, env, eprintln, io, thread_local, time::Instant};
 use tracing_core::{
@@ -1081,20 +1081,16 @@ where
         });
     }
 
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): preserve fmt Layer::downcast_raw component access until safe Any references replace it."
-    )]
-    unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
-        // This `downcast_raw` impl allows downcasting a `fmt` layer to any of
+    fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
+        // This impl allows downcasting a `fmt` layer to any of
         // its components (event formatter, field formatter, and `MakeWriter`)
         // as well as to the layer's type itself. The potential use-cases for
         // this *may* be somewhat niche, though...
         match () {
-            _ if id == TypeId::of::<Self>() => Some(ptr::from_ref(self).cast::<()>()),
-            _ if id == TypeId::of::<E>() => Some(ptr::from_ref(&self.fmt_event).cast::<()>()),
-            _ if id == TypeId::of::<N>() => Some(ptr::from_ref(&self.fmt_fields).cast::<()>()),
-            _ if id == TypeId::of::<W>() => Some(ptr::from_ref(&self.make_writer).cast::<()>()),
+            _ if id == TypeId::of::<Self>() => Some(self),
+            _ if id == TypeId::of::<E>() => Some(&self.fmt_event),
+            _ if id == TypeId::of::<N>() => Some(&self.fmt_fields),
+            _ if id == TypeId::of::<W>() => Some(&self.make_writer),
             _ => None,
         }
     }

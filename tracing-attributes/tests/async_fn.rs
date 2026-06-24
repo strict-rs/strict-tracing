@@ -35,14 +35,6 @@ async fn test_ret_impl_trait_err(n: i32) -> Result<impl Iterator<Item = i32>, &'
 #[allow(dead_code)]
 async fn test_async_fn_empty() {}
 
-#[instrument]
-#[allow(dead_code)]
-#[allow(
-    unsafe_code,
-    reason = "test fixture verifies #[instrument] accepts unsafe async functions"
-)]
-async unsafe fn test_async_unsafe_fn_empty() {}
-
 // Reproduces a compile error when an instrumented function body contains inner
 // attributes (https://github.com/tokio-rs/tracing/issues/2294).
 #[deny(unused_variables)]

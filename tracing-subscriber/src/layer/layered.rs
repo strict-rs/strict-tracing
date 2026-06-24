@@ -11,7 +11,6 @@ use core::{
     any::{Any, TypeId},
     cmp, fmt,
     marker::PhantomData,
-    ptr,
 };
 
 /// A [`Subscriber`] composed of a `Subscriber` wrapped by one or more
@@ -75,22 +74,9 @@ where
 
     /// Returns some reference to this [`Subscriber`] value if it is of type `T`,
     /// or `None` if it isn't.
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): preserve Layered::downcast_ref through the existing raw downcast compatibility hook."
-    )]
     pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
-        unsafe {
-            // SAFETY: The existing `downcast_raw` contract requires that a
-            // non-null pointer is only returned for the requested `TypeId`.
-            // Safe `Any` references should replace this raw hook.
-            let raw = self.downcast_raw(TypeId::of::<T>())?;
-            if raw.is_null() {
-                None
-            } else {
-                Some(&*raw.cast::<T>())
-            }
-        }
+        self.downcast_ref_by_id(TypeId::of::<T>())?
+            .downcast_ref::<T>()
     }
 }
 
@@ -219,11 +205,7 @@ where
     }
 
     #[doc(hidden)]
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): preserve Subscriber::downcast_raw forwarding until safe Any references replace it."
-    )]
-    unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
+    fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
         // Unlike the implementation of `Layer` for `Layered`, we don't have to
         // handle the "magic PLF downcast marker" here. If a `Layered`
         // implements `Subscriber`, we already know that the `inner` branch is
@@ -244,18 +226,13 @@ where
         // `Layered`s that might be tree-shaped (the inner child is also a
         // `Layer`).
 
-        // If downcasting to `Self`, return a pointer to `self`.
         if id == TypeId::of::<Self>() {
-            return Some(ptr::from_ref(self).cast::<()>());
+            return Some(self);
         }
 
-        // SAFETY: this forwarding implementation preserves the raw downcast
-        // protocol required by the public compatibility API. Safe `Any`
-        // references should replace the protocol.
-        unsafe { self.layer.downcast_raw(id) }.or_else(|| unsafe {
-            // SAFETY: same compatibility boundary as above.
-            self.inner.downcast_raw(id)
-        })
+        self.layer
+            .downcast_ref_by_id(id)
+            .or_else(|| self.inner.downcast_ref_by_id(id))
     }
 }
 
@@ -359,14 +336,9 @@ where
     }
 
     #[doc(hidden)]
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): preserve Layer::downcast_raw forwarding until safe Any references replace it."
-    )]
-    unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
+    fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
         match id {
-            // If downcasting to `Self`, return a pointer to `self`.
-            id if id == TypeId::of::<Self>() => Some(ptr::from_ref(self).cast::<()>()),
+            id if id == TypeId::of::<Self>() => Some(self),
 
             // Oh, we're looking for per-layer filters!
             //
@@ -395,19 +367,17 @@ where
             // If you don't understand this...that's fine, just don't mess with
             // it. :)
             id if filter::is_plf_downcast_marker(id) => {
-                // SAFETY: The raw marker probe is used only as a boolean.
-                // Safe `Any` marker references should replace it.
-                unsafe { self.layer.downcast_raw(id) }.and(unsafe {
-                    // SAFETY: same compatibility boundary as above.
-                    self.inner.downcast_raw(id)
-                })
+                if self.layer.downcast_ref_by_id(id).is_none() {
+                    return None;
+                }
+                self.inner.downcast_ref_by_id(id)
             }
 
             // Otherwise, try to downcast both branches normally...
-            _ => unsafe { self.layer.downcast_raw(id) }.or_else(|| unsafe {
-                // SAFETY: same raw downcast forwarding boundary.
-                self.inner.downcast_raw(id)
-            }),
+            _ => self
+                .layer
+                .downcast_ref_by_id(id)
+                .or_else(|| self.inner.downcast_ref_by_id(id)),
         }
     }
 }

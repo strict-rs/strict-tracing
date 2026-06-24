@@ -1,3 +1,4 @@
+use std::any::{Any, TypeId};
 use tracing::Subscriber;
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter::Targets;
@@ -29,9 +30,9 @@ fn downcast_ref_to_inner_layer_and_filter() {
 }
 
 #[test]
-fn forward_downcast_raw_to_layer() {
+fn forward_downcast_ref_by_id_to_layer() {
     // Test that a filtered layer still gives its wrapped layer a chance to
-    // return a custom struct from downcast_raw.
+    // return a custom struct from downcast_ref_by_id.
     // https://github.com/tokio-rs/tracing/issues/1618
 
     struct WrappedLayer {
@@ -45,21 +46,10 @@ fn forward_downcast_raw_to_layer() {
         S: Subscriber,
         S: for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
     {
-        #[allow(
-            unsafe_code,
-            reason = "TODO(unsafe-forbid): exercise the Layer::downcast_raw compatibility hook."
-        )]
-        unsafe fn downcast_raw(&self, id: std::any::TypeId) -> Option<*const ()> {
-            // SAFETY: this test implements the existing raw downcast contract
-            // so forwarding behavior remains covered until safe `Any`
-            // references replace the hook.
+        fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
             match id {
-                id if id == std::any::TypeId::of::<Self>() => {
-                    Some(std::ptr::from_ref(self).cast::<()>())
-                }
-                id if id == std::any::TypeId::of::<WithContext>() => {
-                    Some(std::ptr::from_ref(&self.with_context).cast::<()>())
-                }
+                id if id == TypeId::of::<Self>() => Some(self),
+                id if id == TypeId::of::<WithContext>() => Some(&self.with_context),
                 _ => None,
             }
         }
@@ -72,6 +62,6 @@ fn forward_downcast_raw_to_layer() {
     let registry = tracing_subscriber::registry().with(layer.with_filter(filter));
     let dispatch = tracing::dispatcher::Dispatch::new(registry);
 
-    // Types from a custom implementation of `downcast_raw` are available
+    // Types from a custom implementation of `downcast_ref_by_id` are available
     assert!(dispatch.downcast_ref::<WithContext>().is_some());
 }

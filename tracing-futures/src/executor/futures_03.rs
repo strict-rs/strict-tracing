@@ -14,8 +14,11 @@ where
     /// having been shut down so that it is no longer able to accept
     /// tasks.
     fn spawn_obj(&self, future: FutureObj<'static, ()>) -> Result<(), SpawnError> {
+        let Some(inner) = self.inner.as_ref() else {
+            return Err(SpawnError::shutdown());
+        };
         let future = future.instrument(self.span.clone());
-        self.inner.spawn_obj(FutureObj::new(Box::new(future)))
+        inner.spawn_obj(FutureObj::new(Box::new(future)))
     }
 
     /// Determines whether the executor is able to spawn new tasks.
@@ -26,7 +29,10 @@ where
     /// not guaranteed, to yield an error.
     #[inline]
     fn status(&self) -> Result<(), SpawnError> {
-        self.inner.status()
+        let Some(inner) = self.inner.as_ref() else {
+            return Err(SpawnError::shutdown());
+        };
+        inner.status()
     }
 }
 
@@ -72,9 +78,11 @@ where
     /// having been shut down so that it is no longer able to accept
     /// tasks.
     fn spawn_local_obj(&self, future: LocalFutureObj<'static, ()>) -> Result<(), SpawnError> {
+        let Some(inner) = self.inner.as_ref() else {
+            return Err(SpawnError::shutdown());
+        };
         let future = future.instrument(self.span.clone());
-        self.inner
-            .spawn_local_obj(LocalFutureObj::new(Box::new(future)))
+        inner.spawn_local_obj(LocalFutureObj::new(Box::new(future)))
     }
 
     /// Determines whether the executor is able to spawn new tasks.
@@ -85,7 +93,10 @@ where
     /// not guaranteed, to yield an error.
     #[inline]
     fn status_local(&self) -> Result<(), SpawnError> {
-        self.inner.status_local()
+        let Some(inner) = self.inner.as_ref() else {
+            return Err(SpawnError::shutdown());
+        };
+        inner.status_local()
     }
 }
 

@@ -191,7 +191,7 @@
 //! [`fmt::format`]: mod@crate::fmt::format
 
 use alloc::boxed::Box;
-use core::{any::TypeId, ptr};
+use core::any::{Any, TypeId};
 use std::{error::Error, io};
 use tracing_core::{span, subscriber::Interest, Event, Metadata};
 
@@ -442,17 +442,11 @@ where
         self.inner.max_level_hint()
     }
 
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): preserve fmt Subscriber::downcast_raw forwarding until safe Any references replace it."
-    )]
-    unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
+    fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
         if id == TypeId::of::<Self>() {
-            Some(ptr::from_ref(self).cast::<()>())
+            Some(self)
         } else {
-            // SAFETY: This forwards the existing raw downcast
-            // compatibility hook. A safe `Any` replacement should cover this.
-            unsafe { self.inner.downcast_raw(id) }
+            self.inner.downcast_ref_by_id(id)
         }
     }
 }

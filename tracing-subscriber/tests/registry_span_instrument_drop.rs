@@ -1,6 +1,7 @@
 //! Tests span drop instrumentation through the registry.
 #![cfg(feature = "registry")]
 
+use std::any::{Any, TypeId};
 use std::sync::{Arc, Mutex};
 
 use tracing::{
@@ -75,15 +76,12 @@ fn span_entered_on_different_thread_from_subscriber() {
             self.inner.current_span()
         }
 
-        #[allow(
-            unsafe_code,
-            reason = "TODO(unsafe-forbid): preserve Subscriber::downcast_raw forwarding in this registry drop test."
-        )]
-        unsafe fn downcast_raw(&self, id: std::any::TypeId) -> Option<*const ()> {
-            // SAFETY: `CountingSubscriber` forwards the exact `Subscriber::downcast_raw`
-            // contract to the wrapped `Registry` without changing the requested type ID
-            // or interpreting the returned pointer. Safe `Any` references should replace this.
-            unsafe { self.inner.downcast_raw(id) }
+        fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
+            if id == TypeId::of::<Self>() {
+                return Some(self);
+            }
+
+            self.inner.downcast_ref_by_id(id)
         }
 
         fn enabled(&self, metadata: &Metadata<'_>) -> bool {

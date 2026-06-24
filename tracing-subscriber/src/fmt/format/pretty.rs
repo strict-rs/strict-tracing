@@ -181,6 +181,8 @@ where
         #[cfg(feature = "tracing-log")]
         let normalized_meta = event.normalized_metadata();
         #[cfg(feature = "tracing-log")]
+        let normalized_meta = normalized_meta.as_ref().map(|meta| meta.as_metadata());
+        #[cfg(feature = "tracing-log")]
         let meta = normalized_meta.as_ref().unwrap_or_else(|| event.metadata());
         #[cfg(not(feature = "tracing-log"))]
         let meta = event.metadata();

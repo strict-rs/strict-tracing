@@ -1,7 +1,7 @@
 //! Tests per-layer filtering behavior.
 #![cfg(feature = "registry")]
 mod boxed;
-mod downcast_raw;
+mod downcast_ref_by_id;
 mod filter_scopes;
 mod option;
 mod per_event;

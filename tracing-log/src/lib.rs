@@ -124,7 +124,7 @@
 )]
 use once_cell::sync::Lazy;
 
-use std::{fmt, io, ptr};
+use std::{borrow::Cow, fmt, io};
 
 use tracing_core::{
     Event, Metadata,
@@ -433,6 +433,104 @@ impl AsLog for LevelFilter {
         }
     }
 }
+static NORMALIZED_FIELD_NAMES: &[&str] = &["message"];
+
+/// Metadata reconstructed from a `log` event.
+///
+/// This owns metadata strings that were stored as fields on a `tracing`
+/// [`Event`], avoiding fabricated lifetimes while still allowing callers to
+/// borrow a short-lived [`Metadata`] view with [`as_metadata`].
+///
+/// [`as_metadata`]: Self::as_metadata
+#[derive(Clone, Debug)]
+pub struct NormalizedMetadata<'a> {
+    name: &'static str,
+    target: Cow<'a, str>,
+    level: Level,
+    module_path: Option<Cow<'a, str>>,
+    file: Option<Cow<'a, str>>,
+    line: Option<u32>,
+    callsite: callsite::Identifier,
+    kind: Kind,
+}
+
+impl NormalizedMetadata<'_> {
+    /// Returns this metadata as a short-lived [`Metadata`] value.
+    #[must_use]
+    pub fn as_metadata(&self) -> Metadata<'_> {
+        Metadata::new(
+            self.name,
+            self.target(),
+            self.level,
+            self.file(),
+            self.line,
+            self.module_path(),
+            field::FieldSet::new(NORMALIZED_FIELD_NAMES, self.callsite),
+            self.kind,
+        )
+    }
+
+    /// Returns the name of the event.
+    #[must_use]
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+
+    /// Returns the target associated with the event.
+    #[must_use]
+    pub fn target(&self) -> &str {
+        self.target.as_ref()
+    }
+
+    /// Returns the verbosity level of the event.
+    #[must_use]
+    pub fn level(&self) -> &Level {
+        &self.level
+    }
+
+    /// Returns the module path associated with the event, if known.
+    #[must_use]
+    pub fn module_path(&self) -> Option<&str> {
+        self.module_path.as_deref()
+    }
+
+    /// Returns the source file associated with the event, if known.
+    #[must_use]
+    pub fn file(&self) -> Option<&str> {
+        self.file.as_deref()
+    }
+
+    /// Returns the source line associated with the event, if known.
+    #[must_use]
+    pub fn line(&self) -> Option<u32> {
+        self.line
+    }
+
+    /// Returns the callsite associated with the original event.
+    #[must_use]
+    pub fn callsite(&self) -> callsite::Identifier {
+        self.callsite
+    }
+
+    /// Returns the field set used by the normalized metadata view.
+    #[must_use]
+    pub fn fields(&self) -> field::FieldSet {
+        field::FieldSet::new(NORMALIZED_FIELD_NAMES, self.callsite)
+    }
+
+    /// Returns true if the normalized metadata describes an event.
+    #[must_use]
+    pub fn is_event(&self) -> bool {
+        self.kind.is_event()
+    }
+
+    /// Returns true if the normalized metadata describes a span.
+    #[must_use]
+    pub fn is_span(&self) -> bool {
+        self.kind.is_span()
+    }
+}
+
 /// Extends log `Event`s to provide complete `Metadata`.
 ///
 /// In `tracing-log`, an `Event` produced by a log (through [`AsTrace`]) has an hard coded
@@ -441,9 +539,9 @@ impl AsLog for LevelFilter {
 /// lifetime.
 ///
 /// However, these values are stored in the `Event`'s fields and
-/// the [`normalized_metadata`] method allows to build a new `Metadata`
-/// that only lives as long as its source `Event`, but provides complete
-/// data.
+/// the [`normalized_metadata`] method allows building an owned
+/// [`NormalizedMetadata`] value with complete data and a short-lived
+/// [`Metadata`] view.
 ///
 /// It can typically be used by `Subscriber`s when processing an `Event`,
 /// to allow accessing its complete metadata in a consistent way,
@@ -456,7 +554,7 @@ pub trait NormalizeEvent<'a>: sealed::Sealed {
     /// from the original log, including `file`, `line`, `module_path`
     /// and `target`.
     /// Returns `None` is the `Event` is not issued from a `log`.
-    fn normalized_metadata(&'a self) -> Option<Metadata<'a>>;
+    fn normalized_metadata(&'a self) -> Option<NormalizedMetadata<'a>>;
     /// Returns whether this `Event` represents a log (from the `log` crate)
     fn is_log(&self) -> bool;
 }
@@ -464,22 +562,24 @@ pub trait NormalizeEvent<'a>: sealed::Sealed {
 impl sealed::Sealed for Event<'_> {}
 
 impl<'a> NormalizeEvent<'a> for Event<'a> {
-    fn normalized_metadata(&'a self) -> Option<Metadata<'a>> {
+    fn normalized_metadata(&'a self) -> Option<NormalizedMetadata<'a>> {
         let original = self.metadata();
         if self.is_log() {
-            let mut fields = LogVisitor::new_for(self, level_to_cs(*original.level()).1);
+            let mut fields = LogVisitor::new(level_to_cs(*original.level()).1);
             self.record(&mut fields);
 
-            Some(Metadata::new(
-                "log event",
-                fields.target.unwrap_or("log"),
-                *original.level(),
-                fields.file,
-                fields.line.map(|l| l as u32),
-                fields.module_path,
-                field::FieldSet::new(&["message"], original.callsite()),
-                Kind::EVENT,
-            ))
+            Some(NormalizedMetadata {
+                name: "log event",
+                target: fields
+                    .target
+                    .map_or_else(|| Cow::Borrowed("log"), Cow::Owned),
+                level: *original.level(),
+                file: fields.file.map(Cow::Owned),
+                line: fields.line.and_then(|line| u32::try_from(line).ok()),
+                module_path: fields.module_path.map(Cow::Owned),
+                callsite: original.callsite(),
+                kind: Kind::EVENT,
+            })
         } else {
             None
         }
@@ -490,19 +590,16 @@ impl<'a> NormalizeEvent<'a> for Event<'a> {
     }
 }
 
-struct LogVisitor<'a> {
-    target: Option<&'a str>,
-    module_path: Option<&'a str>,
-    file: Option<&'a str>,
+struct LogVisitor {
+    target: Option<String>,
+    module_path: Option<String>,
+    file: Option<String>,
     line: Option<u64>,
     fields: &'static Fields,
 }
 
-impl<'a> LogVisitor<'a> {
-    // We don't actually _use_ the provided event argument; it is simply to
-    // ensure that the `LogVisitor` does not outlive the event whose fields it
-    // is visiting, so that the reference casts in `record_str` are safe.
-    fn new_for(_event: &'a Event<'a>, fields: &'static Fields) -> Self {
+impl LogVisitor {
+    fn new(fields: &'static Fields) -> Self {
         Self {
             target: None,
             module_path: None,
@@ -513,7 +610,7 @@ impl<'a> LogVisitor<'a> {
     }
 }
 
-impl Visit for LogVisitor<'_> {
+impl Visit for LogVisitor {
     fn record_debug(&mut self, _field: &Field, _value: &dyn fmt::Debug) {}
 
     fn record_u64(&mut self, field: &Field, value: u64) {
@@ -522,25 +619,13 @@ impl Visit for LogVisitor<'_> {
         }
     }
 
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): preserve NormalizeEvent::normalized_metadata until the API can return owned normalized metadata."
-    )]
     fn record_str(&mut self, field: &Field, value: &str) {
-        unsafe {
-            // The `Visit` API erases the string slice's lifetime. However, we
-            // know it is part of the `Event` struct with a lifetime of `'a`. If
-            // (and only if!) this `LogVisitor` was constructed with the same
-            // lifetime parameter `'a` as the event in question, it's safe to
-            // cast these string slices to the `'a` lifetime.
-            let value = ptr::from_ref(value);
-            if field == &self.fields.file {
-                self.file = Some(&*value);
-            } else if field == &self.fields.target {
-                self.target = Some(&*value);
-            } else if field == &self.fields.module {
-                self.module_path = Some(&*value);
-            }
+        if field == &self.fields.file {
+            self.file = Some(value.to_owned());
+        } else if field == &self.fields.target {
+            self.target = Some(value.to_owned());
+        } else if field == &self.fields.module {
+            self.module_path = Some(value.to_owned());
         }
     }
 }

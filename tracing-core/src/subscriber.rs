@@ -2,10 +2,20 @@
 use crate::{Dispatch, Event, LevelFilter, Metadata, span};
 
 use alloc::{boxed::Box, sync::Arc};
-use core::{
-    any::{Any, TypeId},
-    ptr,
-};
+use core::any::{Any, TypeId};
+
+/// Provides `Any` access for type-erased `Subscriber` downcasting.
+#[doc(hidden)]
+pub trait AsAny: Any {
+    /// Returns this value as `dyn Any`.
+    fn as_any(&self) -> &dyn Any;
+}
+
+impl<T: Any> AsAny for T {
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
 
 /// Trait representing the functions required to collect trace data.
 ///
@@ -80,7 +90,7 @@ use core::{
 /// [cs-reg]: crate::callsite#registering-callsites
 /// [`event`]: Subscriber::event
 /// [`event_enabled`]: Subscriber::event_enabled
-pub trait Subscriber: 'static {
+pub trait Subscriber: AsAny {
     /// Invoked when this subscriber becomes a [`Dispatch`].
     ///
     /// ## Avoiding Memory Leaks
@@ -467,38 +477,20 @@ pub trait Subscriber: 'static {
 
     // === Downcasting methods ================================================
 
-    /// If `self` is the same type as the provided `TypeId`, returns an untyped
-    /// `*const` pointer to that type. Otherwise, returns `None`.
+    /// If `self` is the same type as the provided `TypeId`, or contains a
+    /// component with that `TypeId`, returns that value as `dyn Any`.
     ///
-    /// If you wish to downcast a `Subscriber`, it is strongly advised to use
-    /// the safe API provided by [`downcast_ref`] instead.
-    ///
-    /// This API is required for `downcast_raw` to be a trait method; a method
-    /// signature like [`downcast_ref`] (with a generic type parameter) is not
-    /// object-safe, and thus cannot be a trait method for `Subscriber`. This
-    /// means that if we only exposed `downcast_ref`, `Subscriber`
-    /// implementations could not override the downcasting behavior
-    ///
-    /// This method may be overridden by "fan out" or "chained" subscriber
-    /// implementations which consist of multiple composed types. Such
-    /// subscribers might allow `downcast_raw` by returning references to those
-    /// component if they contain components with the given `TypeId`.
-    ///
-    /// # Safety
-    ///
-    /// The [`downcast_ref`] method expects that the pointer returned by
-    /// `downcast_raw` is non-null and points to a valid instance of the type
-    /// with the provided `TypeId`. Failure to ensure this will result in
-    /// undefined behaviour, so implementing `downcast_raw` is unsafe.
+    /// This method is the object-safe implementation hook used by
+    /// [`downcast_ref`]. Subscriber implementations that compose multiple
+    /// subscribers may override this to expose safe references to contained
+    /// components.
     ///
     /// [`downcast_ref`]: #method.downcast_ref
-    #[allow(
-        unsafe_code,
-        reason = "preserve the existing hidden raw downcast hook until safe Any references replace it"
-    )]
-    unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
-        if id == TypeId::of::<Self>() {
-            Some(ptr::from_ref(self).cast::<()>())
+    #[doc(hidden)]
+    fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
+        let this = self.as_any();
+        if this.type_id() == id {
+            Some(this)
         } else {
             None
         }
@@ -513,19 +505,9 @@ impl dyn Subscriber {
 
     /// Returns some reference to this `Subscriber` value if it is of type `T`,
     /// or `None` if it isn't.
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): replace raw Subscriber downcasting with safe Any references"
-    )]
     pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
-        unsafe {
-            let raw = self.downcast_raw(TypeId::of::<T>())?;
-            if raw.is_null() {
-                None
-            } else {
-                Some(&*(raw as *const _))
-            }
-        }
+        self.downcast_ref_by_id(TypeId::of::<T>())?
+            .downcast_ref::<T>()
     }
 }
 
@@ -537,19 +519,9 @@ impl dyn Subscriber + Send {
 
     /// Returns some reference to this [`Subscriber`] value if it is of type `T`,
     /// or `None` if it isn't.
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): replace raw Subscriber downcasting with safe Any references"
-    )]
     pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
-        unsafe {
-            let raw = self.downcast_raw(TypeId::of::<T>())?;
-            if raw.is_null() {
-                None
-            } else {
-                Some(&*(raw as *const _))
-            }
-        }
+        self.downcast_ref_by_id(TypeId::of::<T>())?
+            .downcast_ref::<T>()
     }
 }
 
@@ -561,19 +533,9 @@ impl dyn Subscriber + Sync {
 
     /// Returns some reference to this `[`Subscriber`] value if it is of type `T`,
     /// or `None` if it isn't.
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): replace raw Subscriber downcasting with safe Any references"
-    )]
     pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
-        unsafe {
-            let raw = self.downcast_raw(TypeId::of::<T>())?;
-            if raw.is_null() {
-                None
-            } else {
-                Some(&*(raw as *const _))
-            }
-        }
+        self.downcast_ref_by_id(TypeId::of::<T>())?
+            .downcast_ref::<T>()
     }
 }
 
@@ -585,19 +547,9 @@ impl dyn Subscriber + Send + Sync {
 
     /// Returns some reference to this [`Subscriber`] value if it is of type `T`,
     /// or `None` if it isn't.
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): replace raw Subscriber downcasting with safe Any references"
-    )]
     pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
-        unsafe {
-            let raw = self.downcast_raw(TypeId::of::<T>())?;
-            if raw.is_null() {
-                None
-            } else {
-                Some(&*(raw as *const _))
-            }
-        }
+        self.downcast_ref_by_id(TypeId::of::<T>())?
+            .downcast_ref::<T>()
     }
 }
 
@@ -803,16 +755,13 @@ where
     }
 
     #[inline]
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): preserve Box subscriber raw downcast forwarding until safe Any references replace it"
-    )]
-    unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
-        if id == TypeId::of::<Self>() {
-            return Some(ptr::from_ref(self).cast::<()>());
+    fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
+        let this = self.as_any();
+        if this.type_id() == id {
+            return Some(this);
         }
 
-        unsafe { self.as_ref().downcast_raw(id) }
+        self.as_ref().downcast_ref_by_id(id)
     }
 }
 
@@ -892,15 +841,12 @@ where
     }
 
     #[inline]
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): preserve Arc subscriber raw downcast forwarding until safe Any references replace it"
-    )]
-    unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
-        if id == TypeId::of::<Self>() {
-            return Some(ptr::from_ref(self).cast::<()>());
+    fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
+        let this = self.as_any();
+        if this.type_id() == id {
+            return Some(this);
         }
 
-        unsafe { self.as_ref().downcast_raw(id) }
+        self.as_ref().downcast_ref_by_id(id)
     }
 }

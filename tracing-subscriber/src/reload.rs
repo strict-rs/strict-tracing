@@ -67,7 +67,7 @@
 use crate::layer;
 use crate::sync::RwLock;
 
-use core::any::TypeId;
+use core::any::{Any, TypeId};
 use std::{
     error, fmt,
     marker::PhantomData,
@@ -187,25 +187,18 @@ where
     }
 
     #[doc(hidden)]
-    #[allow(
-        unsafe_code,
-        reason = "TODO(unsafe-forbid): preserve reload Layer::downcast_raw marker forwarding until safe Any references replace it."
-    )]
-    unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
-        // SAFETY: it is generally unsafe to downcast through a reload, because
-        // the pointer can be invalidated after the lock is dropped.
-        // `NoneLayerMarker` is a special case because it
-        // is never dereferenced.
-        //
-        // Additionally, even if the marker type *is* dereferenced (which it
-        // never will be), the pointer should be valid even if the subscriber
-        // is reloaded, because all `NoneLayerMarker` pointers that we return
-        // actually point to the global static singleton `NoneLayerMarker`,
-        // rather than to a field inside the lock.
+    fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
+        // It is not sound to return arbitrary references through a reloadable
+        // layer, because the reference could point into the locked layer and be
+        // invalidated after the guard is dropped. `NoneLayerMarker` is special:
+        // it is used only as a boolean marker and returned as a static value.
         if id == TypeId::of::<layer::NoneLayerMarker>() {
-            // SAFETY: this forwards only the `NoneLayerMarker` probe, which
-            // is used as a boolean and points at a static marker.
-            unsafe { return try_lock!(self.inner.read(), else return None).downcast_raw(id) }
+            let marker_present = try_lock!(self.inner.read(), else return None)
+                .downcast_ref_by_id(id)
+                .is_some();
+            if marker_present {
+                return Some(&layer::NONE_LAYER_MARKER);
+            }
         }
 
         None

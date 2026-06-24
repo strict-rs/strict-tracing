@@ -184,7 +184,7 @@ ignored = []
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(flaky_tests)", "cfg(tracing_unstable)", "cfg(unsound_local_offset)"] }
 
 # ── Absolute prohibitions ────────────────────────────────────────────────
-unsafe_code                             = "deny"
+unsafe_code                             = "forbid"
 
 # ── Group-level floors (every lint in the group starts at deny) ─────────
 future_incompatible                     = { level = "deny", priority = -1 }

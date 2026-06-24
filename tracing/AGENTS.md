@@ -31,4 +31,4 @@
 ## Gotchas
 
 - `#![no_std]` crate; `std` only adds the `extern crate std` paths. Keep new code `core`/`alloc`-only unless behind `#[cfg(feature = "std")]`.
-- `Instrumented<T>` uses `ManuallyDrop` so it can enter the span while dropping or projecting the wrapped future. The remaining unsafe projection/drop code is locally allowed under `TODO(unsafe-forbid)` reasons; keep those blocks small and do not bypass the pin/drop invariants.
+- `Instrumented<T>` stores the wrapped future as `#[pin] inner: Option<T>`. Accessors are fallible (`Option`) because the inner value is taken during consuming/drop paths; `PinnedDrop` uses safe `Pin::set(None)` while the span is entered. Do not reintroduce `ManuallyDrop`, `mem::forget`, panic-only invariant helpers, or unsafe pin projection.
