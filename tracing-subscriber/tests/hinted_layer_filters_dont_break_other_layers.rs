@@ -1,3 +1,4 @@
+//! Tests hinted layer filters alongside other layers.
 #![cfg(feature = "registry")]
 use tracing::{Level, Metadata, Subscriber};
 use tracing_mock::{
@@ -105,12 +106,10 @@ fn events() {
 }
 
 fn filter<S>() -> DynFilterFn<S> {
-    DynFilterFn::new(
-        (|metadata: &Metadata<'_>, _: &tracing_subscriber::layer::Context<'_, S>| {
-            metadata.level() <= &Level::INFO
-        }) as fn(&Metadata<'_>, &Context<'_, S>) -> bool,
-    )
-    .with_max_level_hint(Level::INFO)
+    let filter: fn(&Metadata<'_>, &Context<'_, S>) -> bool =
+        |metadata: &Metadata<'_>, _: &Context<'_, S>| metadata.level() <= &Level::INFO;
+
+    DynFilterFn::new(filter).with_max_level_hint(Level::INFO)
 }
 
 fn unfiltered(name: &str) -> (MockLayer, subscriber::MockHandle) {

@@ -1,6 +1,8 @@
+//! Example binary for tracing workspace checks.
+
 #![deny(rust_2018_idioms)]
 
-use tracing::{Level, debug, span};
+use tracing::{debug, span, Level};
 use tracing_attributes::instrument;
 
 #[instrument]
@@ -17,6 +19,6 @@ fn main() {
     tracing::subscriber::with_default(subscriber, || {
         let span = span!(Level::TRACE, "get_band_rec", "guid:x-request-id" = "abcdef");
         let _enter = span.enter();
-        suggest_band();
+        let _band = suggest_band();
     });
 }

@@ -36,7 +36,7 @@ async fn main() {
     let tasks = (0..10)
         .map(|i| tokio::spawn(check_number(i)))
         .collect::<Vec<_>>();
-    futures::future::join_all(tasks).await;
+    let _results = futures::future::join_all(tasks).await;
 
     tracing::trace!("all tasks done");
 }

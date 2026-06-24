@@ -130,7 +130,7 @@ use crate::callsite;
 /// across all instances of a given span with the same metadata. Thus, when a
 /// subscriber observes a new span, it need only access a field by name _once_,
 /// and use the key for that name for all other accesses.
-#[derive(Debug)]
+#[derive(Copy, Debug)]
 pub struct Field {
     i: usize,
     fields: FieldSet,
@@ -142,7 +142,7 @@ pub struct Field {
 /// present but will be recorded later.
 ///
 /// When a field's value is `Empty`. it will not be recorded.
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Empty;
 
 /// Describes the fields present on a span.
@@ -156,6 +156,7 @@ pub struct Empty;
 ///
 /// [initialized]: Self::new
 /// [callsite identifiers]: callsite::Identifier
+#[derive(Copy, Clone)]
 pub struct FieldSet {
     /// The names of each field on the described span.
     names: &'static [&'static str],
@@ -418,13 +419,13 @@ impl fmt::Debug for HexBytes<'_> {
 
 impl Visit for fmt::DebugStruct<'_, '_> {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        self.field(field.name(), value);
+        let _builder = self.field(field.name(), value);
     }
 }
 
 impl Visit for fmt::DebugMap<'_, '_> {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        self.entry(&format_args!("{}", field), value);
+        let _builder = self.entry(&format_args!("{}", field), value);
     }
 }
 
@@ -556,12 +557,13 @@ impl_values! {
     record_u128(u128),
     record_i128(i128),
     record_bool(bool),
-    record_f64(f64, f32 as f64)
+    record_f64(f64),
+    record_f64(f32 as f64)
 }
 
 impl<T: crate::sealed::Sealed> crate::sealed::Sealed for Wrapping<T> {}
-impl<T: crate::field::Value> crate::field::Value for Wrapping<T> {
-    fn record(&self, key: &crate::field::Field, visitor: &mut dyn crate::field::Visit) {
+impl<T: Value> Value for Wrapping<T> {
+    fn record(&self, key: &Field, visitor: &mut dyn Visit) {
         self.0.record(key, visitor)
     }
 }
@@ -600,7 +602,8 @@ impl crate::sealed::Sealed for dyn std::error::Error + Send + 'static {}
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 impl Value for dyn std::error::Error + Send + 'static {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        (self as &dyn std::error::Error).record(key, visitor)
+        let error: &(dyn std::error::Error + 'static) = self;
+        error.record(key, visitor)
     }
 }
 
@@ -611,7 +614,8 @@ impl crate::sealed::Sealed for dyn std::error::Error + Sync + 'static {}
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 impl Value for dyn std::error::Error + Sync + 'static {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        (self as &dyn std::error::Error).record(key, visitor)
+        let error: &(dyn std::error::Error + 'static) = self;
+        error.record(key, visitor)
     }
 }
 
@@ -622,7 +626,8 @@ impl crate::sealed::Sealed for dyn std::error::Error + Send + Sync + 'static {}
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 impl Value for dyn std::error::Error + Send + Sync + 'static {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        (self as &dyn std::error::Error).record(key, visitor)
+        let error: &(dyn std::error::Error + 'static) = self;
+        error.record(key, visitor)
     }
 }
 
@@ -683,13 +688,21 @@ impl fmt::Debug for dyn Value {
         // actually care about the field name here.
         struct NullCallsite;
         static NULL_CALLSITE: NullCallsite = NullCallsite;
-        impl crate::callsite::Callsite for NullCallsite {
-            fn set_interest(&self, _: crate::subscriber::Interest) {
-                unreachable!("you somehow managed to register the null callsite?")
-            }
+        static NULL_METADATA: crate::metadata::Metadata<'static> = crate::metadata::Metadata::new(
+            "field::Value",
+            "tracing_core::field",
+            crate::metadata::Level::TRACE,
+            None,
+            None,
+            None,
+            FieldSet::new(&[], crate::identify_callsite!(&NULL_CALLSITE)),
+            crate::metadata::Kind::EVENT,
+        );
+        impl callsite::Callsite for NullCallsite {
+            fn set_interest(&self, _: crate::subscriber::Interest) {}
 
             fn metadata(&self) -> &crate::Metadata<'_> {
-                unreachable!("you somehow managed to access the null callsite?")
+                &NULL_METADATA
             }
         }
 
@@ -1166,8 +1179,7 @@ mod private {
 
 #[cfg(test)]
 mod test {
-    use alloc::{borrow::ToOwned, boxed::Box, string::String};
-    use std::format;
+    use alloc::{borrow::ToOwned, format, string::String};
 
     use super::*;
     use crate::metadata::{Kind, Level, Metadata};
@@ -1186,10 +1198,8 @@ mod test {
         kind: Kind::SPAN,
     };
 
-    impl crate::callsite::Callsite for TestCallsite1 {
-        fn set_interest(&self, _: crate::subscriber::Interest) {
-            unimplemented!()
-        }
+    impl callsite::Callsite for TestCallsite1 {
+        fn set_interest(&self, _: crate::subscriber::Interest) {}
 
         fn metadata(&self) -> &Metadata<'_> {
             &TEST_META_1
@@ -1209,10 +1219,8 @@ mod test {
         kind: Kind::SPAN,
     };
 
-    impl crate::callsite::Callsite for TestCallsite2 {
-        fn set_interest(&self, _: crate::subscriber::Interest) {
-            unimplemented!()
-        }
+    impl callsite::Callsite for TestCallsite2 {
+        fn set_interest(&self, _: crate::subscriber::Interest) {}
 
         fn metadata(&self) -> &Metadata<'_> {
             &TEST_META_2
@@ -1252,10 +1260,13 @@ mod test {
     #[test]
     fn value_sets_with_fields_from_other_callsites_are_empty() {
         let fields = TEST_META_1.fields();
+        let one: &dyn Value = &1;
+        let two: &dyn Value = &2;
+        let three: &dyn Value = &3;
         let values = &[
-            (&fields.field("foo").unwrap(), Some(&1 as &dyn Value)),
-            (&fields.field("bar").unwrap(), Some(&2 as &dyn Value)),
-            (&fields.field("baz").unwrap(), Some(&3 as &dyn Value)),
+            (&fields.field("foo").unwrap(), Some(one)),
+            (&fields.field("bar").unwrap(), Some(two)),
+            (&fields.field("baz").unwrap(), Some(three)),
         ];
         let valueset = TEST_META_2.fields().value_set(values);
         assert!(valueset.is_empty())
@@ -1264,9 +1275,10 @@ mod test {
     #[test]
     fn sparse_value_sets_are_not_empty() {
         let fields = TEST_META_1.fields();
+        let value: &dyn Value = &57;
         let values = &[
             (&fields.field("foo").unwrap(), None),
-            (&fields.field("bar").unwrap(), Some(&57 as &dyn Value)),
+            (&fields.field("bar").unwrap(), Some(value)),
             (&fields.field("baz").unwrap(), None),
         ];
         let valueset = fields.value_set(values);
@@ -1276,12 +1288,10 @@ mod test {
     #[test]
     fn fields_from_other_callsets_are_skipped() {
         let fields = TEST_META_1.fields();
+        let value: &dyn Value = &57;
         let values = &[
             (&fields.field("foo").unwrap(), None),
-            (
-                &TEST_META_2.fields().field("bar").unwrap(),
-                Some(&57 as &dyn Value),
-            ),
+            (&TEST_META_2.fields().field("bar").unwrap(), Some(value)),
             (&fields.field("baz").unwrap(), None),
         ];
 
@@ -1298,10 +1308,12 @@ mod test {
     #[test]
     fn empty_fields_are_skipped() {
         let fields = TEST_META_1.fields();
+        let empty: &dyn Value = &Empty;
+        let value: &dyn Value = &57;
         let values = &[
-            (&fields.field("foo").unwrap(), Some(&Empty as &dyn Value)),
-            (&fields.field("bar").unwrap(), Some(&57 as &dyn Value)),
-            (&fields.field("baz").unwrap(), Some(&Empty as &dyn Value)),
+            (&fields.field("foo").unwrap(), Some(empty)),
+            (&fields.field("bar").unwrap(), Some(value)),
+            (&fields.field("baz").unwrap(), Some(empty)),
         ];
 
         struct MyVisitor;
@@ -1317,10 +1329,13 @@ mod test {
     #[test]
     fn record_debug_fn() {
         let fields = TEST_META_1.fields();
+        let one: &dyn Value = &1;
+        let two: &dyn Value = &2;
+        let three: &dyn Value = &3;
         let values = &[
-            (&fields.field("foo").unwrap(), Some(&1 as &dyn Value)),
-            (&fields.field("bar").unwrap(), Some(&2 as &dyn Value)),
-            (&fields.field("baz").unwrap(), Some(&3 as &dyn Value)),
+            (&fields.field("foo").unwrap(), Some(one)),
+            (&fields.field("bar").unwrap(), Some(two)),
+            (&fields.field("baz").unwrap(), Some(three)),
         ];
         let valueset = fields.value_set(values);
         let mut result = String::new();
@@ -1337,10 +1352,12 @@ mod test {
         let fields = TEST_META_1.fields();
         let err: Box<dyn std::error::Error + Send + Sync + 'static> =
             std::io::Error::other("lol").into();
+        let err_value: &dyn Value = &err;
+        let empty: &dyn Value = &Empty;
         let values = &[
-            (&fields.field("foo").unwrap(), Some(&err as &dyn Value)),
-            (&fields.field("bar").unwrap(), Some(&Empty as &dyn Value)),
-            (&fields.field("baz").unwrap(), Some(&Empty as &dyn Value)),
+            (&fields.field("foo").unwrap(), Some(err_value)),
+            (&fields.field("bar").unwrap(), Some(empty)),
+            (&fields.field("baz").unwrap(), Some(empty)),
         ];
         let valueset = fields.value_set(values);
         let mut result = String::new();
@@ -1356,10 +1373,13 @@ mod test {
         let fields = TEST_META_1.fields();
         let first = &b"abc"[..];
         let second: &[u8] = &[192, 255, 238];
+        let first_value: &dyn Value = &first;
+        let space: &dyn Value = &" ";
+        let second_value: &dyn Value = &second;
         let values = &[
-            (&fields.field("foo").unwrap(), Some(&first as &dyn Value)),
-            (&fields.field("bar").unwrap(), Some(&" " as &dyn Value)),
-            (&fields.field("baz").unwrap(), Some(&second as &dyn Value)),
+            (&fields.field("foo").unwrap(), Some(first_value)),
+            (&fields.field("bar").unwrap(), Some(space)),
+            (&fields.field("baz").unwrap(), Some(second_value)),
         ];
         let valueset = fields.value_set(values);
         let mut result = String::new();

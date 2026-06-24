@@ -1,3 +1,4 @@
+//! Tests span drop instrumentation through the registry.
 #![cfg(feature = "registry")]
 
 use std::sync::{Arc, Mutex};
@@ -54,18 +55,18 @@ fn span_entered_on_different_thread_from_subscriber() {
             self.inner.event_enabled(event)
         }
 
-        fn clone_span(&self, id: &span::Id) -> span::Id {
+        fn clone_span(&self, id: &Id) -> Id {
             self.counts.lock().unwrap().sub_clone_count += 1;
             self.inner.clone_span(id)
         }
 
-        fn drop_span(&self, id: span::Id) {
+        fn drop_span(&self, id: Id) {
             self.counts.lock().unwrap().sub_close_count += 1;
             #[allow(deprecated)]
             self.inner.drop_span(id);
         }
 
-        fn try_close(&self, id: span::Id) -> bool {
+        fn try_close(&self, id: Id) -> bool {
             self.counts.lock().unwrap().sub_close_count += 1;
             self.inner.try_close(id)
         }
@@ -74,10 +75,14 @@ fn span_entered_on_different_thread_from_subscriber() {
             self.inner.current_span()
         }
 
+        #[allow(
+            unsafe_code,
+            reason = "TODO(unsafe-forbid): preserve Subscriber::downcast_raw forwarding in this registry drop test."
+        )]
         unsafe fn downcast_raw(&self, id: std::any::TypeId) -> Option<*const ()> {
             // SAFETY: `CountingSubscriber` forwards the exact `Subscriber::downcast_raw`
             // contract to the wrapped `Registry` without changing the requested type ID
-            // or interpreting the returned pointer.
+            // or interpreting the returned pointer. Safe `Any` references should replace this.
             unsafe { self.inner.downcast_raw(id) }
         }
 
@@ -85,16 +90,16 @@ fn span_entered_on_different_thread_from_subscriber() {
             self.inner.enabled(metadata)
         }
 
-        fn new_span(&self, span: &span::Attributes<'_>) -> span::Id {
+        fn new_span(&self, span: &span::Attributes<'_>) -> Id {
             self.counts.lock().unwrap().sub_new_count += 1;
             self.inner.new_span(span)
         }
 
-        fn record(&self, span: &span::Id, values: &span::Record<'_>) {
+        fn record(&self, span: &Id, values: &span::Record<'_>) {
             self.inner.record(span, values);
         }
 
-        fn record_follows_from(&self, span: &span::Id, follows: &span::Id) {
+        fn record_follows_from(&self, span: &Id, follows: &Id) {
             self.inner.record_follows_from(span, follows);
         }
 
@@ -102,12 +107,12 @@ fn span_entered_on_different_thread_from_subscriber() {
             self.inner.event(event);
         }
 
-        fn enter(&self, span: &span::Id) {
+        fn enter(&self, span: &Id) {
             self.inner.enter(span);
             self.counts.lock().unwrap().sub_enter_count += 1;
         }
 
-        fn exit(&self, span: &span::Id) {
+        fn exit(&self, span: &Id) {
             self.inner.exit(span);
             self.counts.lock().unwrap().sub_exit_count += 1;
         }
@@ -123,17 +128,17 @@ fn span_entered_on_different_thread_from_subscriber() {
         fn on_new_span(
             &self,
             _attrs: &span::Attributes<'_>,
-            _id: &span::Id,
+            _id: &Id,
             _ctx: Context<'_, CountingSubscriber>,
         ) {
             self.counts.lock().unwrap().layer_new_count += 1;
         }
 
-        fn on_enter(&self, _id: &span::Id, _ctx: Context<'_, CountingSubscriber>) {
+        fn on_enter(&self, _id: &Id, _ctx: Context<'_, CountingSubscriber>) {
             self.counts.lock().unwrap().layer_enter_count += 1;
         }
 
-        fn on_exit(&self, _id: &span::Id, _ctx: Context<'_, CountingSubscriber>) {
+        fn on_exit(&self, _id: &Id, _ctx: Context<'_, CountingSubscriber>) {
             self.counts.lock().unwrap().layer_exit_count += 1;
         }
 
@@ -163,7 +168,7 @@ fn span_entered_on_different_thread_from_subscriber() {
 
     // Enter the span in a thread which doesn't have a direct relationship to the subscriber.
     std::thread::spawn(move || {
-        let _ = span.entered();
+        let _entered = span.entered();
     })
     .join()
     .unwrap();

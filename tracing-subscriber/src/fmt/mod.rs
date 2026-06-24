@@ -191,7 +191,7 @@
 //! [`fmt::format`]: mod@crate::fmt::format
 
 use alloc::boxed::Box;
-use core::any::TypeId;
+use core::{any::TypeId, ptr};
 use std::{error::Error, io};
 use tracing_core::{span, subscriber::Interest, Event, Metadata};
 
@@ -241,7 +241,7 @@ pub type Formatter<
     N = format::DefaultFields,
     E = format::Format<format::Full>,
     W = fn() -> io::Stdout,
-> = layer::Layered<fmt_layer::Layer<Registry, N, E, W>, Registry>;
+> = layer::Layered<Layer<Registry, N, E, W>, Registry>;
 
 /// Configures and constructs `Subscriber`s.
 #[cfg_attr(docsrs, doc(cfg(all(feature = "fmt", feature = "std"))))]
@@ -374,7 +374,7 @@ where
     F: layer::Layer<Formatter<N, E, W>> + 'static,
     W: for<'writer> MakeWriter<'writer> + 'static,
     layer::Layered<F, Formatter<N, E, W>>: tracing_core::Subscriber,
-    fmt_layer::Layer<Registry, N, E, W>: layer::Layer<Registry>,
+    Layer<Registry, N, E, W>: layer::Layer<Registry>,
 {
     #[inline]
     fn register_callsite(&self, meta: &'static Metadata<'static>) -> Interest {
@@ -438,14 +438,20 @@ where
     }
 
     #[inline]
-    fn max_level_hint(&self) -> Option<tracing_core::LevelFilter> {
+    fn max_level_hint(&self) -> Option<LevelFilter> {
         self.inner.max_level_hint()
     }
 
+    #[allow(
+        unsafe_code,
+        reason = "TODO(unsafe-forbid): preserve fmt Subscriber::downcast_raw forwarding until safe Any references replace it."
+    )]
     unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
         if id == TypeId::of::<Self>() {
-            Some(self as *const Self as *const ())
+            Some(ptr::from_ref(self).cast::<()>())
         } else {
+            // SAFETY: This forwards the existing raw downcast
+            // compatibility hook. A safe `Any` replacement should cover this.
             unsafe { self.inner.downcast_raw(id) }
         }
     }
@@ -480,7 +486,7 @@ where
     E: FormatEvent<Registry, N> + 'static,
     W: for<'writer> MakeWriter<'writer> + 'static,
     F: layer::Layer<Formatter<N, E, W>> + Send + Sync + 'static,
-    fmt_layer::Layer<Registry, N, E, W>: layer::Layer<Registry> + Send + Sync + 'static,
+    Layer<Registry, N, E, W>: layer::Layer<Registry> + Send + Sync + 'static,
 {
     /// Finish the builder, returning a new `FmtSubscriber`.
     pub fn finish(self) -> Subscriber<N, E, F, W> {
@@ -527,7 +533,7 @@ where
     E: FormatEvent<Registry, N> + 'static,
     W: for<'writer> MakeWriter<'writer> + 'static,
     F: layer::Layer<Formatter<N, E, W>> + Send + Sync + 'static,
-    fmt_layer::Layer<Registry, N, E, W>: layer::Layer<Registry> + Send + Sync + 'static,
+    Layer<Registry, N, E, W>: layer::Layer<Registry> + Send + Sync + 'static,
 {
     fn from(builder: SubscriberBuilder<N, E, F, W>) -> tracing_core::Dispatch {
         tracing_core::Dispatch::new(builder.finish())
@@ -1273,6 +1279,7 @@ mod test {
             writer::MakeWriter,
             Subscriber,
         },
+        registry::LookupSpan,
     };
     use alloc::{borrow::ToOwned, string::String, vec::Vec};
     use std::{
@@ -1354,11 +1361,11 @@ mod test {
         let subscriber = Subscriber::builder().event_format(f).finish();
         let _dispatch = Dispatch::new(subscriber);
 
-        let f = format::Format::default();
+        let f = Format::default();
         let subscriber = Subscriber::builder().event_format(f).finish();
         let _dispatch = Dispatch::new(subscriber);
 
-        let f = format::Format::default().compact();
+        let f = Format::default().compact();
         let subscriber = Subscriber::builder().event_format(f).finish();
         let _dispatch = Dispatch::new(subscriber);
     }
@@ -1376,12 +1383,12 @@ mod test {
         let dispatch = Dispatch::new(subscriber);
         assert!(dispatch.downcast_ref::<format::DefaultFields>().is_some());
         assert!(dispatch.downcast_ref::<LevelFilter>().is_some());
-        assert!(dispatch.downcast_ref::<format::Format>().is_some())
+        assert!(dispatch.downcast_ref::<Format>().is_some())
     }
 
     #[test]
     fn is_lookup_span() {
-        fn assert_lookup_span<T: for<'a> crate::registry::LookupSpan<'a>>(_: T) {}
+        fn assert_lookup_span<T: for<'a> LookupSpan<'a>>(_: T) {}
         let subscriber = Subscriber::new();
         assert_lookup_span(subscriber)
     }

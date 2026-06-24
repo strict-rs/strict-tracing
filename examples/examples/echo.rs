@@ -31,7 +31,7 @@ use std::env;
 use std::error::Error;
 use std::net::SocketAddr;
 
-use tracing::{Instrument as _, debug, info, info_span, trace_span, warn};
+use tracing::{debug, info, info_span, trace_span, warn, Instrument as _};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {

@@ -1,3 +1,5 @@
+//! Span field benchmarks.
+
 use criterion::{Criterion, criterion_group, criterion_main};
 use tracing::{Level, span};
 

@@ -1,10 +1,13 @@
 //! Support for serializing fields as `serde` structs or maps.
 use super::*;
 
+/// A `serde::Serialize` adapter that records tracing fields as a map.
 #[derive(Debug)]
 pub struct SerializeFieldMap<'a, T>(&'a T);
 
+/// Converts tracing values with fields into map-shaped serialization adapters.
 pub trait AsMap: Sized + sealed::Sealed {
+    /// Returns a map-shaped serialization adapter for the value's fields.
     fn field_map(&self) -> SerializeFieldMap<'_, Self> {
         SerializeFieldMap(self)
     }

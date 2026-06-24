@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
 use tracing_mock::{expect, span::NewSpan, subscriber};
@@ -31,7 +33,7 @@ fn fn_clashy_expr_field2(s: &str) {
 
 #[instrument(fields(s = &s))]
 fn fn_string(s: String) {
-    let _ = s;
+    drop(s);
 }
 
 #[instrument(fields(keywords.impl.type.fn = _arg), skip(_arg))]
@@ -244,6 +246,6 @@ fn run_test<F: FnOnce() -> T, T>(span: NewSpan, fun: F) {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, fun);
+    let _result = with_default(subscriber, fun);
     handle.assert_finished();
 }

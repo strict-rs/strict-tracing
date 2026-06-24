@@ -124,7 +124,7 @@
 )]
 use once_cell::sync::Lazy;
 
-use std::{fmt, io};
+use std::{fmt, io, ptr};
 
 use tracing_core::{
     Event, Metadata,
@@ -132,7 +132,7 @@ use tracing_core::{
     dispatcher,
     field::{self, Field, Visit},
     identify_callsite,
-    metadata::{Kind, Level},
+    metadata::{Kind, Level, LevelFilter},
     subscriber,
 };
 
@@ -179,14 +179,24 @@ pub(crate) fn dispatch_record(record: &log::Record<'_>) {
         let log_file = record.file();
         let log_line = record.line();
 
-        let module = log_module.as_ref().map(|s| s as &dyn field::Value);
-        let file = log_file.as_ref().map(|s| s as &dyn field::Value);
-        let line = log_line.as_ref().map(|s| s as &dyn field::Value);
+        let module = log_module.as_ref().map(|s| {
+            let value: &dyn field::Value = s;
+            value
+        });
+        let file = log_file.as_ref().map(|s| {
+            let value: &dyn field::Value = s;
+            value
+        });
+        let line = log_line.as_ref().map(|s| {
+            let value: &dyn field::Value = s;
+            value
+        });
+        let message: &dyn field::Value = record.args();
 
         dispatch.event(&Event::new(
             meta,
             &meta.fields().value_set(&[
-                (&keys.message, Some(record.args() as &dyn field::Value)),
+                (&keys.message, Some(message)),
                 (&keys.target, Some(&record.target())),
                 (&keys.module, module),
                 (&keys.file, file),
@@ -198,7 +208,7 @@ pub(crate) fn dispatch_record(record: &log::Record<'_>) {
 
 /// Trait implemented for `tracing` types that can be converted to a `log`
 /// equivalent.
-pub trait AsLog: crate::sealed::Sealed {
+pub trait AsLog: sealed::Sealed {
     /// The `log` type that this type can be converted into.
     type Log;
     /// Returns the `log` equivalent of `self`.
@@ -207,14 +217,14 @@ pub trait AsLog: crate::sealed::Sealed {
 
 /// Trait implemented for `log` types that can be converted to a `tracing`
 /// equivalent.
-pub trait AsTrace: crate::sealed::Sealed {
+pub trait AsTrace: sealed::Sealed {
     /// The `tracing` type that this type can be converted into.
     type Trace;
     /// Returns the `tracing` equivalent of `self`.
     fn as_trace(&self) -> Self::Trace;
 }
 
-impl crate::sealed::Sealed for Metadata<'_> {}
+impl sealed::Sealed for Metadata<'_> {}
 
 impl<'a> AsLog for Metadata<'a> {
     type Log = log::Metadata<'a>;
@@ -225,7 +235,7 @@ impl<'a> AsLog for Metadata<'a> {
             .build()
     }
 }
-impl crate::sealed::Sealed for log::Metadata<'_> {}
+impl sealed::Sealed for log::Metadata<'_> {}
 
 impl<'a> AsTrace for log::Metadata<'a> {
     type Trace = Metadata<'a>;
@@ -245,11 +255,11 @@ impl<'a> AsTrace for log::Metadata<'a> {
 }
 
 struct Fields {
-    message: field::Field,
-    target: field::Field,
-    module: field::Field,
-    file: field::Field,
-    line: field::Field,
+    message: Field,
+    target: Field,
+    module: Field,
+    file: Field,
+    line: Field,
 }
 
 static FIELD_NAMES: &[&str] = &[
@@ -302,26 +312,11 @@ macro_rules! log_cs {
     };
 }
 
-log_cs!(
-    tracing_core::Level::TRACE,
-    TRACE_CS,
-    TRACE_META,
-    TraceCallsite
-);
-log_cs!(
-    tracing_core::Level::DEBUG,
-    DEBUG_CS,
-    DEBUG_META,
-    DebugCallsite
-);
-log_cs!(tracing_core::Level::INFO, INFO_CS, INFO_META, InfoCallsite);
-log_cs!(tracing_core::Level::WARN, WARN_CS, WARN_META, WarnCallsite);
-log_cs!(
-    tracing_core::Level::ERROR,
-    ERROR_CS,
-    ERROR_META,
-    ErrorCallsite
-);
+log_cs!(Level::TRACE, TRACE_CS, TRACE_META, TraceCallsite);
+log_cs!(Level::DEBUG, DEBUG_CS, DEBUG_META, DebugCallsite);
+log_cs!(Level::INFO, INFO_CS, INFO_META, InfoCallsite);
+log_cs!(Level::WARN, WARN_CS, WARN_META, WarnCallsite);
+log_cs!(Level::ERROR, ERROR_CS, ERROR_META, ErrorCallsite);
 
 static TRACE_FIELDS: Lazy<Fields> = Lazy::new(|| Fields::new(&TRACE_CS));
 static DEBUG_FIELDS: Lazy<Fields> = Lazy::new(|| Fields::new(&DEBUG_CS));
@@ -355,7 +350,7 @@ fn loglevel_to_cs(
     }
 }
 
-impl crate::sealed::Sealed for log::Record<'_> {}
+impl sealed::Sealed for log::Record<'_> {}
 
 impl<'a> AsTrace for log::Record<'a> {
     type Trace = Metadata<'a>;
@@ -374,67 +369,67 @@ impl<'a> AsTrace for log::Record<'a> {
     }
 }
 
-impl crate::sealed::Sealed for tracing_core::Level {}
+impl sealed::Sealed for Level {}
 
-impl AsLog for tracing_core::Level {
+impl AsLog for Level {
     type Log = log::Level;
     fn as_log(&self) -> log::Level {
         match *self {
-            tracing_core::Level::ERROR => log::Level::Error,
-            tracing_core::Level::WARN => log::Level::Warn,
-            tracing_core::Level::INFO => log::Level::Info,
-            tracing_core::Level::DEBUG => log::Level::Debug,
-            tracing_core::Level::TRACE => log::Level::Trace,
+            Level::ERROR => log::Level::Error,
+            Level::WARN => log::Level::Warn,
+            Level::INFO => log::Level::Info,
+            Level::DEBUG => log::Level::Debug,
+            Level::TRACE => log::Level::Trace,
         }
     }
 }
 
-impl crate::sealed::Sealed for log::Level {}
+impl sealed::Sealed for log::Level {}
 
 impl AsTrace for log::Level {
-    type Trace = tracing_core::Level;
+    type Trace = Level;
     #[inline]
-    fn as_trace(&self) -> tracing_core::Level {
+    fn as_trace(&self) -> Level {
         match self {
-            log::Level::Error => tracing_core::Level::ERROR,
-            log::Level::Warn => tracing_core::Level::WARN,
-            log::Level::Info => tracing_core::Level::INFO,
-            log::Level::Debug => tracing_core::Level::DEBUG,
-            log::Level::Trace => tracing_core::Level::TRACE,
+            log::Level::Error => Level::ERROR,
+            log::Level::Warn => Level::WARN,
+            log::Level::Info => Level::INFO,
+            log::Level::Debug => Level::DEBUG,
+            log::Level::Trace => Level::TRACE,
         }
     }
 }
 
-impl crate::sealed::Sealed for log::LevelFilter {}
+impl sealed::Sealed for log::LevelFilter {}
 
 impl AsTrace for log::LevelFilter {
-    type Trace = tracing_core::LevelFilter;
+    type Trace = LevelFilter;
     #[inline]
-    fn as_trace(&self) -> tracing_core::LevelFilter {
+    fn as_trace(&self) -> LevelFilter {
         match self {
-            log::LevelFilter::Off => tracing_core::LevelFilter::OFF,
-            log::LevelFilter::Error => tracing_core::LevelFilter::ERROR,
-            log::LevelFilter::Warn => tracing_core::LevelFilter::WARN,
-            log::LevelFilter::Info => tracing_core::LevelFilter::INFO,
-            log::LevelFilter::Debug => tracing_core::LevelFilter::DEBUG,
-            log::LevelFilter::Trace => tracing_core::LevelFilter::TRACE,
+            log::LevelFilter::Off => LevelFilter::OFF,
+            log::LevelFilter::Error => LevelFilter::ERROR,
+            log::LevelFilter::Warn => LevelFilter::WARN,
+            log::LevelFilter::Info => LevelFilter::INFO,
+            log::LevelFilter::Debug => LevelFilter::DEBUG,
+            log::LevelFilter::Trace => LevelFilter::TRACE,
         }
     }
 }
 
-impl crate::sealed::Sealed for tracing_core::LevelFilter {}
+impl sealed::Sealed for LevelFilter {}
 
-impl AsLog for tracing_core::LevelFilter {
+impl AsLog for LevelFilter {
     type Log = log::LevelFilter;
     #[inline]
     fn as_log(&self) -> Self::Log {
         match *self {
-            tracing_core::LevelFilter::OFF => log::LevelFilter::Off,
-            tracing_core::LevelFilter::ERROR => log::LevelFilter::Error,
-            tracing_core::LevelFilter::WARN => log::LevelFilter::Warn,
-            tracing_core::LevelFilter::INFO => log::LevelFilter::Info,
-            tracing_core::LevelFilter::DEBUG => log::LevelFilter::Debug,
-            tracing_core::LevelFilter::TRACE => log::LevelFilter::Trace,
+            LevelFilter::OFF => log::LevelFilter::Off,
+            LevelFilter::ERROR => log::LevelFilter::Error,
+            LevelFilter::WARN => log::LevelFilter::Warn,
+            LevelFilter::INFO => log::LevelFilter::Info,
+            LevelFilter::DEBUG => log::LevelFilter::Debug,
+            LevelFilter::TRACE => log::LevelFilter::Trace,
         }
     }
 }
@@ -455,7 +450,7 @@ impl AsLog for tracing_core::LevelFilter {
 /// regardless of the source of its source.
 ///
 /// [`normalized_metadata`]: NormalizeEvent#normalized_metadata
-pub trait NormalizeEvent<'a>: crate::sealed::Sealed {
+pub trait NormalizeEvent<'a>: sealed::Sealed {
     /// If this `Event` comes from a `log`, this method provides a new
     /// normalized `Metadata` which has all available attributes
     /// from the original log, including `file`, `line`, `module_path`
@@ -466,7 +461,7 @@ pub trait NormalizeEvent<'a>: crate::sealed::Sealed {
     fn is_log(&self) -> bool;
 }
 
-impl crate::sealed::Sealed for Event<'_> {}
+impl sealed::Sealed for Event<'_> {}
 
 impl<'a> NormalizeEvent<'a> for Event<'a> {
     fn normalized_metadata(&'a self) -> Option<Metadata<'a>> {
@@ -527,6 +522,10 @@ impl Visit for LogVisitor<'_> {
         }
     }
 
+    #[allow(
+        unsafe_code,
+        reason = "TODO(unsafe-forbid): preserve NormalizeEvent::normalized_metadata until the API can return owned normalized metadata."
+    )]
     fn record_str(&mut self, field: &Field, value: &str) {
         unsafe {
             // The `Visit` API erases the string slice's lifetime. However, we
@@ -534,12 +533,13 @@ impl Visit for LogVisitor<'_> {
             // (and only if!) this `LogVisitor` was constructed with the same
             // lifetime parameter `'a` as the event in question, it's safe to
             // cast these string slices to the `'a` lifetime.
+            let value = ptr::from_ref(value);
             if field == &self.fields.file {
-                self.file = Some(&*(value as *const _));
+                self.file = Some(&*value);
             } else if field == &self.fields.target {
-                self.target = Some(&*(value as *const _));
+                self.target = Some(&*value);
             } else if field == &self.fields.module {
-                self.module_path = Some(&*(value as *const _));
+                self.module_path = Some(&*value);
             }
         }
     }

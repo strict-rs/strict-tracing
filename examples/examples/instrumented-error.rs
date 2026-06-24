@@ -3,7 +3,7 @@
 #![deny(rust_2018_idioms)]
 use std::error::Error;
 use std::fmt;
-use tracing_error::{ErrorLayer, prelude::*};
+use tracing_error::{prelude::*, ErrorLayer};
 use tracing_subscriber::prelude::*;
 
 #[derive(Debug)]
@@ -27,7 +27,7 @@ impl fmt::Display for FooError {
 }
 
 #[tracing::instrument]
-fn do_something(foo: &str) -> Result<&'static str, impl Error + Send + Sync + 'static> {
+fn do_something(foo: &str) -> Result<&'static str, impl Error + Send + Sync + 'static + use<>> {
     // Results can be instrumented with a `SpanTrace` via the `InstrumentResult` trait
     do_another_thing(42, false).in_current_span()
 }

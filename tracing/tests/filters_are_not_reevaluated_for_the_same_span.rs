@@ -1,3 +1,5 @@
+//! Filter caching coverage for repeated entries of the same span.
+
 // Tests that depend on a count of the number of times their filter is evaluated
 // cant exist in the same file with other tests that add subscribers to the
 // registry. The registry was changed so that each time a new dispatcher is
@@ -27,11 +29,11 @@ fn filters_are_not_reevaluated_for_the_same_span() {
     let (subscriber, handle) = subscriber::mock()
         .with_filter(move |meta| match meta.name() {
             "alice" => {
-                alice_count2.fetch_add(1, Ordering::Relaxed);
+                let _previous = alice_count2.fetch_add(1, Ordering::Relaxed);
                 false
             }
             "bob" => {
-                bob_count2.fetch_add(1, Ordering::Relaxed);
+                let _previous = bob_count2.fetch_add(1, Ordering::Relaxed);
                 true
             }
             _ => false,

@@ -1,3 +1,5 @@
+//! `Dispatch::get_default` reference benchmarks.
+
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
@@ -7,7 +9,7 @@ fn bench(c: &mut Criterion) {
     shared::for_all_dispatches(&mut c.benchmark_group("Dispatch::get_ref"), |b| {
         b.iter(|| {
             tracing::dispatcher::get_default(|current| {
-                black_box(&current);
+                let _value = black_box(&current);
             })
         })
     });

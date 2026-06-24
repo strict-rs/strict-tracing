@@ -1,3 +1,5 @@
+//! Span API integration coverage.
+
 // These tests require the thread-local scoped dispatcher, which only works when
 // we have a standard library. The behaviour being tested should be the same
 // with the standard lib disabled.
@@ -332,7 +334,7 @@ fn entered_api() {
         let span = tracing::span!(Level::TRACE, "foo").entered();
         let _derefs_to_span = span.id();
         tracing::debug!("exiting span...");
-        let _: Span = span.exit();
+        let _span: Span = span.exit();
     });
 
     handle.assert_finished();
@@ -569,7 +571,7 @@ fn record_new_value_for_field() {
 
     with_default(subscriber, || {
         let span = tracing::span!(Level::TRACE, "foo", bar = 5, baz = false);
-        span.record("baz", true);
+        let _span = span.record("baz", true);
         span.in_scope(|| {})
     });
 
@@ -604,8 +606,8 @@ fn record_new_values_for_fields() {
 
     with_default(subscriber, || {
         let span = tracing::span!(Level::TRACE, "foo", bar = 4, baz = false);
-        span.record("bar", 5);
-        span.record("baz", true);
+        let _span = span.record("bar", 5);
+        let _span = span.record("baz", true);
         span.in_scope(|| {})
     });
 
@@ -746,7 +748,7 @@ fn record_all_macro_unknown_field() {
         )
         .record(
             expect::span().named("foo"),
-            tracing_mock::field::ExpectedFields::default().only(),
+            field::ExpectedFields::default().only(),
         )
         .enter(expect::span().named("foo"))
         .exit(expect::span().named("foo"))
@@ -917,8 +919,8 @@ fn explicit_child_regardless_of_ctx() {
 
     with_default(subscriber, || {
         let foo = tracing::span!(Level::TRACE, "foo");
-        tracing::span!(Level::TRACE, "bar")
-            .in_scope(|| tracing::span!(parent: foo.id(), Level::TRACE, "baz"))
+        let _span = tracing::span!(Level::TRACE, "bar")
+            .in_scope(|| tracing::span!(parent: foo.id(), Level::TRACE, "baz"));
     });
 
     handle.assert_finished();

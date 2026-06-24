@@ -1,3 +1,4 @@
+//! Tests optional layer composition.
 #![cfg(feature = "registry")]
 use tracing_core::{LevelFilter, Metadata, Subscriber, subscriber::Interest};
 use tracing_subscriber::{layer, prelude::*};

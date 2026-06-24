@@ -1,3 +1,4 @@
+//! Tests subscriber initialization utilities.
 #![cfg(feature = "std")]
 
 use tracing_mock::*;
@@ -47,8 +48,8 @@ fn set_default_initializes_log_tracer() {
 #[test]
 #[cfg(feature = "fmt")]
 fn builders_are_init_ext() {
-    tracing_subscriber::fmt().set_default();
-    let _ = tracing_subscriber::fmt()
+    let _guard = tracing_subscriber::fmt().set_default();
+    let _result = tracing_subscriber::fmt()
         .with_target(false)
         .compact()
         .try_init();
@@ -57,7 +58,7 @@ fn builders_are_init_ext() {
 #[test]
 #[cfg(all(feature = "fmt", feature = "env-filter"))]
 fn layered_is_init_ext() {
-    tracing_subscriber::registry()
+    let _guard = tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer())
         .with(tracing_subscriber::EnvFilter::new("foo=info"))
         .set_default();

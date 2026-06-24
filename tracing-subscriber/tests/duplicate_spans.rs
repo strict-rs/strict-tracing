@@ -1,3 +1,4 @@
+//! Tests duplicate span filtering behavior.
 #![cfg(all(feature = "env-filter", feature = "fmt"))]
 use tracing::{self, Span, subscriber::with_default};
 use tracing_subscriber::{FmtSubscriber, filter::EnvFilter};

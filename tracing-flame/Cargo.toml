@@ -30,6 +30,8 @@ tracing-subscriber = { workspace = true, features = ["registry", "fmt"] }
 tracing = { workspace = true, features = ["std"] }
 once_cell = { workspace = true }
 
-
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[lints]
+workspace = true

@@ -1,3 +1,5 @@
+//! Tests the public re-export of the `log` crate.
+
 use tracing_log::{LogTracer, log::LevelFilter};
 
 /// This test makes sure we can access `log::LevelFilter` through the `tracing_log` crate and don't

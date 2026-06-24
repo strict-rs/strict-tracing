@@ -5,7 +5,7 @@ use crate::{
     registry::{self, LookupSpan, SpanRef},
 };
 use alloc::{fmt, format, string::String};
-use core::{any::TypeId, marker::PhantomData, ops::Deref};
+use core::{any::TypeId, marker::PhantomData, ops::Deref, ptr};
 use format::{FmtSpan, TimingDisplay};
 use std::{cell::RefCell, env, eprintln, io, thread_local, time::Instant};
 use tracing_core::{
@@ -738,9 +738,14 @@ impl<S, N, E, W> Layer<S, N, E, W> {
 
 impl<S> Default for Layer<S> {
     fn default() -> Self {
-        // only enable ANSI when the feature is enabled, and the NO_COLOR
-        // environment variable is unset or empty.
-        let ansi = cfg!(feature = "ansi") && env::var("NO_COLOR").map_or(true, |v| v.is_empty());
+        let no_color = env::var("NO_COLOR").ok();
+        Self::default_with_no_color(no_color.as_deref())
+    }
+}
+
+impl<S> Layer<S> {
+    fn default_with_no_color(no_color: Option<&str>) -> Self {
+        let ansi = default_ansi_enabled(no_color);
 
         Layer {
             fmt_fields: format::DefaultFields::default(),
@@ -753,6 +758,12 @@ impl<S> Default for Layer<S> {
             _inner: PhantomData,
         }
     }
+}
+
+fn default_ansi_enabled(no_color: Option<&str>) -> bool {
+    // Only enable ANSI when the feature is enabled, and the NO_COLOR
+    // environment variable is unset or empty.
+    cfg!(feature = "ansi") && no_color.map_or(true, str::is_empty)
 }
 
 impl<S, N, E, W> Layer<S, N, E, W>
@@ -856,7 +867,10 @@ macro_rules! with_event_from_span {
         #[allow(unused)]
         let mut iter = fs.iter();
         let v = [$(
-            (&iter.next().unwrap(), ::core::option::Option::Some(&$value as &dyn field::Value)),
+            (&iter.next().unwrap(), {
+                let value: &dyn field::Value = &$value;
+                ::core::option::Option::Some(value)
+            }),
         )*];
         let vs = fs.value_set(&v);
         let $event = Event::new_child_of($id, meta, &vs);
@@ -1067,16 +1081,20 @@ where
         });
     }
 
+    #[allow(
+        unsafe_code,
+        reason = "TODO(unsafe-forbid): preserve fmt Layer::downcast_raw component access until safe Any references replace it."
+    )]
     unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
         // This `downcast_raw` impl allows downcasting a `fmt` layer to any of
         // its components (event formatter, field formatter, and `MakeWriter`)
         // as well as to the layer's type itself. The potential use-cases for
         // this *may* be somewhat niche, though...
         match () {
-            _ if id == TypeId::of::<Self>() => Some(self as *const Self as *const ()),
-            _ if id == TypeId::of::<E>() => Some(&self.fmt_event as *const E as *const ()),
-            _ if id == TypeId::of::<N>() => Some(&self.fmt_fields as *const N as *const ()),
-            _ if id == TypeId::of::<W>() => Some(&self.make_writer as *const W as *const ()),
+            _ if id == TypeId::of::<Self>() => Some(ptr::from_ref(self).cast::<()>()),
+            _ if id == TypeId::of::<E>() => Some(ptr::from_ref(&self.fmt_event).cast::<()>()),
+            _ if id == TypeId::of::<N>() => Some(ptr::from_ref(&self.fmt_fields).cast::<()>()),
+            _ if id == TypeId::of::<W>() => Some(ptr::from_ref(&self.make_writer).cast::<()>()),
             _ => None,
         }
     }
@@ -1257,7 +1275,7 @@ where
     /// [stored data]: crate::registry::SpanRef
     pub fn event_scope(&self) -> Option<registry::Scope<'_, S>>
     where
-        S: for<'lookup> registry::LookupSpan<'lookup>,
+        S: for<'lookup> LookupSpan<'lookup>,
     {
         self.ctx.event_scope(self.event)
     }
@@ -1302,7 +1320,7 @@ mod test {
         test::{MockMakeWriter, MockWriter},
         time,
     };
-    use crate::Registry;
+    use crate::{Registry, registry::LookupSpan};
     use alloc::{string::ToString, vec, vec::Vec};
     use format::FmtSpan;
     use regex::Regex;
@@ -1312,45 +1330,45 @@ mod test {
     #[test]
     fn impls() {
         let f = Format::default().with_timer(time::Uptime::default());
-        let fmt = fmt::Layer::default().event_format(f);
+        let fmt = Layer::default().event_format(f);
         let subscriber = fmt.with_subscriber(Registry::default());
         let _dispatch = Dispatch::new(subscriber);
 
-        let f = format::Format::default();
-        let fmt = fmt::Layer::default().event_format(f);
+        let f = Format::default();
+        let fmt = Layer::default().event_format(f);
         let subscriber = fmt.with_subscriber(Registry::default());
         let _dispatch = Dispatch::new(subscriber);
 
-        let f = format::Format::default().compact();
-        let fmt = fmt::Layer::default().event_format(f);
+        let f = Format::default().compact();
+        let fmt = Layer::default().event_format(f);
         let subscriber = fmt.with_subscriber(Registry::default());
         let _dispatch = Dispatch::new(subscriber);
     }
 
     #[test]
     fn fmt_layer_downcasts() {
-        let f = format::Format::default();
-        let fmt = fmt::Layer::default().event_format(f);
+        let f = Format::default();
+        let fmt = Layer::default().event_format(f);
         let subscriber = fmt.with_subscriber(Registry::default());
 
         let dispatch = Dispatch::new(subscriber);
-        assert!(dispatch.downcast_ref::<fmt::Layer<Registry>>().is_some());
+        assert!(dispatch.downcast_ref::<Layer<Registry>>().is_some());
     }
 
     #[test]
     fn fmt_layer_downcasts_to_parts() {
-        let f = format::Format::default();
-        let fmt = fmt::Layer::default().event_format(f);
+        let f = Format::default();
+        let fmt = Layer::default().event_format(f);
         let subscriber = fmt.with_subscriber(Registry::default());
         let dispatch = Dispatch::new(subscriber);
         assert!(dispatch.downcast_ref::<format::DefaultFields>().is_some());
-        assert!(dispatch.downcast_ref::<format::Format>().is_some())
+        assert!(dispatch.downcast_ref::<Format>().is_some())
     }
 
     #[test]
     fn is_lookup_span() {
-        fn assert_lookup_span<T: for<'a> crate::registry::LookupSpan<'a>>(_: T) {}
-        let fmt = fmt::Layer::default();
+        fn assert_lookup_span<T: for<'a> LookupSpan<'a>>(_: T) {}
+        let fmt = Layer::default();
         let subscriber = fmt.with_subscriber(Registry::default());
         assert_lookup_span(subscriber)
     }
@@ -1371,7 +1389,7 @@ mod test {
         }
 
         let make_writer = MockMakeWriter::default();
-        let subscriber = crate::fmt::Subscriber::builder()
+        let subscriber = fmt::Subscriber::builder()
             .with_writer(make_writer.clone())
             .with_level(false)
             .with_ansi(false)
@@ -1408,7 +1426,7 @@ mod test {
         }
 
         let make_writer = MockMakeWriter::default();
-        let subscriber = crate::fmt::Subscriber::builder()
+        let subscriber = fmt::Subscriber::builder()
             .with_writer(make_writer.clone())
             .with_level(false)
             .with_ansi(false)
@@ -1426,7 +1444,7 @@ mod test {
     #[test]
     fn synthesize_span_none() {
         let make_writer = MockMakeWriter::default();
-        let subscriber = crate::fmt::Subscriber::builder()
+        let subscriber = fmt::Subscriber::builder()
             .with_writer(make_writer.clone())
             .with_level(false)
             .with_ansi(false)
@@ -1445,7 +1463,7 @@ mod test {
     #[test]
     fn synthesize_span_active() {
         let make_writer = MockMakeWriter::default();
-        let subscriber = crate::fmt::Subscriber::builder()
+        let subscriber = fmt::Subscriber::builder()
             .with_writer(make_writer.clone())
             .with_level(false)
             .with_ansi(false)
@@ -1468,7 +1486,7 @@ mod test {
     #[test]
     fn synthesize_span_close() {
         let make_writer = MockMakeWriter::default();
-        let subscriber = crate::fmt::Subscriber::builder()
+        let subscriber = fmt::Subscriber::builder()
             .with_writer(make_writer.clone())
             .with_level(false)
             .with_ansi(false)
@@ -1490,7 +1508,7 @@ mod test {
     #[test]
     fn synthesize_span_close_no_timing() {
         let make_writer = MockMakeWriter::default();
-        let subscriber = crate::fmt::Subscriber::builder()
+        let subscriber = fmt::Subscriber::builder()
             .with_writer(make_writer.clone())
             .with_level(false)
             .with_ansi(false)
@@ -1513,7 +1531,7 @@ mod test {
     #[test]
     fn synthesize_span_full() {
         let make_writer = MockMakeWriter::default();
-        let subscriber = crate::fmt::Subscriber::builder()
+        let subscriber = fmt::Subscriber::builder()
             .with_writer(make_writer.clone())
             .with_level(false)
             .with_ansi(false)
@@ -1565,7 +1583,7 @@ mod test {
             make_writer2: make_writer2.clone(),
         };
 
-        let subscriber = crate::fmt::Subscriber::builder()
+        let subscriber = fmt::Subscriber::builder()
             .with_writer(make_writer)
             .with_level(false)
             .with_target(false)
@@ -1602,26 +1620,6 @@ mod test {
     #[cfg(feature = "ansi")]
     #[test]
     fn layer_no_color() {
-        const NO_COLOR: &str = "NO_COLOR";
-
-        // Restores the previous value of the `NO_COLOR` env variable when
-        // dropped.
-        //
-        // This is done in a `Drop` implementation, rather than just resetting
-        // the value at the end of the test, so that the previous value is
-        // restored even if the test panics.
-        struct RestoreEnvVar(Result<String, env::VarError>);
-        impl Drop for RestoreEnvVar {
-            fn drop(&mut self) {
-                match self.0 {
-                    Ok(ref var) => unsafe { env::set_var(NO_COLOR, var) },
-                    Err(_) => unsafe { env::remove_var(NO_COLOR) },
-                }
-            }
-        }
-
-        let _saved_no_color = RestoreEnvVar(env::var(NO_COLOR));
-
         let cases: Vec<(Option<&str>, bool)> = vec![
             (Some("0"), false),   // any non-empty value disables ansi
             (Some("off"), false), // any non-empty value disables ansi
@@ -1631,13 +1629,9 @@ mod test {
         ];
 
         for (var, ansi) in cases {
-            if let Some(value) = var {
-                unsafe { env::set_var(NO_COLOR, value); }
-            } else {
-                unsafe { env::remove_var(NO_COLOR); }
-            }
+            assert_eq!(default_ansi_enabled(var), ansi);
 
-            let layer: Layer<()> = fmt::Layer::default();
+            let layer: Layer<()> = Layer::default_with_no_color(var);
             assert_eq!(
                 layer.is_ansi, ansi,
                 "NO_COLOR={:?}; Layer::default().is_ansi should be {}",
@@ -1645,7 +1639,7 @@ mod test {
             );
 
             // with_ansi should override any `NO_COLOR` value
-            let layer: Layer<()> = fmt::Layer::default().with_ansi(true);
+            let layer: Layer<()> = Layer::default_with_no_color(var).with_ansi(true);
             assert!(
                 layer.is_ansi,
                 "NO_COLOR={:?}; Layer::default().with_ansi(true).is_ansi should be true",
@@ -1653,7 +1647,7 @@ mod test {
             );
 
             // set_ansi should override any `NO_COLOR` value
-            let mut layer: Layer<()> = fmt::Layer::default();
+            let mut layer: Layer<()> = Layer::default_with_no_color(var);
             layer.set_ansi(true);
             assert!(
                 layer.is_ansi,
@@ -1662,8 +1656,6 @@ mod test {
             );
         }
 
-        // dropping `_saved_no_color` will restore the previous value of
-        // `NO_COLOR`.
     }
 
     // Validates that span event configuration can be modified with a reload handle
@@ -1671,7 +1663,7 @@ mod test {
     fn modify_span_events() {
         let make_writer = MockMakeWriter::default();
 
-        let inner_layer = fmt::Layer::default()
+        let inner_layer = Layer::default()
             .with_writer(make_writer.clone())
             .with_level(false)
             .with_ansi(false)

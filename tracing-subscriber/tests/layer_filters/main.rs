@@ -1,3 +1,4 @@
+//! Tests per-layer filtering behavior.
 #![cfg(feature = "registry")]
 mod boxed;
 mod downcast_raw;

@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 #![allow(dead_code)]
 //! This example shows how a field value may be recorded using the `valuable`
 //! crate (https://crates.io/crates/valuable).
@@ -15,18 +17,18 @@
 use tracing::{info, info_span};
 use valuable::Valuable;
 
-#[derive(Clone, Debug, Valuable)]
+#[derive(Copy, Clone, Debug, Valuable)]
 struct User {
-    name: String,
+    name: &'static str,
     age: u32,
     address: Address,
 }
 
-#[derive(Clone, Debug, Valuable)]
+#[derive(Copy, Clone, Debug, Valuable)]
 struct Address {
-    country: String,
-    city: String,
-    street: String,
+    country: &'static str,
+    city: &'static str,
+    street: &'static str,
 }
 
 fn main() {
@@ -35,12 +37,12 @@ fn main() {
         .init();
 
     let user = User {
-        name: "Arwen Undomiel".to_string(),
+        name: "Arwen Undomiel",
         age: 3000,
         address: Address {
-            country: "Middle Earth".to_string(),
-            city: "Rivendell".to_string(),
-            street: "leafy lane".to_string(),
+            country: "Middle Earth",
+            city: "Rivendell",
+            street: "leafy lane",
         },
     };
 

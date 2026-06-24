@@ -1,3 +1,4 @@
+//! Tests reloadable layer behavior.
 #![cfg(feature = "registry")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing_core::{
@@ -7,6 +8,8 @@ use tracing_core::{
 };
 use tracing_subscriber::{layer, prelude::*, reload::*};
 
+/// Subscriber used by reload tests when only layer behavior is under test.
+#[derive(Copy, Clone, Debug)]
 pub struct NopSubscriber;
 fn event() {
     tracing::info!("my event");
@@ -59,8 +62,12 @@ fn reload_handle() {
         fn enabled(&self, m: &Metadata<'_>, _: layer::Context<'_, S>) -> bool {
             println!("ENABLED: {:?}", m);
             match self {
-                Filter::One => FILTER1_CALLS.fetch_add(1, Ordering::SeqCst),
-                Filter::Two => FILTER2_CALLS.fetch_add(1, Ordering::SeqCst),
+                Filter::One => {
+                    let _previous = FILTER1_CALLS.fetch_add(1, Ordering::SeqCst);
+                }
+                Filter::Two => {
+                    let _previous = FILTER2_CALLS.fetch_add(1, Ordering::SeqCst);
+                }
             };
             true
         }
@@ -117,12 +124,16 @@ fn reload_filter() {
         Two,
     }
 
-    impl<S: Subscriber> tracing_subscriber::layer::Filter<S> for Filter {
+    impl<S: Subscriber> layer::Filter<S> for Filter {
         fn enabled(&self, m: &Metadata<'_>, _: &layer::Context<'_, S>) -> bool {
             println!("ENABLED: {:?}", m);
             match self {
-                Filter::One => FILTER1_CALLS.fetch_add(1, Ordering::SeqCst),
-                Filter::Two => FILTER2_CALLS.fetch_add(1, Ordering::SeqCst),
+                Filter::One => {
+                    let _previous = FILTER1_CALLS.fetch_add(1, Ordering::SeqCst);
+                }
+                Filter::Two => {
+                    let _previous = FILTER2_CALLS.fetch_add(1, Ordering::SeqCst);
+                }
             };
             true
         }

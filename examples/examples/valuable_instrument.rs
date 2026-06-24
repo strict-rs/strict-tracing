@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 #[cfg(tracing_unstable)]
 mod app {
     use std::collections::HashMap;

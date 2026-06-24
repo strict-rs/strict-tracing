@@ -230,7 +230,7 @@ pub struct MakeExtMarker<T> {
     _p: PhantomData<T>,
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 #[doc(hidden)]
 pub struct RecordFieldsMarker {
     _p: (),
@@ -253,23 +253,20 @@ pub(in crate::field) mod test_util {
     impl TestAttrs1 {
         pub(crate) fn with<T>(f: impl FnOnce(Attributes<'_>) -> T) -> T {
             let fieldset = TEST_META_1.fields();
+            let question: &dyn Value = &"life, the universe, and everything";
+            let tricky: &dyn Value = &true;
+            let can_you_do_it: &dyn Value = &true;
             let values = &[
-                (
-                    &fieldset.field("question").unwrap(),
-                    Some(&"life, the universe, and everything" as &dyn Value),
-                ),
+                (&fieldset.field("question").unwrap(), Some(question)),
                 (&fieldset.field("question.answer").unwrap(), None),
-                (
-                    &fieldset.field("tricky").unwrap(),
-                    Some(&true as &dyn Value),
-                ),
+                (&fieldset.field("tricky").unwrap(), Some(tricky)),
                 (
                     &fieldset.field("can_you_do_it").unwrap(),
-                    Some(&true as &dyn Value),
+                    Some(can_you_do_it),
                 ),
             ];
             let valueset = fieldset.value_set(values);
-            let attrs = tracing_core::span::Attributes::new(&TEST_META_1, &valueset);
+            let attrs = Attributes::new(&TEST_META_1, &valueset);
             f(attrs)
         }
     }
@@ -278,26 +275,21 @@ pub(in crate::field) mod test_util {
         pub(crate) fn with<T>(f: impl FnOnce(Attributes<'_>) -> T) -> T {
             let fieldset = TEST_META_1.fields();
             let none = tracing_core::field::debug(&Option::<&str>::None);
+            let none: &dyn Value = &none;
+            let answer: &dyn Value = &42;
+            let tricky: &dyn Value = &true;
+            let can_you_do_it: &dyn Value = &false;
             let values = &[
-                (
-                    &fieldset.field("question").unwrap(),
-                    Some(&none as &dyn Value),
-                ),
-                (
-                    &fieldset.field("question.answer").unwrap(),
-                    Some(&42 as &dyn Value),
-                ),
-                (
-                    &fieldset.field("tricky").unwrap(),
-                    Some(&true as &dyn Value),
-                ),
+                (&fieldset.field("question").unwrap(), Some(none)),
+                (&fieldset.field("question.answer").unwrap(), Some(answer)),
+                (&fieldset.field("tricky").unwrap(), Some(tricky)),
                 (
                     &fieldset.field("can_you_do_it").unwrap(),
-                    Some(&false as &dyn Value),
+                    Some(can_you_do_it),
                 ),
             ];
             let valueset = fieldset.value_set(values);
-            let attrs = tracing_core::span::Attributes::new(&TEST_META_1, &valueset);
+            let attrs = Attributes::new(&TEST_META_1, &valueset);
             f(attrs)
         }
     }

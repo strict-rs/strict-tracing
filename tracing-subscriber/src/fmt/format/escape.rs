@@ -19,7 +19,7 @@ struct EscapingWriter<'a, 'b> {
     inner: &'a mut fmt::Formatter<'b>,
 }
 
-impl<'a, 'b> fmt::Write for EscapingWriter<'a, 'b> {
+impl Write for EscapingWriter<'_, '_> {
     fn write_str(&mut self, s: &str) -> fmt::Result {
         // Stream the string character by character, escaping ANSI and C1 control sequences
         for ch in s.chars() {

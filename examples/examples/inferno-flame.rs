@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use std::{
     env,
     fs::File,
@@ -6,13 +8,13 @@ use std::{
     thread::sleep,
     time::Duration,
 };
-use tracing::{Level, span};
+use tracing::{span, Level};
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{prelude::*, registry::Registry};
 
 static PATH: &str = "flame.folded";
 
-fn setup_global_subscriber(dir: &Path) -> impl Drop {
+fn setup_global_subscriber(dir: &Path) -> impl Drop + use<> {
     let (flame_layer, _guard) = FlameLayer::with_file(dir.join(PATH)).unwrap();
 
     let subscriber = Registry::default().with(flame_layer);

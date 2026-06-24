@@ -1,3 +1,5 @@
+//! Event dispatch benchmarks.
+
 use criterion::{Criterion, criterion_group, criterion_main};
 
 mod shared;

@@ -1,22 +1,23 @@
 use super::{Format, FormatEvent, FormatFields, FormatTime, Writer};
 use crate::{
-    field::{RecordFields, VisitOutput},
+    field::{RecordFields, VisitFmt, VisitOutput},
     fmt::{
         fmt_layer::{FmtContext, FormattedFields},
         writer::WriteAdaptor,
     },
-    registry::LookupSpan,
+    layer::Context,
+    registry::{LookupSpan, SpanRef},
 };
 use alloc::{
     collections::BTreeMap,
-    fmt::{self, Write},
+    fmt::{self, Debug, Write},
     format,
     string::String,
 };
 use serde::ser::{SerializeMap, Serializer as _};
 use serde_json::Serializer;
 use tracing_core::{
-    field::{self, Field},
+    field::{Field, Visit},
     span::Record,
     Event, Subscriber,
 };
@@ -114,16 +115,16 @@ impl Json {
 }
 
 struct SerializableContext<'a, 'b, Span, N>(
-    &'b crate::layer::Context<'a, Span>,
+    &'b Context<'a, Span>,
     std::marker::PhantomData<N>,
 )
 where
-    Span: Subscriber + for<'lookup> crate::registry::LookupSpan<'lookup>,
+    Span: Subscriber + for<'lookup> LookupSpan<'lookup>,
     N: for<'writer> FormatFields<'writer> + 'static;
 
 impl<Span, N> serde::ser::Serialize for SerializableContext<'_, '_, Span, N>
 where
-    Span: Subscriber + for<'lookup> crate::registry::LookupSpan<'lookup>,
+    Span: Subscriber + for<'lookup> LookupSpan<'lookup>,
     N: for<'writer> FormatFields<'writer> + 'static,
 {
     fn serialize<Ser>(&self, serializer_o: Ser) -> Result<Ser::Ok, Ser::Error>
@@ -144,16 +145,16 @@ where
 }
 
 struct SerializableSpan<'a, 'b, Span, N>(
-    &'b crate::registry::SpanRef<'a, Span>,
+    &'b SpanRef<'a, Span>,
     std::marker::PhantomData<N>,
 )
 where
-    Span: for<'lookup> crate::registry::LookupSpan<'lookup>,
+    Span: for<'lookup> LookupSpan<'lookup>,
     N: for<'writer> FormatFields<'writer> + 'static;
 
 impl<Span, N> serde::ser::Serialize for SerializableSpan<'_, '_, Span, N>
 where
-    Span: for<'lookup> crate::registry::LookupSpan<'lookup>,
+    Span: for<'lookup> LookupSpan<'lookup>,
     N: for<'writer> FormatFields<'writer> + 'static,
 {
     fn serialize<Ser>(&self, serializer: Ser) -> Result<Ser::Ok, Ser::Error>
@@ -343,7 +344,7 @@ impl Default for Json {
 
 /// The JSON [`FormatFields`] implementation.
 ///
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct JsonFields {
     // reserve the ability to add fields to this without causing a breaking
     // change in the future.
@@ -428,7 +429,7 @@ pub struct JsonVisitor<'a> {
     writer: &'a mut dyn Write,
 }
 
-impl fmt::Debug for JsonVisitor<'_> {
+impl Debug for JsonVisitor<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_fmt(format_args!("JsonVisitor {{ values: {:?} }}", self.values))
     }
@@ -449,13 +450,13 @@ impl<'a> JsonVisitor<'a> {
     }
 }
 
-impl crate::field::VisitFmt for JsonVisitor<'_> {
-    fn writer(&mut self) -> &mut dyn fmt::Write {
+impl VisitFmt for JsonVisitor<'_> {
+    fn writer(&mut self) -> &mut dyn Write {
         self.writer
     }
 }
 
-impl crate::field::VisitOutput<fmt::Result> for JsonVisitor<'_> {
+impl VisitOutput<fmt::Result> for JsonVisitor<'_> {
     fn finish(self) -> fmt::Result {
         let inner = || {
             let mut serializer = Serializer::new(WriteAdaptor::new(self.writer));
@@ -476,7 +477,7 @@ impl crate::field::VisitOutput<fmt::Result> for JsonVisitor<'_> {
     }
 }
 
-impl field::Visit for JsonVisitor<'_> {
+impl Visit for JsonVisitor<'_> {
     #[cfg(all(tracing_unstable, feature = "valuable"))]
     fn record_value(&mut self, field: &Field, value: valuable_crate::Value<'_>) {
         let value = match serde_json::to_value(valuable_serde::Serializable::new(value)) {
@@ -494,55 +495,63 @@ impl field::Visit for JsonVisitor<'_> {
             }
         };
 
-        self.values.insert(field.name(), value);
+        let _previous = self.values.insert(field.name(), value);
     }
 
     /// Visit a double precision floating point value.
     fn record_f64(&mut self, field: &Field, value: f64) {
-        self.values
+        let _previous = self
+            .values
             .insert(field.name(), serde_json::Value::from(value));
     }
 
     /// Visit a signed 64-bit integer value.
     fn record_i64(&mut self, field: &Field, value: i64) {
-        self.values
+        let _previous = self
+            .values
             .insert(field.name(), serde_json::Value::from(value));
     }
 
     /// Visit an unsigned 64-bit integer value.
     fn record_u64(&mut self, field: &Field, value: u64) {
-        self.values
+        let _previous = self
+            .values
             .insert(field.name(), serde_json::Value::from(value));
     }
 
     /// Visit a boolean value.
     fn record_bool(&mut self, field: &Field, value: bool) {
-        self.values
+        let _previous = self
+            .values
             .insert(field.name(), serde_json::Value::from(value));
     }
 
     /// Visit a string value.
     fn record_str(&mut self, field: &Field, value: &str) {
-        self.values
+        let _previous = self
+            .values
             .insert(field.name(), serde_json::Value::from(value));
     }
 
     fn record_bytes(&mut self, field: &Field, value: &[u8]) {
-        self.values
+        let _previous = self
+            .values
             .insert(field.name(), serde_json::Value::from(value));
     }
 
-    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
         match field.name() {
             // Skip fields that are actually log metadata that have already been handled
             #[cfg(feature = "tracing-log")]
             name if name.starts_with("log.") => (),
             name if name.starts_with("r#") => {
-                self.values
+                let _previous = self
+                    .values
                     .insert(&name[2..], serde_json::Value::from(format!("{:?}", value)));
             }
             name => {
-                self.values
+                let _previous = self
+                    .values
                     .insert(name, serde_json::Value::from(format!("{:?}", value)));
             }
         };
@@ -733,7 +742,7 @@ mod test {
             );
 
             let span = tracing::info_span!("the span", na = tracing::field::Empty);
-            span.record("na", "value");
+            let _span = span.record("na", "value");
             let _enter = span.enter();
 
             tracing::info!("an event inside the root span");
@@ -846,7 +855,7 @@ mod test {
 
     fn test_json<T>(
         expected: &str,
-        builder: crate::fmt::SubscriberBuilder<JsonFields, Format<Json>>,
+        builder: SubscriberBuilder<JsonFields, Format<Json>>,
         producer: impl FnOnce() -> T,
     ) {
         let make_writer = MockMakeWriter::default();
@@ -855,7 +864,7 @@ mod test {
             .with_timer(MockTime)
             .finish();
 
-        with_default(subscriber, producer);
+        let _result = with_default(subscriber, producer);
 
         let buf = make_writer.buf();
         let actual = std::str::from_utf8(&buf[..]).unwrap();
@@ -868,7 +877,7 @@ mod test {
 
     fn test_json_with_line_number<T>(
         expected: &str,
-        builder: crate::fmt::SubscriberBuilder<JsonFields, Format<Json>>,
+        builder: SubscriberBuilder<JsonFields, Format<Json>>,
         producer: impl FnOnce() -> T,
     ) {
         let make_writer = MockMakeWriter::default();
@@ -877,7 +886,7 @@ mod test {
             .with_timer(MockTime)
             .finish();
 
-        with_default(subscriber, producer);
+        let _result = with_default(subscriber, producer);
 
         let buf = make_writer.buf();
         let actual = std::str::from_utf8(&buf[..]).unwrap();

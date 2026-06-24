@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use std::convert::Infallible;
 use std::{future::Future, pin::Pin, sync::Arc};
 
@@ -35,6 +37,10 @@ async fn test_async_fn_empty() {}
 
 #[instrument]
 #[allow(dead_code)]
+#[allow(
+    unsafe_code,
+    reason = "test fixture verifies #[instrument] accepts unsafe async functions"
+)]
 async unsafe fn test_async_unsafe_fn_empty() {}
 
 // Reproduces a compile error when an instrumented function body contains inner
@@ -103,8 +109,8 @@ fn async_fn_only_enters_for_polls() {
         .drop_span(expect::span().named("test_async_fn"))
         .only()
         .run_with_handle();
-    with_default(subscriber, || {
-        block_on_future(async { test_async_fn(2).await }).unwrap();
+    let _result = with_default(subscriber, || {
+        let _result = block_on_future(async { test_async_fn(2).await }).unwrap();
     });
     handle.assert_finished();
 }
@@ -140,8 +146,8 @@ fn async_fn_nested() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
-        block_on_future(async { test_async_fns_nested().await });
+    let _result = with_default(subscriber, || {
+        let _result = block_on_future(async { test_async_fns_nested().await });
     });
 
     handle.assert_finished();
@@ -154,19 +160,19 @@ fn async_fn_with_async_trait() {
     // test the correctness of the metadata obtained by #[instrument]
     // (function name, functions parameters) when async-trait is used
     #[async_trait]
-    pub trait TestA {
+    pub(crate) trait TestA {
         async fn foo(&mut self, v: usize);
     }
 
     // test nesting of async fns with aync-trait
     #[async_trait]
-    pub trait TestB {
+    pub(crate) trait TestB {
         async fn bar(&self);
     }
 
     // test skip(self) with async-await
     #[async_trait]
-    pub trait TestC {
+    pub(crate) trait TestC {
         async fn baz(&self);
     }
 
@@ -230,9 +236,9 @@ fn async_fn_with_async_trait() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         let mut test = TestImpl(2);
-        block_on_future(async { test.foo(5).await });
+        let _result = block_on_future(async { test.foo(5).await });
     });
 
     handle.assert_finished();
@@ -243,7 +249,7 @@ fn async_fn_with_async_trait_and_fields_expressions() {
     use async_trait::async_trait;
 
     #[async_trait]
-    pub trait Test {
+    pub(crate) trait Test {
         async fn call(&mut self, v: usize);
     }
 
@@ -282,8 +288,8 @@ fn async_fn_with_async_trait_and_fields_expressions() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
-        block_on_future(async { TestImpl.call(5).await });
+    let _result = with_default(subscriber, || {
+        let _result = block_on_future(async { TestImpl.call(5).await });
     });
 
     handle.assert_finished();
@@ -294,7 +300,7 @@ fn async_fn_with_async_trait_and_fields_expressions_with_generic_parameter() {
     use async_trait::async_trait;
 
     #[async_trait]
-    pub trait Test {
+    pub(crate) trait Test {
         async fn call();
         async fn call_with_self(&self);
         async fn call_with_mut_self(&mut self);
@@ -373,8 +379,8 @@ fn async_fn_with_async_trait_and_fields_expressions_with_generic_parameter() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
-        block_on_future(async {
+    let _result = with_default(subscriber, || {
+        let _result = block_on_future(async {
             TestImpl::call().await;
             TestImpl.call_with_self().await;
             TestImpl.call_with_mut_self().await
@@ -416,12 +422,12 @@ fn out_of_scope_fields() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
-        block_on_future(async {
+    let _result = with_default(subscriber, || {
+        let _result = block_on_future(async {
             let mut my_thing = Thing {
                 metrics: Arc::new(()),
             };
-            my_thing.call(()).await;
+            let _metrics = my_thing.call(()).await;
         });
     });
 
@@ -453,8 +459,8 @@ fn manual_impl_future() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
-        block_on_future(async {
+    let _result = with_default(subscriber, || {
+        let _result = block_on_future(async {
             manual_impl_future().await;
         });
     });
@@ -486,8 +492,8 @@ fn manual_box_pin() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
-        block_on_future(async {
+    let _result = with_default(subscriber, || {
+        let _result = block_on_future(async {
             manual_box_pin().await;
         });
     });

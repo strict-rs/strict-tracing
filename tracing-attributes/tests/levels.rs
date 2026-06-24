@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use tracing::Level;
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
@@ -38,7 +40,7 @@ fn named_levels() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         trace();
         debug();
         info();
@@ -84,7 +86,7 @@ fn numeric_levels() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         trace();
         debug();
         info();
@@ -103,7 +105,7 @@ fn enum_levels() {
     #[instrument(level = Level::DEBUG)]
     fn debug() {}
 
-    #[instrument(level = tracing::Level::INFO)]
+    #[instrument(level = Level::INFO)]
     fn info() {}
 
     #[instrument(level = Level::WARN)]
@@ -130,7 +132,7 @@ fn enum_levels() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         trace();
         debug();
         info();

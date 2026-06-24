@@ -128,7 +128,7 @@ mod tokio_runtime {
             F: Future<Item = (), Error = ()> + Send + 'static,
         {
             let future = future.instrument(self.span.clone());
-            self.inner.spawn(future);
+            let _runtime = self.inner.spawn(future);
             self
         }
 
@@ -179,7 +179,7 @@ mod tokio_runtime {
             F: Future<Item = (), Error = ()> + 'static,
         {
             let future = future.instrument(self.span.clone());
-            self.inner.spawn(future);
+            let _runtime = self.inner.spawn(future);
             self
         }
 
@@ -246,7 +246,7 @@ mod tokio_runtime {
             F: Future<Item = (), Error = ()> + Send + 'static,
         {
             let future = self.with_dispatch(future);
-            self.inner.spawn(future);
+            let _runtime = self.inner.spawn(future);
             self
         }
 
@@ -300,7 +300,7 @@ mod tokio_runtime {
             F: Future<Item = (), Error = ()> + 'static,
         {
             let future = self.with_dispatch(future);
-            self.inner.spawn(future);
+            let _runtime = self.inner.spawn(future);
             self
         }
 

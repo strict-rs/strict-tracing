@@ -1,3 +1,5 @@
+//! Tests for `std::future::Future` instrumentation.
+
 use std::{future::Future, pin::Pin, task};
 
 use futures::FutureExt as _;

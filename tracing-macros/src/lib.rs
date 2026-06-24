@@ -1,3 +1,8 @@
+//! Experimental helper macros for emitting `tracing` diagnostics.
+//!
+//! This crate currently provides a `dbg!`-style macro that records the
+//! expression value as a `tracing` event instead of printing to standard error.
+
 #![cfg_attr(docsrs, deny(rustdoc::broken_intra_doc_links))]
 #[doc(hidden)]
 pub use tracing;

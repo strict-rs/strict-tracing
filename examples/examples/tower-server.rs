@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use bytes::Bytes;
 use futures::future;
 use http::{Request, Response};
@@ -6,16 +8,16 @@ use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
 use hyper_util::service::TowerToHyperService;
-use std::convert::Infallible;
 use std::task::{Context, Poll};
 use std::time::Duration;
+use std::{convert::Infallible, error::Error};
 use tokio::net::TcpListener;
 use tower::{Service, ServiceBuilder};
 use tracing::dispatcher;
 use tracing::info;
 use tracing_tower::request_span::make;
 
-type Err = Box<dyn std::error::Error + Send + Sync + 'static>;
+type Err = Box<dyn Error + Send + Sync + 'static>;
 
 fn req_span<A>(req: &Request<A>) -> tracing::Span {
     let span = tracing::info_span!(
@@ -31,8 +33,8 @@ fn req_span<A>(req: &Request<A>) -> tracing::Span {
 
 const ROOT: &str = "/";
 
-#[derive(Debug, Clone)]
-pub struct Svc;
+#[derive(Copy, Clone, Debug)]
+struct Svc;
 
 impl Service<Request<Incoming>> for Svc {
     type Response = Response<Full<Bytes>>;
@@ -73,7 +75,8 @@ impl Service<Request<Incoming>> for Svc {
     }
 }
 
-pub struct MakeSvc;
+#[derive(Copy, Clone, Debug)]
+struct MakeSvc;
 
 impl<T> Service<T> for MakeSvc {
     type Response = Svc;
@@ -111,7 +114,7 @@ async fn main() -> Result<(), Err> {
         let svc = make_svc.call(remote_addr).await?;
         let hyper_svc = TowerToHyperService::new(svc);
 
-        tokio::spawn(async move {
+        let _task = tokio::spawn(async move {
             if let Err(e) = auto::Builder::new(TokioExecutor::new())
                 .serve_connection(io, hyper_svc)
                 .await

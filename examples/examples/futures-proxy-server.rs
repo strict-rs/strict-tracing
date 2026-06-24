@@ -32,7 +32,7 @@ use tokio::{
     self, io,
     net::{TcpListener, TcpStream},
 };
-use tracing::{Instrument as _, debug, debug_span, info, instrument, warn};
+use tracing::{debug, debug_span, info, instrument, warn, Instrument as _};
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -70,9 +70,9 @@ async fn transfer(mut inbound: TcpStream, proxy_addr: SocketAddr) -> Result<(), 
     Ok(())
 }
 
-#[derive(FromArgs)]
+#[derive(Debug, FromArgs)]
 #[argh(description = "Proxy server example")]
-pub struct Args {
+struct Args {
     /// how to format the logs.
     #[argh(option, default = "LogFormat::Plain")]
     log_format: LogFormat,
@@ -86,8 +86,8 @@ pub struct Args {
     server_addr: SocketAddr,
 }
 
-#[derive(Eq, PartialEq, Debug)]
-pub enum LogFormat {
+#[derive(Copy, Clone, Eq, PartialEq, Debug)]
+enum LogFormat {
     Plain,
     Json,
 }
@@ -110,7 +110,13 @@ async fn main() -> Result<(), Error> {
     info!("Listening on: {}", args.listen_addr);
     info!("Proxying to: {}", args.server_addr);
 
-    while let Ok((inbound, client_addr)) = listener.accept().await {
+    loop {
+        let accepted = listener.accept().await;
+        let (inbound, client_addr) = match accepted {
+            Ok(accepted) => accepted,
+            Err(_) => break,
+        };
+
         info!(client.addr = %client_addr, "client connected");
 
         let transfer = transfer(inbound, args.server_addr).map(|r| {
@@ -120,7 +126,7 @@ async fn main() -> Result<(), Error> {
             }
         });
 
-        tokio::spawn(transfer);
+        let _task = tokio::spawn(transfer);
     }
 
     Ok(())

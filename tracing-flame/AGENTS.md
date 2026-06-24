@@ -25,3 +25,4 @@ The pipeline is `FlameLayer` -> folded-stack text -> `inferno-flamegraph` (an ex
 
 - Flamegraph vs flamechart is purely an `inferno-flamegraph` flag (`--flamechart` preserves event order; default collapses/sorts identical frames). This crate only emits the folded text.
 - With a buffered writer you **must** keep a `FlushGuard` alive (or call `.flush()`) before feeding the file to `inferno`, or the tail of the trace is lost.
+- Writes from `on_enter`/`on_exit` intentionally ignore sink errors because `Layer` hooks cannot return them; keep ignored write results named (for example `_write_result`) so the workspace lint policy does not hide accidental discards.

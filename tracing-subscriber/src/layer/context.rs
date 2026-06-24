@@ -208,7 +208,7 @@ where
     ///
     /// [stored data]: crate::registry::SpanRef
     #[inline]
-    pub fn span(&self, id: &span::Id) -> Option<registry::SpanRef<'_, S>>
+    pub fn span(&self, id: &span::Id) -> Option<SpanRef<'_, S>>
     where
         S: for<'lookup> LookupSpan<'lookup>,
     {
@@ -253,7 +253,7 @@ where
     ///
     /// [stored data]: crate::registry::SpanRef
     #[inline]
-    pub fn lookup_current(&self) -> Option<registry::SpanRef<'_, S>>
+    pub fn lookup_current(&self) -> Option<SpanRef<'_, S>>
     where
         S: for<'lookup> LookupSpan<'lookup>,
     {
@@ -303,11 +303,12 @@ where
     fn lookup_current_filtered<'lookup>(
         &self,
         subscriber: &'lookup S,
-    ) -> Option<registry::SpanRef<'lookup, S>>
+    ) -> Option<SpanRef<'lookup, S>>
     where
         S: LookupSpan<'lookup>,
     {
-        let registry = (subscriber as &dyn Subscriber).downcast_ref::<Registry>()?;
+        let registry_subscriber: &dyn Subscriber = subscriber;
+        let registry = registry_subscriber.downcast_ref::<Registry>()?;
         registry
             .span_stack()
             .iter()

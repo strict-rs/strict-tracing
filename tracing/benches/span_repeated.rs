@@ -1,3 +1,5 @@
+//! Repeated span benchmarks.
+
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use tracing::{Level, span};

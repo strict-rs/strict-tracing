@@ -5,9 +5,9 @@ use crate::{
     registry::LookupSpan,
 };
 
-use std::fmt;
+use std::fmt::{self, Debug, Write};
 use tracing_core::{
-    field::{self, Field},
+    field::{Field, Visit},
     Event, Level, Subscriber,
 };
 
@@ -95,7 +95,7 @@ use nu_ansi_term::{Color, Style};
 ///   2022-02-15T18:44:24.535765Z <font color="#4E9A06"> INFO</font> <font color="#4E9A06"><b>fmt_pretty</b></font><font color="#4E9A06">: yak shaving completed, </font><font color="#4E9A06"><b>all_yaks_shaved</b></font><font color="#4E9A06">: false</font>
 ///     <font color="#AAAAAA"><i>at</i></font> examples/examples/fmt-pretty.rs:19 <font color="#AAAAAA"><i>on</i></font> main
 /// </pre>
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Pretty {
     display_location: bool,
 }
@@ -115,7 +115,7 @@ pub struct PrettyVisitor<'a> {
 /// An excessively pretty, human-readable [`MakeVisitor`] implementation.
 ///
 /// [`MakeVisitor`]: crate::field::MakeVisitor
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct PrettyFields {
     /// A value to override the provided `Writer`'s ANSI formatting
     /// configuration.
@@ -206,7 +206,7 @@ where
             write!(
                 writer,
                 "{} ",
-                super::FmtLevel::new(meta.level(), writer.has_ansi_escapes())
+                FmtLevel::new(meta.level(), writer.has_ansi_escapes())
             )?;
         }
 
@@ -418,7 +418,7 @@ impl<'a> PrettyVisitor<'a> {
         Self { style, ..self }
     }
 
-    fn write_padded(&mut self, value: &impl fmt::Debug) {
+    fn write_padded(&mut self, value: &impl Debug) {
         let padding = if self.is_empty {
             self.is_empty = false;
             ""
@@ -437,7 +437,7 @@ impl<'a> PrettyVisitor<'a> {
     }
 }
 
-impl field::Visit for PrettyVisitor<'_> {
+impl Visit for PrettyVisitor<'_> {
     fn record_str(&mut self, field: &Field, value: &str) {
         if self.result.is_err() {
             return;
@@ -473,7 +473,7 @@ impl field::Visit for PrettyVisitor<'_> {
         }
     }
 
-    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
         if self.result.is_err() {
             return;
         }
@@ -516,7 +516,7 @@ impl VisitOutput<fmt::Result> for PrettyVisitor<'_> {
 }
 
 impl VisitFmt for PrettyVisitor<'_> {
-    fn writer(&mut self) -> &mut dyn fmt::Write {
+    fn writer(&mut self) -> &mut dyn Write {
         &mut self.writer
     }
 }

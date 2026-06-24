@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use std::{
     io::{self},
     sync::{Arc, Mutex},
@@ -6,14 +8,14 @@ use std::{
 use ansi_to_tui::IntoText;
 use crossterm::event;
 use ratatui::{
-    DefaultTerminal, Frame,
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
     style::Stylize,
     widgets::{Block, Widget},
+    DefaultTerminal, Frame,
 };
 use ratatui_textarea::{Input, Key, TextArea};
-use tracing_subscriber::{EnvFilter, filter::ParseError, fmt::MakeWriter};
+use tracing_subscriber::{filter::ParseError, fmt::MakeWriter, EnvFilter};
 
 /// A list of preset filters to make it easier to explore the filter syntax.
 ///
@@ -70,14 +72,14 @@ impl App {
     fn run(mut self, mut terminal: DefaultTerminal) -> io::Result<()> {
         while !self.exit {
             self.log_widget = self.evaluate_filter();
-            terminal.draw(|frame| self.render(frame))?;
+            let _frame = terminal.draw(|frame| self.render(frame))?;
             self.handle_event()?;
         }
         Ok(())
     }
 
     /// Render the application with a filter input area and a log output area.
-    fn render(&self, frame: &mut Frame) {
+    fn render(&self, frame: &mut Frame<'_>) {
         let layout = Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]);
         let [filter_area, main_area] = layout.areas(frame.area());
         frame.render_widget(&self.filter, filter_area);
@@ -115,13 +117,13 @@ impl App {
     fn select_preset(&mut self, index: usize) {
         self.preset_index = index;
         self.filter.select_all();
-        self.filter.delete_line_by_head();
-        self.filter.insert_str(PRESET_FILTERS[self.preset_index]);
+        let _deleted = self.filter.delete_line_by_head();
+        let _inserted = self.filter.insert_str(PRESET_FILTERS[self.preset_index]);
     }
 
     /// Handles normal keyboard input by adding it to the filter text area.
     fn add_input(&mut self, input: Input) {
-        self.filter.input(input);
+        let _input = self.filter.input(input);
     }
 
     /// Evaluates the current filter and returns a log widget with the filtered logs or an error.

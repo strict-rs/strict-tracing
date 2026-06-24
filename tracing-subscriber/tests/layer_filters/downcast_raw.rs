@@ -45,11 +45,20 @@ fn forward_downcast_raw_to_layer() {
         S: Subscriber,
         S: for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
     {
+        #[allow(
+            unsafe_code,
+            reason = "TODO(unsafe-forbid): exercise the Layer::downcast_raw compatibility hook."
+        )]
         unsafe fn downcast_raw(&self, id: std::any::TypeId) -> Option<*const ()> {
+            // SAFETY: this test implements the existing raw downcast contract
+            // so forwarding behavior remains covered until safe `Any`
+            // references replace the hook.
             match id {
-                id if id == std::any::TypeId::of::<Self>() => Some(self as *const _ as *const ()),
+                id if id == std::any::TypeId::of::<Self>() => {
+                    Some(std::ptr::from_ref(self).cast::<()>())
+                }
                 id if id == std::any::TypeId::of::<WithContext>() => {
-                    Some(&self.with_context as *const _ as *const ())
+                    Some(std::ptr::from_ref(&self.with_context).cast::<()>())
                 }
                 _ => None,
             }

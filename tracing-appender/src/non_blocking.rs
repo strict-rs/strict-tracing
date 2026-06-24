@@ -235,7 +235,7 @@ impl Default for NonBlockingBuilder {
     }
 }
 
-impl std::io::Write for NonBlocking {
+impl Write for NonBlocking {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let buf_size = buf.len();
         if self.is_lossy {
@@ -356,14 +356,14 @@ mod test {
         }
     }
 
-    impl std::io::Write for MockWriter {
-        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+    impl Write for MockWriter {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
             let buf_len = buf.len();
-            let _ = self.tx.send(String::from_utf8_lossy(buf).to_string());
+            let _send_result = self.tx.send(String::from_utf8_lossy(buf).to_string());
             Ok(buf_len)
         }
 
-        fn flush(&mut self) -> std::io::Result<()> {
+        fn flush(&mut self) -> io::Result<()> {
             Ok(())
         }
     }
@@ -372,7 +372,7 @@ mod test {
     fn backpressure_exerted() {
         let (mock_writer, rx) = MockWriter::new(1);
 
-        let (mut non_blocking, _guard) = self::NonBlockingBuilder::default()
+        let (mut non_blocking, _guard) = NonBlockingBuilder::default()
             .lossy(false)
             .buffered_lines_limit(1)
             .finish(mock_writer);
@@ -415,7 +415,7 @@ mod test {
     fn logs_dropped_if_lossy() {
         let (mock_writer, rx) = MockWriter::new(1);
 
-        let (mut non_blocking, _guard) = self::NonBlockingBuilder::default()
+        let (mut non_blocking, _guard) = NonBlockingBuilder::default()
             .lossy(true)
             .buffered_lines_limit(1)
             .finish(mock_writer);
@@ -456,7 +456,7 @@ mod test {
     fn multi_threaded_writes() {
         let (mock_writer, rx) = MockWriter::new(DEFAULT_BUFFERED_LINES_LIMIT);
 
-        let (non_blocking, _guard) = self::NonBlockingBuilder::default()
+        let (non_blocking, _guard) = NonBlockingBuilder::default()
             .lossy(true)
             .finish(mock_writer);
 

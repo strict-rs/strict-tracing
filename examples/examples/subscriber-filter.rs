@@ -1,9 +1,11 @@
+//! Example binary for tracing workspace checks.
+
 #![deny(rust_2018_idioms)]
 #[path = "fmt/yak_shave.rs"]
 mod yak_shave;
 
 fn main() {
-    use tracing_subscriber::{EnvFilter, fmt};
+    use tracing_subscriber::{fmt, EnvFilter};
 
     let subscriber = fmt::Subscriber::builder()
         .with_env_filter(EnvFilter::from_default_env())

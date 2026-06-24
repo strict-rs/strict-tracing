@@ -1,4 +1,6 @@
 #![cfg(feature = "std")]
+//! Scoped subscriber override coverage.
+
 use tracing_mock::{expect, subscriber};
 
 #[test]

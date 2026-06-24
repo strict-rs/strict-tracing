@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 #![deny(rust_2018_idioms)]
 use tracing::{error, info};
 use tracing_subscriber::prelude::*;

@@ -1,4 +1,5 @@
 #![cfg(target_os = "linux")]
+//! Integration tests for native journald output.
 
 use std::collections::HashMap;
 use std::process::Command;
@@ -155,7 +156,7 @@ fn retry<T, E>(f: impl Fn() -> Result<T, E>) -> Result<T, E> {
 fn read_from_journal(namespace: JournalNamespace, test_name: &str) -> Vec<HashMap<String, Field>> {
     let mut command = Command::new("journalctl");
     if namespace == JournalNamespace::User {
-        command.arg("--user");
+        let _command = command.arg("--user");
     }
 
     let stdout = String::from_utf8(

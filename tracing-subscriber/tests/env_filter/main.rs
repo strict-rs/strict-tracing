@@ -1,3 +1,4 @@
+//! Tests environment filter directive behavior.
 #![cfg(feature = "env-filter")]
 
 mod per_layer;
@@ -233,7 +234,7 @@ fn method_name_resolution() {
     use tracing_subscriber::layer::{Filter, Layer};
 
     let filter = EnvFilter::new("hello_world=info");
-    filter.max_level_hint();
+    let _hint = filter.max_level_hint();
 }
 
 #[test]

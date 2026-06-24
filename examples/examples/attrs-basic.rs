@@ -1,6 +1,8 @@
+//! Example binary for tracing workspace checks.
+
 #![deny(rust_2018_idioms)]
 
-use tracing::{Level, debug, info, span};
+use tracing::{debug, info, span, Level};
 use tracing_attributes::instrument;
 
 #[instrument]

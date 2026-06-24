@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
 use tracing_mock::*;
@@ -24,7 +26,7 @@ fn destructure_tuples() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         my_fn((1, 2));
     });
 
@@ -55,7 +57,7 @@ fn destructure_nested_tuples() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         my_fn(((1, 2), (3, 4)));
     });
 
@@ -80,7 +82,7 @@ fn destructure_refs() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         my_fn(&1);
     });
 
@@ -111,7 +113,7 @@ fn destructure_tuple_structs() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         my_fn(Foo(1, 2));
     });
 
@@ -152,7 +154,7 @@ fn destructure_structs() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         my_fn(Foo { bar: 1, baz: 2 });
     });
 
@@ -199,7 +201,7 @@ fn destructure_everything() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         let foo = Foo {
             bar: Bar((1, 2)),
             baz: (3, 4),

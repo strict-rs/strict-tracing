@@ -21,7 +21,7 @@ pub(crate) fn gen_function<'a, B: ToTokens + 'a>(
     args: InstrumentArgs,
     instrumented_function_name: &str,
     self_type: Option<&TypePath>,
-) -> proc_macro2::TokenStream {
+) -> TokenStream {
     // these are needed ahead of time, as ItemFn contains the function body _and_
     // isn't representable inside a quote!/quote_spanned! macro
     // (Syn's ToTokens isn't implemented for ItemFn)
@@ -131,7 +131,7 @@ fn gen_block<B: ToTokens>(
     mut args: InstrumentArgs,
     instrumented_function_name: &str,
     self_type: Option<&TypePath>,
-) -> proc_macro2::TokenStream {
+) -> TokenStream {
     // generate the span's name
     let span_name = args
         // did the user override the span's name?

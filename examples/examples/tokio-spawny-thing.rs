@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 #![deny(rust_2018_idioms)]
 /// This is a example showing how information is scoped with tokio's
 /// `task::spawn`.
@@ -8,7 +10,7 @@
 /// cargo run --example tokio-spawny-thing
 /// ```
 use futures::future::try_join_all;
-use tracing::{Instrument as _, Level, debug, info, instrument, span};
+use tracing::{debug, info, instrument, span, Instrument as _, Level};
 
 type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
 
@@ -37,7 +39,7 @@ async fn subtask(number: usize) -> usize {
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(Level::DEBUG)
         .try_init()?;
     parent_task(10).await?;
     Ok(())

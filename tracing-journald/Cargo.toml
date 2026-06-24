@@ -16,7 +16,7 @@ keywords = ["tracing", "journald"]
 rust-version.workspace = true
 
 [dependencies]
-libc = { workspace = true }
+rustix = { workspace = true }
 tracing-core = { workspace = true, default-features = true }
 tracing-subscriber = { workspace = true, features = ["registry"] }
 

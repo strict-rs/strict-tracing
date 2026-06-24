@@ -326,7 +326,7 @@ use crate::{
     field,
 };
 use core::{
-    cmp, fmt,
+    fmt,
     hash::{Hash, Hasher},
     marker::PhantomData,
     mem,
@@ -1213,9 +1213,10 @@ impl Span {
         if let Some(meta) = self.meta
             && let Some(field) = field.as_field(meta)
         {
-            let values = [(&field, Some(&value as &dyn field::Value))];
+            let value: &dyn field::Value = &value;
+            let values = [(&field, Some(value))];
             let value_set = meta.fields().value_set(&values);
-            self.record_all(&value_set);
+            let _span = self.record_all(&value_set);
         }
 
         self
@@ -1385,7 +1386,7 @@ impl Span {
     }
 }
 
-impl cmp::PartialEq for Span {
+impl PartialEq for Span {
     fn eq(&self, other: &Self) -> bool {
         match (&self.meta, &other.meta) {
             (Some(this), Some(that)) => {
@@ -1406,29 +1407,30 @@ impl fmt::Debug for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut span = f.debug_struct("Span");
         if let Some(meta) = self.meta {
-            span.field("name", &meta.name())
+            let _builder = span
+                .field("name", &meta.name())
                 .field("level", &meta.level())
                 .field("target", &meta.target());
 
             if let Some(ref inner) = self.inner {
-                span.field("id", &inner.id());
+                let _builder = span.field("id", &inner.id());
             } else {
-                span.field("disabled", &true);
+                let _builder = span.field("disabled", &true);
             }
 
             if let Some(ref path) = meta.module_path() {
-                span.field("module_path", &path);
+                let _builder = span.field("module_path", &path);
             }
 
             if let Some(ref line) = meta.line() {
-                span.field("line", &line);
+                let _builder = span.field("line", &line);
             }
 
             if let Some(ref file) = meta.file() {
-                span.field("file", &file);
+                let _builder = span.field("file", &file);
             }
         } else {
-            span.field("none", &true);
+            let _builder = span.field("none", &true);
         }
 
         span.finish()
@@ -1473,7 +1475,7 @@ impl Drop for Span {
             ref subscriber,
         }) = self.inner
         {
-            subscriber.try_close(id.clone());
+            let _closed = subscriber.try_close(id.clone());
         }
 
         if_log_enabled! { crate::Level::TRACE, {
@@ -1527,7 +1529,7 @@ impl Inner {
     }
 }
 
-impl cmp::PartialEq for Inner {
+impl PartialEq for Inner {
     fn eq(&self, other: &Self) -> bool {
         self.id == other.id
     }
@@ -1602,19 +1604,15 @@ impl Drop for EnteredSpan {
 /// it. However, we still want them to be `Sync` so that a struct holding an
 /// `Entered` guard can be `Sync`.
 ///
-/// Thus, this is totally safe.
+/// The marker stores `dyn Sync` in `PhantomData`, making it `Sync` but not
+/// `Send` without requiring an unsafe impl.
 #[derive(Debug)]
 struct PhantomNotSend {
-    ghost: PhantomData<*mut ()>,
+    ghost: PhantomData<dyn Sync>,
 }
 
 #[allow(non_upper_case_globals)]
 const PhantomNotSend: PhantomNotSend = PhantomNotSend { ghost: PhantomData };
-
-/// # Safety
-///
-/// Trivially safe, as `PhantomNotSend` doesn't have any API.
-unsafe impl Sync for PhantomNotSend {}
 
 #[cfg(test)]
 mod test {
@@ -1622,7 +1620,7 @@ mod test {
 
     #[test]
     fn test_record_backwards_compat() {
-        Span::current().record("some-key", "some text");
-        Span::current().record("some-key", false);
+        let _span = Span::current().record("some-key", "some text");
+        let _span = Span::current().record("some-key", false);
     }
 }

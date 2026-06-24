@@ -1,3 +1,5 @@
+//! Send-bound regression coverage for instrumented futures.
+
 // These tests reproduce the following issues:
 // - https://github.com/tokio-rs/tracing/issues/1487
 // - https://github.com/tokio-rs/tracing/issues/1793

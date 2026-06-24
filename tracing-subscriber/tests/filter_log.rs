@@ -1,3 +1,4 @@
+//! Tests log compatibility with subscriber filters.
 #![cfg(all(feature = "env-filter", feature = "tracing-log"))]
 
 use tracing::{self, Level};

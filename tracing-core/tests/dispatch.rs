@@ -1,4 +1,6 @@
+//! Thread-local dispatcher integration coverage.
 #![cfg(feature = "std")]
+
 mod common;
 
 use common::*;

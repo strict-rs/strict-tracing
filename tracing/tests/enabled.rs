@@ -1,4 +1,6 @@
 #![cfg(feature = "std")]
+//! Enabled macro and level-filter integration coverage.
+
 use tracing::{
     Level,
     level_filters::{LevelFilter, STATIC_MAX_LEVEL},

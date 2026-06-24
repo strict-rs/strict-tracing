@@ -1,12 +1,13 @@
 #![deny(warnings)]
+#![doc = "Macro expansion integration coverage."]
 // We call all macros in this module with `no_implicit_prelude` to ensure they do not depend on the standard prelude.
 #![no_implicit_prelude]
-extern crate tracing;
+extern crate tracing as tracing_crate;
 #[cfg(target_arch = "wasm32")]
 extern crate wasm_bindgen_test;
 
 use ::std::convert::From;
-use tracing::{
+use tracing_crate::{
     Level, callsite, debug, debug_span, enabled, error, error_span, event, event_enabled, field,
     info, info_span, record_all, span, span_enabled, trace, trace_span, warn, warn_span,
 };
@@ -1452,20 +1453,20 @@ fn callsite_macro_api() {
     // caused by changes to the macro.
     let _callsite = callsite! {
         name: "test callsite",
-        kind: tracing::metadata::Kind::EVENT,
+        kind: tracing_crate::metadata::Kind::EVENT,
         target: "test target",
-        level: tracing::Level::TRACE,
+        level: Level::TRACE,
         fields: foo, bar,
     };
     let _callsite = callsite! {
         name: "test callsite",
-        kind: tracing::metadata::Kind::SPAN,
-        level: tracing::Level::TRACE,
+        kind: tracing_crate::metadata::Kind::SPAN,
+        level: Level::TRACE,
         fields: foo,
     };
     let _callsite = callsite! {
         name: "test callsite",
-        kind: tracing::metadata::Kind::SPAN,
+        kind: tracing_crate::metadata::Kind::SPAN,
         fields: foo,
     };
 }

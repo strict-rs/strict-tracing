@@ -1,6 +1,9 @@
+//! Shared subscriber fixtures for dispatcher integration tests.
+
 use tracing_core::{Event, metadata::Metadata, span, subscriber::Subscriber};
 
-pub struct TestSubscriberA;
+/// Subscriber fixture used as the outer/global test subscriber.
+pub(crate) struct TestSubscriberA;
 impl Subscriber for TestSubscriberA {
     fn enabled(&self, _: &Metadata<'_>) -> bool {
         true
@@ -14,7 +17,10 @@ impl Subscriber for TestSubscriberA {
     fn enter(&self, _: &span::Id) {}
     fn exit(&self, _: &span::Id) {}
 }
-pub struct TestSubscriberB;
+/// Subscriber fixture used as the inner/scoped test subscriber.
+#[cfg(feature = "std")]
+pub(crate) struct TestSubscriberB;
+#[cfg(feature = "std")]
 impl Subscriber for TestSubscriberB {
     fn enabled(&self, _: &Metadata<'_>) -> bool {
         true

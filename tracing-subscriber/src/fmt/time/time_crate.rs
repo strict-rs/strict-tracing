@@ -60,7 +60,7 @@ pub struct UtcTime<F> {
 #[derive(Clone, Debug)]
 #[cfg_attr(docsrs, doc(cfg(feature = "time")))]
 pub struct OffsetTime<F> {
-    offset: time::UtcOffset,
+    offset: UtcOffset,
     format: F,
 }
 
@@ -368,7 +368,7 @@ impl OffsetTime<well_known::Rfc3339> {
     }
 }
 
-impl<F: time::formatting::Formattable> OffsetTime<F> {
+impl<F: Formattable> OffsetTime<F> {
     /// Returns a formatter that formats the current time using the [`time` crate] with the provided
     /// provided format and [timezone offset]. The format may be any type that implements the
     /// [`Formattable`] trait.
@@ -443,14 +443,14 @@ impl<F: time::formatting::Formattable> OffsetTime<F> {
     /// [`format_description!`]: https://docs.rs/time/0.3/time/macros/macro.format_description.html
     /// [`time::format_description::parse`]: time::format_description::parse
     /// [`time` book]: https://time-rs.github.io/book/api/format-description.html
-    pub fn new(offset: time::UtcOffset, format: F) -> Self {
+    pub fn new(offset: UtcOffset, format: F) -> Self {
         Self { offset, format }
     }
 }
 
 impl<F> FormatTime for OffsetTime<F>
 where
-    F: time::formatting::Formattable,
+    F: Formattable,
 {
     fn format_time(&self, w: &mut Writer<'_>) -> fmt::Result {
         let now = OffsetDateTime::now_utc().to_offset(self.offset);

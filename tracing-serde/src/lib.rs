@@ -206,6 +206,7 @@ use tracing_core::{
 
 pub mod fields;
 
+/// A `serde::Serialize` adapter for a tracing [`Field`].
 #[derive(Debug)]
 pub struct SerializeField<'a>(&'a Field);
 
@@ -218,6 +219,7 @@ impl Serialize for SerializeField<'_> {
     }
 }
 
+/// A `serde::Serialize` adapter for a tracing [`FieldSet`].
 #[derive(Debug)]
 pub struct SerializeFieldSet<'a>(&'a FieldSet);
 
@@ -234,6 +236,7 @@ impl Serialize for SerializeFieldSet<'_> {
     }
 }
 
+/// A `serde::Serialize` adapter for a tracing [`Level`].
 #[derive(Debug)]
 pub struct SerializeLevel<'a>(&'a Level);
 
@@ -258,6 +261,7 @@ impl Serialize for SerializeLevel<'_> {
     }
 }
 
+/// A `serde::Serialize` adapter for a tracing span [`Id`].
 #[derive(Debug)]
 pub struct SerializeId<'a>(&'a Id);
 
@@ -272,6 +276,7 @@ impl Serialize for SerializeId<'_> {
     }
 }
 
+/// A `serde::Serialize` adapter for tracing [`Metadata`].
 #[derive(Debug)]
 pub struct SerializeMetadata<'a>(&'a Metadata<'a>);
 
@@ -516,14 +521,16 @@ impl<S: SerializeStruct> SerdeStructVisitor<S> {
     }
 }
 
-pub trait AsSerde<'a>: self::sealed::Sealed {
-    type Serializable: serde::Serialize + 'a;
+/// Converts tracing values into serializable wrapper types.
+pub trait AsSerde<'a>: sealed::Sealed {
+    /// The `serde::Serialize` adapter returned for this value.
+    type Serializable: Serialize + 'a;
 
     /// `as_serde` borrows a `tracing` value and returns the serialized value.
     fn as_serde(&'a self) -> Self::Serializable;
 }
 
-impl<'a> AsSerde<'a> for tracing_core::Metadata<'a> {
+impl<'a> AsSerde<'a> for Metadata<'a> {
     type Serializable = SerializeMetadata<'a>;
 
     fn as_serde(&'a self) -> Self::Serializable {
@@ -531,7 +538,7 @@ impl<'a> AsSerde<'a> for tracing_core::Metadata<'a> {
     }
 }
 
-impl<'a> AsSerde<'a> for tracing_core::Event<'a> {
+impl<'a> AsSerde<'a> for Event<'a> {
     type Serializable = SerializeEvent<'a>;
 
     fn as_serde(&'a self) -> Self::Serializable {
@@ -539,7 +546,7 @@ impl<'a> AsSerde<'a> for tracing_core::Event<'a> {
     }
 }
 
-impl<'a> AsSerde<'a> for tracing_core::span::Attributes<'a> {
+impl<'a> AsSerde<'a> for Attributes<'a> {
     type Serializable = SerializeAttributes<'a>;
 
     fn as_serde(&'a self) -> Self::Serializable {
@@ -547,7 +554,7 @@ impl<'a> AsSerde<'a> for tracing_core::span::Attributes<'a> {
     }
 }
 
-impl<'a> AsSerde<'a> for tracing_core::span::Id {
+impl<'a> AsSerde<'a> for Id {
     type Serializable = SerializeId<'a>;
 
     fn as_serde(&'a self) -> Self::Serializable {
@@ -555,7 +562,7 @@ impl<'a> AsSerde<'a> for tracing_core::span::Id {
     }
 }
 
-impl<'a> AsSerde<'a> for tracing_core::span::Record<'a> {
+impl<'a> AsSerde<'a> for Record<'a> {
     type Serializable = SerializeRecord<'a>;
 
     fn as_serde(&'a self) -> Self::Serializable {
@@ -587,21 +594,21 @@ impl<'a> AsSerde<'a> for FieldSet {
     }
 }
 
-impl self::sealed::Sealed for Event<'_> {}
+impl sealed::Sealed for Event<'_> {}
 
-impl self::sealed::Sealed for Attributes<'_> {}
+impl sealed::Sealed for Attributes<'_> {}
 
-impl self::sealed::Sealed for Id {}
+impl sealed::Sealed for Id {}
 
-impl self::sealed::Sealed for Level {}
+impl sealed::Sealed for Level {}
 
-impl self::sealed::Sealed for Record<'_> {}
+impl sealed::Sealed for Record<'_> {}
 
-impl self::sealed::Sealed for Metadata<'_> {}
+impl sealed::Sealed for Metadata<'_> {}
 
-impl self::sealed::Sealed for Field {}
+impl sealed::Sealed for Field {}
 
-impl self::sealed::Sealed for FieldSet {}
+impl sealed::Sealed for FieldSet {}
 
 mod sealed {
     pub trait Sealed {}

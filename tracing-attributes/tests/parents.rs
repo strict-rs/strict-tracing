@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use tracing::{Id, Level, subscriber::with_default};
 use tracing_attributes::instrument;
 use tracing_mock::*;
@@ -38,7 +40,7 @@ fn default_parent_test() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         let contextual_parent = tracing::span!(Level::TRACE, "contextual_parent");
 
         with_default_parent();
@@ -76,7 +78,7 @@ fn explicit_parent_test() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         let contextual_parent = tracing::span!(Level::INFO, "contextual_parent");
         let explicit_parent = tracing::span!(Level::INFO, "explicit_parent");
 

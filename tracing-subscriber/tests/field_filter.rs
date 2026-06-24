@@ -1,3 +1,4 @@
+//! Tests filtering by field values.
 #![cfg(feature = "env-filter")]
 
 use tracing::{self, Level, subscriber::with_default};
@@ -103,7 +104,7 @@ fn record_after_created() {
             tracing::debug!("i'm disabled!");
         });
 
-        span.record("enabled", true);
+        let _span = span.record("enabled", true);
         span.in_scope(|| {
             tracing::debug!("i'm enabled!");
         });

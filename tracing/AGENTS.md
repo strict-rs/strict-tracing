@@ -4,12 +4,12 @@
 
 ## Architecture
 
-- `macros.rs` (the bulk of the crate, ~3k lines) defines the user-facing macros: `event!`/`span!` and their level shorthands (`trace!`..`error!`, `trace_span!`..`error_span!`). They expand to a static `DefaultCallsite` + `Metadata` per call site and consult `Interest`/`STATIC_MAX_LEVEL` before constructing anything, so disabled instrumentation costs nothing.
+- `macros.rs` (the bulk of the crate, ~3k lines) defines the user-facing macros: `event!`/`span!` and their level shorthands (`trace!`..`error!`, `trace_span!`..`error_span!`). They expand to a static `DefaultCallsite` + `Metadata` per call site and consult `Interest`/`STATIC_MAX_LEVEL` before constructing anything, so disabled instrumentation costs nothing. Macro-generated field values are borrowed by `ValueSet`; when touching expansion code, make sure temporaries live through the dispatch/record call rather than adding call-site-specific workarounds.
 - `span.rs` defines `Span` (the central handle) plus its RAII guards: `Entered<'a>` (borrowed, from `enter()`), `EnteredSpan` (owned, from `entered()`), and the `in_scope()` closure form. A `Span` holds an optional `Id` + `&'static Metadata`; entering/exiting drives the active `Dispatch`.
 - `instrument.rs` defines the future combinators: the `Instrument` trait (attach a `Span` to a `Future` → `Instrumented<T>`, entered on every poll/drop) and `WithSubscriber` (attach a `Dispatch` → `WithDispatch<T>`). Both use `pin-project-lite`.
 - Thin re-export modules over `tracing-core`: `dispatcher` (`Dispatch`, `set_default`/`with_default`/`set_global_default`), `field` (`Value`, `Empty`, `field::debug`/`display`), `subscriber` (`Subscriber`, `set_default`/`with_default` taking an owned subscriber), `level_filters`, `event`.
 - `level_filters.rs` computes `STATIC_MAX_LEVEL` at compile time from the `max_level_*` / `release_max_level_*` features (release set wins in non-debug builds; most-permissive enabled feature wins since features are additive).
-- `__macro_support` and `log` are `#[doc(hidden)]` private APIs invoked only by the macros — not semver-stable despite being `pub`.
+- `__macro_support` and `log` are `#[doc(hidden)]` private APIs invoked only by the macros — not semver-stable despite being `pub`. `__macro_support::FieldName::as_str` now uses checked UTF-8 instead of an unsafe unchecked conversion.
 
 ## Features
 
@@ -31,4 +31,4 @@
 ## Gotchas
 
 - `#![no_std]` crate; `std` only adds the `extern crate std` paths. Keep new code `core`/`alloc`-only unless behind `#[cfg(feature = "std")]`.
-- The `__macro_support::FieldName` const fn uses `unsafe { str::from_utf8_unchecked }` to strip `r#` from raw-identifier field names at compile time — its safety rests on the private field having been built by `FieldName::new`.
+- `Instrumented<T>` uses `ManuallyDrop` so it can enter the span while dropping or projecting the wrapped future. The remaining unsafe projection/drop code is locally allowed under `TODO(unsafe-forbid)` reasons; keep those blocks small and do not bypass the pin/drop invariants.

@@ -46,7 +46,7 @@ fn inner_layer_short_circuits() {
         // Note: we don't just use a `LevelFilter` for the global filter here,
         // because it will just return a max level filter, and the chain of
         // `register_callsite` calls that would trigger the bug never happens...
-        .with(filter::filter_fn(|meta| meta.level() <= &Level::INFO))
+        .with(filter_fn(|meta| meta.level() <= &Level::INFO))
         .with(layer.with_filter(filter));
     let _guard = tracing::subscriber::set_default(subscriber);
 

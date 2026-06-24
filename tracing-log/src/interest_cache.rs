@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// The interest cache configuration.
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct InterestCacheConfig {
     min_verbosity: Level,
     lru_cache_size: usize,
@@ -123,7 +123,7 @@ struct SentinelCallsite;
 
 impl tracing_core::Callsite for SentinelCallsite {
     fn set_interest(&self, _: tracing_core::subscriber::Interest) {
-        INTEREST_CACHE_EPOCH.fetch_add(1, Ordering::SeqCst);
+        let _previous_epoch = INTEREST_CACHE_EPOCH.fetch_add(1, Ordering::SeqCst);
     }
 
     fn metadata(&self) -> &tracing_core::Metadata<'_> {
@@ -157,7 +157,7 @@ thread_local! {
 
 pub(crate) fn configure(new_config: Option<InterestCacheConfig>) {
     *CONFIG.lock().unwrap() = new_config.unwrap_or_else(InterestCacheConfig::disabled);
-    INTEREST_CACHE_EPOCH.fetch_add(1, Ordering::SeqCst);
+    let _previous_epoch = INTEREST_CACHE_EPOCH.fetch_add(1, Ordering::SeqCst);
 }
 
 pub(crate) fn try_cache(metadata: &Metadata<'_>, callback: impl FnOnce() -> bool) -> bool {
@@ -228,7 +228,7 @@ pub(crate) fn try_cache(metadata: &Metadata<'_>, callback: impl FnOnce() -> bool
         }
 
         let interest = callback();
-        cache.put(key, target_hash | interest as u64);
+        let _previous = cache.put(key, target_hash | interest as u64);
 
         interest
     })
@@ -260,12 +260,12 @@ mod tests {
                 .target("dummy")
                 .build();
             let mut count = 0;
-            try_cache(&metadata, || {
+            let _cached = try_cache(&metadata, || {
                 count += 1;
                 true
             });
             assert_eq!(count, 1);
-            try_cache(&metadata, || {
+            let _cached = try_cache(&metadata, || {
                 count += 1;
                 true
             });
@@ -287,12 +287,12 @@ mod tests {
                 .target("dummy")
                 .build();
             let mut count = 0;
-            try_cache(&metadata, || {
+            let _cached = try_cache(&metadata, || {
                 count += 1;
                 true
             });
             assert_eq!(count, 1);
-            try_cache(&metadata, || {
+            let _cached = try_cache(&metadata, || {
                 count += 1;
                 true
             });
@@ -315,11 +315,11 @@ mod tests {
                 .build();
             {
                 let mut count = 0;
-                try_cache(&metadata, || {
+                let _cached = try_cache(&metadata, || {
                     count += 1;
                     true
                 });
-                try_cache(&metadata, || {
+                let _cached = try_cache(&metadata, || {
                     count += 1;
                     true
                 });
@@ -328,11 +328,11 @@ mod tests {
             tracing_core::callsite::rebuild_interest_cache();
             {
                 let mut count = 0;
-                try_cache(&metadata, || {
+                let _cached = try_cache(&metadata, || {
                     count += 1;
                     true
                 });
-                try_cache(&metadata, || {
+                let _cached = try_cache(&metadata, || {
                     count += 1;
                     true
                 });
@@ -355,12 +355,12 @@ mod tests {
                 .target("dummy")
                 .build();
             let mut count = 0;
-            try_cache(&metadata, || {
+            let _cached = try_cache(&metadata, || {
                 count += 1;
                 true
             });
             assert_eq!(count, 1);
-            try_cache(&metadata, || {
+            let _cached = try_cache(&metadata, || {
                 count += 1;
                 true
             });
@@ -387,19 +387,19 @@ mod tests {
                 .build();
             let mut count_debug = 0;
             let mut count_trace = 0;
-            try_cache(&metadata_debug, || {
+            let _cached = try_cache(&metadata_debug, || {
                 count_debug += 1;
                 true
             });
-            try_cache(&metadata_trace, || {
+            let _cached = try_cache(&metadata_trace, || {
                 count_trace += 1;
                 true
             });
-            try_cache(&metadata_debug, || {
+            let _cached = try_cache(&metadata_debug, || {
                 count_debug += 1;
                 true
             });
-            try_cache(&metadata_trace, || {
+            let _cached = try_cache(&metadata_trace, || {
                 count_trace += 1;
                 true
             });
@@ -427,19 +427,19 @@ mod tests {
                 .build();
             let mut count_1 = 0;
             let mut count_2 = 0;
-            try_cache(&metadata_1, || {
+            let _cached = try_cache(&metadata_1, || {
                 count_1 += 1;
                 true
             });
-            try_cache(&metadata_2, || {
+            let _cached = try_cache(&metadata_2, || {
                 count_2 += 1;
                 true
             });
-            try_cache(&metadata_1, || {
+            let _cached = try_cache(&metadata_1, || {
                 count_1 += 1;
                 true
             });
-            try_cache(&metadata_2, || {
+            let _cached = try_cache(&metadata_2, || {
                 count_2 += 1;
                 true
             });
@@ -468,17 +468,17 @@ mod tests {
                 .target("dummy_2")
                 .build();
             let mut count = 0;
-            try_cache(&metadata_1, || {
+            let _cached = try_cache(&metadata_1, || {
                 count += 1;
                 true
             });
-            try_cache(&metadata_1, || {
+            let _cached = try_cache(&metadata_1, || {
                 count += 1;
                 true
             });
             assert_eq!(count, 1);
-            try_cache(&metadata_2, || true);
-            try_cache(&metadata_1, || {
+            let _cached = try_cache(&metadata_2, || true);
+            let _cached = try_cache(&metadata_1, || {
                 count += 1;
                 true
             });
@@ -503,9 +503,9 @@ mod tests {
                 .level(Level::Trace)
                 .target("dummy_2")
                 .build();
-            try_cache(&metadata_1, || true);
+            let _cached = try_cache(&metadata_1, || true);
             assert!(try_cache(&metadata_1, || { unreachable!() }));
-            try_cache(&metadata_2, || false);
+            let _cached = try_cache(&metadata_2, || false);
             assert!(!try_cache(&metadata_2, || { unreachable!() }));
         })
         .join()
@@ -525,7 +525,7 @@ mod tests {
                 .target(std::str::from_utf8(&target).unwrap())
                 .build();
 
-            try_cache(&metadata_1, || true);
+            let _cached = try_cache(&metadata_1, || true);
             assert!(try_cache(&metadata_1, || { unreachable!() }));
 
             *target.last_mut().unwrap() = b'2';
@@ -534,7 +534,7 @@ mod tests {
                 .target(std::str::from_utf8(&target).unwrap())
                 .build();
 
-            try_cache(&metadata_2, || false);
+            let _cached = try_cache(&metadata_2, || false);
             assert!(!try_cache(&metadata_2, || { unreachable!() }));
         })
         .join()

@@ -668,7 +668,7 @@ mod tests {
 
     #[test]
     fn parse_ralith_mixed() {
-        expect_parse("common=iNfo,server=dEbUg");
+        let _targets = expect_parse("common=iNfo,server=dEbUg");
     }
 
     #[test]
@@ -775,14 +775,14 @@ mod tests {
     // `println!` is only available with `libstd`.
     #[cfg(feature = "std")]
     fn size_of_filters() {
-        use std::println;
+        use std::{mem::size_of_val, println};
 
         fn print_sz(s: &str) {
             let filter = s.parse::<Targets>().expect("filter should parse");
             println!(
                 "size_of_val({:?})\n -> {}B",
                 s,
-                std::mem::size_of_val(&filter)
+                size_of_val(&filter)
             );
         }
 

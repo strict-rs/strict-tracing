@@ -1,3 +1,5 @@
+//! Local dispatcher lookup coverage before global initialization.
+
 mod common;
 
 use common::*;

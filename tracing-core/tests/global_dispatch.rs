@@ -1,3 +1,5 @@
+//! Global dispatcher integration coverage.
+
 mod common;
 
 use common::*;
@@ -29,6 +31,6 @@ fn global_dispatch() {
         )
     });
 
-    set_global_default(Dispatch::new(TestSubscriberA))
+    let _error = set_global_default(Dispatch::new(TestSubscriberA))
         .expect_err("double global dispatch set succeeded");
 }

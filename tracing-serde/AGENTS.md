@@ -4,8 +4,8 @@
 
 ## Architecture
 
-- `lib.rs` — the `AsSerde<'a>` extension trait (sealed) adds `.as_serde()` to `Metadata`, `Event`, `span::{Attributes, Id, Record}`, `Level`, `Field`, and `FieldSet`, each returning a thin `Serialize` newtype wrapper: `SerializeMetadata`, `SerializeEvent`, `SerializeAttributes`, `SerializeId`, `SerializeRecord`, `SerializeLevel`, `SerializeField`, `SerializeFieldSet`. Because `tracing` values expose their fields only through the visitor pattern, two adapters bridge `tracing_core::field::Visit` onto serde: `SerdeMapVisitor<S: SerializeMap>` and `SerdeStructVisitor<S: SerializeStruct>`. Both short-circuit: once a `record_*` call errors, `state` holds it and later fields are skipped; `finish()` returns that error. `SerdeMapVisitor` is `pub` with `new()`/`finish()`/`take_serializer()` for downstream reuse.
-- `fields.rs` — the `AsMap` trait (also sealed) adds `.field_map()` returning `SerializeFieldMap<'a, T>`, which serializes just an item's fields as a serde map (for `Event`/`Attributes`/`Record`), as opposed to the whole metadata struct.
+- `lib.rs` — the `AsSerde<'a>` extension trait (sealed) adds `.as_serde()` to `Metadata`, `Event`, `span::{Attributes, Id, Record}`, `Level`, `Field`, and `FieldSet`, each returning a documented thin `Serialize` newtype wrapper: `SerializeMetadata`, `SerializeEvent`, `SerializeAttributes`, `SerializeId`, `SerializeRecord`, `SerializeLevel`, `SerializeField`, `SerializeFieldSet`. Because `tracing` values expose their fields only through the visitor pattern, two adapters bridge `tracing_core::field::Visit` onto serde: `SerdeMapVisitor<S: SerializeMap>` and `SerdeStructVisitor<S: SerializeStruct>`. Both short-circuit: once a `record_*` call errors, `state` holds it and later fields are skipped; `finish()` returns that error. `SerdeMapVisitor` is `pub` with `new()`/`finish()`/`take_serializer()` for downstream reuse.
+- `fields.rs` — the `AsMap` trait (also sealed) adds `.field_map()` returning the documented `SerializeFieldMap<'a, T>`, which serializes just an item's fields as a serde map (for `Event`/`Attributes`/`Record`), as opposed to the whole metadata struct.
 
 ## Features
 

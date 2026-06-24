@@ -110,6 +110,8 @@ use core::{
     pin::Pin,
     task::Context,
 };
+#[cfg(feature = "std-future")]
+use stdlib::{future::Future, task::Poll};
 
 #[cfg(feature = "std")]
 use tracing::{Dispatch, dispatcher};
@@ -262,6 +264,10 @@ pin_project! {
     }
 
     impl<T> PinnedDrop for Instrumented<T> {
+        #[allow(
+            unsafe_code,
+            reason = "TODO(unsafe-forbid): preserve infallible Instrumented<T> API until fallible Option<T> redesign"
+        )]
         fn drop(this: Pin<&mut Self>) {
             let this = this.project();
             let _enter = this.span.enter();
@@ -281,6 +287,10 @@ pin_project! {
 impl<'a, T> InstrumentedProj<'a, T> {
     /// Get a mutable reference to the [`Span`] a pinned mutable reference to
     /// the wrapped type.
+    #[allow(
+        unsafe_code,
+        reason = "TODO(unsafe-forbid): preserve infallible Instrumented<T> pin projection until a fallible projection API replaces it"
+    )]
     fn span_and_inner_pin_mut(self) -> (&'a mut Span, Pin<&'a mut T>) {
         // SAFETY: As long as `ManuallyDrop<T>` does not move, `T` won't move
         //         and `inner` is valid, because `ManuallyDrop::drop` is called
@@ -293,6 +303,10 @@ impl<'a, T> InstrumentedProj<'a, T> {
 #[cfg(feature = "std-future")]
 impl<'a, T> InstrumentedProjRef<'a, T> {
     /// Get a reference to the [`Span`] a pinned reference to the wrapped type.
+    #[allow(
+        unsafe_code,
+        reason = "TODO(unsafe-forbid): preserve infallible Instrumented<T> pin projection until a fallible projection API replaces it"
+    )]
     fn span_and_inner_pin_ref(self) -> (&'a Span, Pin<&'a T>) {
         // SAFETY: As long as `ManuallyDrop<T>` does not move, `T` won't move
         //         and `inner` is valid, because `ManuallyDrop::drop` is called
@@ -337,10 +351,10 @@ impl<T: Sized> Instrument for T {}
 
 #[cfg(feature = "std-future")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std-future")))]
-impl<T: crate::stdlib::future::Future> crate::stdlib::future::Future for Instrumented<T> {
+impl<T: Future> Future for Instrumented<T> {
     type Output = T::Output;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> core::task::Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let (span, inner) = self.project().span_and_inner_pin_mut();
         let _enter = span.enter();
         inner.poll(cx)
@@ -396,10 +410,7 @@ impl<T: futures_01::Sink> futures_01::Sink for Instrumented<T> {
 impl<T: futures::Stream> futures::Stream for Instrumented<T> {
     type Item = T::Item;
 
-    fn poll_next(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> futures::task::Poll<Option<Self::Item>> {
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let (span, inner) = self.project().span_and_inner_pin_mut();
         let _enter = span.enter();
         T::poll_next(inner, cx)
@@ -414,10 +425,7 @@ where
 {
     type Error = T::Error;
 
-    fn poll_ready(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> futures::task::Poll<Result<(), Self::Error>> {
+    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let (span, inner) = self.project().span_and_inner_pin_mut();
         let _enter = span.enter();
         T::poll_ready(inner, cx)
@@ -429,19 +437,13 @@ where
         T::start_send(inner, item)
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> futures::task::Poll<Result<(), Self::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let (span, inner) = self.project().span_and_inner_pin_mut();
         let _enter = span.enter();
         T::poll_flush(inner, cx)
     }
 
-    fn poll_close(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> futures::task::Poll<Result<(), Self::Error>> {
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let (span, inner) = self.project().span_and_inner_pin_mut();
         let _enter = span.enter();
         T::poll_close(inner, cx)
@@ -496,6 +498,10 @@ impl<T> Instrumented<T> {
     /// Consumes the `Instrumented`, returning the wrapped type.
     ///
     /// Note that this drops the span.
+    #[allow(
+        unsafe_code,
+        reason = "TODO(unsafe-forbid): preserve Instrumented<T>::into_inner until fallible API"
+    )]
     pub fn into_inner(self) -> T {
         #[cfg(feature = "std-future")]
         {
@@ -534,10 +540,10 @@ impl<T: futures_01::Future> futures_01::Future for WithDispatch<T> {
 
 #[cfg(all(feature = "std-future", feature = "std"))]
 #[cfg_attr(docsrs, doc(cfg(all(feature = "std-future", feature = "std"))))]
-impl<T: crate::stdlib::future::Future> crate::stdlib::future::Future for WithDispatch<T> {
+impl<T: Future> Future for WithDispatch<T> {
     type Output = T::Output;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> crate::stdlib::task::Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.project();
         let dispatch = this.dispatch;
         let future = this.inner;
@@ -626,7 +632,7 @@ mod tests {
             }
         }
 
-        impl<T, E> futures_01::Future for PollN<T, E> {
+        impl<T, E> Future for PollN<T, E> {
             type Item = T;
             type Error = E;
             fn poll(&mut self) -> futures_01::Poll<Self::Item, Self::Error> {

@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use tracing::Level;
 
 fn main() {

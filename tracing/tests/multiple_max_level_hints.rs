@@ -1,4 +1,5 @@
 #![cfg(feature = "std")]
+//! Multiple maximum-level hint coverage.
 
 use tracing::Level;
 use tracing_mock::*;

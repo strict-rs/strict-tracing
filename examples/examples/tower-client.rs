@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use bytes::Bytes;
 use http::{Method, Request, Uri};
 use http_body_util::Empty;

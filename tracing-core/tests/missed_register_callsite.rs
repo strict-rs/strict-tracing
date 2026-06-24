@@ -1,3 +1,6 @@
+//! Regression coverage for callsites registered during concurrent dispatch setup.
+#![cfg(feature = "std")]
+
 use std::{
     ptr,
     sync::atomic::{AtomicPtr, Ordering},
@@ -15,7 +18,7 @@ use tracing_core::{
 
 struct TestSubscriber {
     sleep: Duration,
-    callsite: AtomicPtr<Metadata<'static>>,
+    callsite: AtomicPtr<()>,
 }
 
 impl TestSubscriber {
@@ -33,15 +36,15 @@ impl Subscriber for TestSubscriber {
             thread::sleep(self.sleep);
         }
 
-        self.callsite
-            .store(metadata as *const _ as *mut _, Ordering::SeqCst);
+        let metadata_ptr = ptr::from_ref(metadata).cast::<()>().cast_mut();
+        self.callsite.store(metadata_ptr, Ordering::SeqCst);
 
         tracing_core::Interest::always()
     }
 
-    fn event(&self, event: &tracing_core::Event<'_>) {
+    fn event(&self, event: &Event<'_>) {
         let stored_callsite = self.callsite.load(Ordering::SeqCst);
-        let event_callsite: *mut Metadata<'static> = event.metadata() as *const _ as *mut _;
+        let event_callsite = ptr::from_ref(event.metadata()).cast::<()>().cast_mut();
 
         // This assert is the actual test.
         assert_eq!(
@@ -60,8 +63,8 @@ impl Subscriber for TestSubscriber {
     }
     fn record(&self, _span: &span::Id, _values: &span::Record<'_>) {}
     fn record_follows_from(&self, _span: &span::Id, _follows: &span::Id) {}
-    fn enter(&self, _span: &tracing_core::span::Id) {}
-    fn exit(&self, _span: &tracing_core::span::Id) {}
+    fn enter(&self, _span: &span::Id) {}
+    fn exit(&self, _span: &span::Id) {}
 }
 
 fn subscriber_thread(idx: usize, register_sleep_micros: u64) -> JoinHandle<()> {
@@ -91,7 +94,8 @@ fn subscriber_thread(idx: usize, register_sleep_micros: u64) -> JoinHandle<()> {
             let meta = CALLSITE.metadata();
             let field = meta.fields().field("message").unwrap();
             let message = format!("event-from-{idx}", idx = idx);
-            let values = [(&field, Some(&message as &dyn Value))];
+            let message_value: &dyn Value = &message;
+            let values = [(&field, Some(message_value))];
             let value_set = CALLSITE.metadata().fields().value_set(&values);
 
             Event::dispatch(meta, &value_set);

@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 // Only test on stable, since UI tests are bound to change over time
 
 #[rustversion::stable]

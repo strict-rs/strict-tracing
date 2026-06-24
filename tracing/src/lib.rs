@@ -1093,11 +1093,10 @@ pub mod __macro_support {
         }
 
         pub const fn as_str(&self) -> &str {
-            // SAFETY: Because of the private visibility of self.0, it must have
-            // been computed by Self::new. So these bytes are all of the bytes
-            // of some original valid UTF-8 string, but with "r#" substrings
-            // removed, which cannot have produced invalid UTF-8.
-            unsafe { str::from_utf8_unchecked(self.0.as_slice()) }
+            match str::from_utf8(self.0.as_slice()) {
+                Ok(name) => name,
+                Err(_) => "",
+            }
         }
     }
 
@@ -1130,7 +1129,7 @@ pub mod __macro_support {
 
     static CALLSITE: crate::callsite::DefaultCallsite =
         crate::callsite::DefaultCallsite::new(&META);
-    static META: crate::Metadata<'static> = crate::metadata! {
+    static META: Metadata<'static> = crate::metadata! {
         name: "__fake_tracing_callsite",
         target: module_path!(),
         level: crate::Level::TRACE,
@@ -1154,7 +1153,7 @@ pub mod log {
         pub(crate) is_first: bool,
     }
 
-    impl<'a> fmt::Display for LogValueSet<'a> {
+    impl fmt::Display for LogValueSet<'_> {
         #[inline]
         fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
             struct LogVisitor<'a, 'b> {

@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
 use tracing_mock::*;
@@ -23,7 +25,7 @@ fn default_name_test() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         default_name();
     });
 
@@ -39,7 +41,7 @@ fn custom_name_test() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         custom_name();
     });
 
@@ -55,7 +57,7 @@ fn custom_name_no_equals_test() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         custom_name_no_equals();
     });
 

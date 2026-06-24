@@ -1,3 +1,4 @@
+//! Tests vector-backed layer composition.
 #![cfg(feature = "registry")]
 use tracing::Subscriber;
 use tracing::level_filters::LevelFilter;

@@ -38,7 +38,7 @@ use crate::{
 
 use std::fmt::{self, Debug, Display, Write};
 use tracing_core::{
-    field::{self, Field, Visit},
+    field::{Field, Visit},
     span, Event, Level, Subscriber,
 };
 
@@ -286,7 +286,7 @@ pub fn json() -> Format<Json> {
 ///
 pub fn debug_fn<F>(f: F) -> FieldFn<F>
 where
-    F: Fn(&mut Writer<'_>, &Field, &dyn fmt::Debug) -> fmt::Result + Clone,
+    F: Fn(&mut Writer<'_>, &Field, &dyn Debug) -> fmt::Result + Clone,
 {
     FieldFn(f)
 }
@@ -307,7 +307,7 @@ where
 ///
 /// [fields]: tracing_core::field
 pub struct Writer<'writer> {
-    writer: &'writer mut dyn fmt::Write,
+    writer: &'writer mut dyn Write,
     // TODO(eliza): add ANSI support
     is_ansi: bool,
     ansi_sanitization: bool,
@@ -438,9 +438,10 @@ impl<'writer> Writer<'writer> {
     ///
     /// [`String`]: alloc::string::String
     #[must_use]
-    pub fn new(writer: &'writer mut impl fmt::Write) -> Self {
+    pub fn new(writer: &'writer mut impl Write) -> Self {
+        let writer: &mut dyn Write = writer;
         Self {
-            writer: writer as &mut dyn fmt::Write,
+            writer,
             is_ansi: false,
             ansi_sanitization: true,
         }
@@ -466,8 +467,9 @@ impl<'writer> Writer<'writer> {
     pub fn by_ref(&mut self) -> Writer<'_> {
         let is_ansi = self.is_ansi;
         let ansi_sanitization = self.ansi_sanitization;
+        let writer: &mut dyn Write = self;
         Writer {
-            writer: self as &mut dyn fmt::Write,
+            writer,
             is_ansi,
             ansi_sanitization,
         }
@@ -581,7 +583,7 @@ impl<'writer> Writer<'writer> {
     }
 }
 
-impl fmt::Write for Writer<'_> {
+impl Write for Writer<'_> {
     #[inline]
     fn write_str(&mut self, s: &str) -> fmt::Result {
         Writer::write_str(self, s)
@@ -598,7 +600,7 @@ impl fmt::Write for Writer<'_> {
     }
 }
 
-impl fmt::Debug for Writer<'_> {
+impl Debug for Writer<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Writer")
             .field("writer", &format_args!("<&mut dyn fmt::Write>"))
@@ -1194,7 +1196,7 @@ where
 
 /// The default [`FormatFields`] implementation.
 ///
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct DefaultFields {
     // reserve the ability to add fields to this without causing a breaking
     // change in the future.
@@ -1260,7 +1262,7 @@ impl<'a> DefaultVisitor<'a> {
     }
 }
 
-impl field::Visit for DefaultVisitor<'_> {
+impl Visit for DefaultVisitor<'_> {
     fn record_str(&mut self, field: &Field, value: &str) {
         if self.result.is_err() {
             return;
@@ -1296,7 +1298,7 @@ impl field::Visit for DefaultVisitor<'_> {
         }
     }
 
-    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
         if self.result.is_err() {
             return;
         }
@@ -1340,14 +1342,14 @@ impl field::Visit for DefaultVisitor<'_> {
     }
 }
 
-impl crate::field::VisitOutput<fmt::Result> for DefaultVisitor<'_> {
+impl VisitOutput<fmt::Result> for DefaultVisitor<'_> {
     fn finish(self) -> fmt::Result {
         self.result
     }
 }
 
-impl crate::field::VisitFmt for DefaultVisitor<'_> {
-    fn writer(&mut self) -> &mut dyn fmt::Write {
+impl VisitFmt for DefaultVisitor<'_> {
+    fn writer(&mut self) -> &mut dyn Write {
         &mut self.writer
     }
 }
@@ -1372,7 +1374,7 @@ impl Display for ErrorSourceList<'_> {
         let mut list = f.debug_list();
         let mut curr = Some(self.error);
         while let Some(curr_err) = curr {
-            list.entry(&EscapeGuard::new(
+            let _list = list.entry(&EscapeGuard::new(
                 format_args!("{}", curr_err),
                 self.ansi_sanitization,
             ));
@@ -1420,7 +1422,7 @@ where
     }
 }
 
-impl<'a, S, N: 'a> fmt::Display for FmtCtx<'a, S, N>
+impl<'a, S, N: 'a> Display for FmtCtx<'a, S, N>
 where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
     N: for<'writer> FormatFields<'writer> + 'static,
@@ -1457,19 +1459,15 @@ impl Style {
         Style
     }
 
-    fn bold(self) -> Self {
-        self
-    }
-
-    fn paint(&self, d: impl fmt::Display) -> impl fmt::Display {
+    fn paint(&self, d: impl Display) -> impl Display {
         d
     }
 
-    fn prefix(&self) -> impl fmt::Display {
+    fn prefix(&self) -> impl Display {
         ""
     }
 
-    fn suffix(&self) -> impl fmt::Display {
+    fn suffix(&self) -> impl Display {
         ""
     }
 }
@@ -1484,7 +1482,7 @@ impl<'a> FmtThreadName<'a> {
     }
 }
 
-impl fmt::Display for FmtThreadName<'_> {
+impl Display for FmtThreadName<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use std::sync::atomic::{
             AtomicUsize,
@@ -1542,7 +1540,7 @@ const WARN_STR: &str = " WARN";
 const ERROR_STR: &str = "ERROR";
 
 #[cfg(not(feature = "ansi"))]
-impl<'a> fmt::Display for FmtLevel<'a> {
+impl Display for FmtLevel<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self.level {
             Level::TRACE => f.pad(TRACE_STR),
@@ -1555,7 +1553,7 @@ impl<'a> fmt::Display for FmtLevel<'a> {
 }
 
 #[cfg(feature = "ansi")]
-impl fmt::Display for FmtLevel<'_> {
+impl Display for FmtLevel<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if self.ansi {
             match *self.level {
@@ -1581,7 +1579,7 @@ impl fmt::Display for FmtLevel<'_> {
 
 impl<'a, F> MakeVisitor<Writer<'a>> for FieldFn<F>
 where
-    F: Fn(&mut Writer<'a>, &Field, &dyn fmt::Debug) -> fmt::Result + Clone,
+    F: Fn(&mut Writer<'a>, &Field, &dyn Debug) -> fmt::Result + Clone,
 {
     type Visitor = FieldFnVisitor<'a, F>;
 
@@ -1596,9 +1594,9 @@ where
 
 impl<'a, F> Visit for FieldFnVisitor<'a, F>
 where
-    F: Fn(&mut Writer<'a>, &Field, &dyn fmt::Debug) -> fmt::Result,
+    F: Fn(&mut Writer<'a>, &Field, &dyn Debug) -> fmt::Result,
 {
-    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
         if self.result.is_ok() {
             self.result = (self.f)(&mut self.writer, field, value)
         }
@@ -1607,7 +1605,7 @@ where
 
 impl<'a, F> VisitOutput<fmt::Result> for FieldFnVisitor<'a, F>
 where
-    F: Fn(&mut Writer<'a>, &Field, &dyn fmt::Debug) -> fmt::Result,
+    F: Fn(&mut Writer<'a>, &Field, &dyn Debug) -> fmt::Result,
 {
     fn finish(self) -> fmt::Result {
         self.result
@@ -1616,14 +1614,14 @@ where
 
 impl<'a, F> VisitFmt for FieldFnVisitor<'a, F>
 where
-    F: Fn(&mut Writer<'a>, &Field, &dyn fmt::Debug) -> fmt::Result,
+    F: Fn(&mut Writer<'a>, &Field, &dyn Debug) -> fmt::Result,
 {
-    fn writer(&mut self) -> &mut dyn fmt::Write {
+    fn writer(&mut self) -> &mut dyn Write {
         &mut self.writer
     }
 }
 
-impl<F> fmt::Debug for FieldFnVisitor<'_, F> {
+impl<F> Debug for FieldFnVisitor<'_, F> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FieldFnVisitor")
             .field("f", &format_args!("{}", std::any::type_name::<F>()))
@@ -1640,7 +1638,7 @@ impl<F> fmt::Debug for FieldFnVisitor<'_, F> {
 /// See also [`with_span_events`].
 ///
 /// [`with_span_events`]: super::SubscriberBuilder::with_span_events
-#[derive(Clone, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct FmtSpan(u8);
 
 impl FmtSpan {

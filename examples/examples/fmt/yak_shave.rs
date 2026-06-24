@@ -1,13 +1,13 @@
 use snafu::{ResultExt, Snafu};
 use std::error::Error;
 use thiserror::Error;
-use tracing::{Level, debug, error, info, span, trace, warn};
+use tracing::{debug, error, info, span, trace, warn, Level};
 
 // the `#[tracing::instrument]` attribute creates and enters a span
 // every time the instrumented function is called. The span is named after the
 // the function or method. Paramaters passed to the function are recorded as fields.
 #[tracing::instrument]
-pub fn shave(yak: usize) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+pub(crate) fn shave(yak: usize) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // this creates an event at the TRACE log level with two fields:
     // - `excitement`, with the key "excitement" and the value "yay!"
     // - `message`, with the key "message" and the value "hello! I'm gonna shave a yak."
@@ -27,7 +27,7 @@ pub fn shave(yak: usize) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     Ok(())
 }
 
-pub fn shave_all(yaks: usize) -> usize {
+pub(crate) fn shave_all(yaks: usize) -> usize {
     // Constructs a new span named "shaving_yaks" at the INFO level,
     // and a field whose key is "yaks". This is equivalent to writing:
     //

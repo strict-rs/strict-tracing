@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 #![deny(rust_2018_idioms)]
 
 use bytes::Bytes;
@@ -8,7 +10,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
 use std::str;
 use tokio::net::TcpListener;
-use tracing::{Instrument as _, Level, debug, info, span};
+use tracing::{debug, info, span, Instrument as _, Level};
 
 async fn echo(req: Request<Incoming>) -> Result<Response<Full<Bytes>>, hyper::Error> {
     let span = span!(
@@ -110,7 +112,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let (stream, _peer_addr) = listener.accept().await?;
         let io = TokioIo::new(stream);
         let conn_span = server_span.clone();
-        tokio::spawn(
+        let _task = tokio::spawn(
             async move {
                 if let Err(err) = auto::Builder::new(TokioExecutor::new())
                     .serve_connection(io, service_fn(echo))

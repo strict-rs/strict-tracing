@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use std::convert::TryFrom;
 use std::num::TryFromIntError;
 
@@ -34,7 +36,7 @@ fn test() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, ret);
+    let _result = with_default(subscriber, ret);
     handle.assert_finished();
 }
 
@@ -61,7 +63,7 @@ fn test_custom_target() {
 
     let subscriber = subscriber.with(filter);
 
-    with_default(subscriber, ret_with_target);
+    let _result = with_default(subscriber, ret_with_target);
     handle.assert_finished();
 }
 
@@ -86,7 +88,7 @@ fn test_warn() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, ret_warn);
+    let _result = with_default(subscriber, ret_warn);
     handle.assert_finished();
 }
 
@@ -118,7 +120,7 @@ fn test_mut() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || ret_mut(&mut 1));
+    let _result = with_default(subscriber, || ret_mut(&mut 1));
     handle.assert_finished();
 }
 
@@ -145,7 +147,7 @@ fn test_async() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || block_on_future(async { ret_async().await }));
+    let _result = with_default(subscriber, || block_on_future(async { ret_async().await }));
     handle.assert_finished();
 }
 
@@ -170,7 +172,7 @@ fn test_impl_type() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, ret_impl_type);
+    let _result = with_default(subscriber, ret_impl_type);
     handle.assert_finished();
 }
 
@@ -195,7 +197,7 @@ fn test_dbg() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, ret_display);
+    let _result = with_default(subscriber, ret_display);
     handle.assert_finished();
 }
 
@@ -224,7 +226,7 @@ fn test_ret_and_err() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || ret_and_err().ok());
+    let _result = with_default(subscriber, || ret_and_err().ok());
     handle.assert_finished();
 }
 
@@ -253,7 +255,7 @@ fn test_ret_and_ok() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || ret_and_ok().ok());
+    let _result = with_default(subscriber, || ret_and_ok().ok());
     handle.assert_finished();
 }
 
@@ -278,7 +280,7 @@ fn test_warn_info() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, ret_warn_info);
+    let _result = with_default(subscriber, ret_warn_info);
     handle.assert_finished();
 }
 
@@ -303,6 +305,6 @@ fn test_dbg_warn() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, ret_dbg_warn);
+    let _result = with_default(subscriber, ret_dbg_warn);
     handle.assert_finished();
 }

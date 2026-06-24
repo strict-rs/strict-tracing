@@ -1,3 +1,5 @@
+//! Regression coverage for concurrent callsite registration.
+
 use std::{
     ptr,
     sync::atomic::{AtomicPtr, Ordering},
@@ -11,7 +13,7 @@ use tracing_core::{Metadata, span};
 struct TestSubscriber {
     creator_thread: String,
     sleep: Duration,
-    callsite: AtomicPtr<Metadata<'static>>,
+    callsite: AtomicPtr<()>,
 }
 
 impl TestSubscriber {
@@ -34,12 +36,12 @@ impl Subscriber for TestSubscriber {
             thread::sleep(self.sleep);
         }
 
-        self.callsite
-            .store(metadata as *const _ as *mut _, Ordering::SeqCst);
+        let metadata_ptr = ptr::from_ref(metadata).cast::<()>().cast_mut();
+        self.callsite.store(metadata_ptr, Ordering::SeqCst);
         println!(
             "{creator} from {thread:?}: register_callsite: {callsite:#?}",
             creator = self.creator_thread,
-            callsite = metadata as *const _,
+            callsite = ptr::from_ref(metadata),
             thread = thread::current().name(),
         );
         tracing_core::Interest::always()
@@ -47,7 +49,7 @@ impl Subscriber for TestSubscriber {
 
     fn event(&self, event: &tracing_core::Event<'_>) {
         let stored_callsite = self.callsite.load(Ordering::SeqCst);
-        let event_callsite: *mut Metadata<'static> = event.metadata() as *const _ as *mut _;
+        let event_callsite = ptr::from_ref(event.metadata()).cast::<()>().cast_mut();
 
         println!(
             "{creator} from {thread:?}: event (with callsite): {event_callsite:#?} (stored callsite: {stored_callsite:#?})",
@@ -72,8 +74,8 @@ impl Subscriber for TestSubscriber {
     }
     fn record(&self, _span: &span::Id, _values: &span::Record<'_>) {}
     fn record_follows_from(&self, _span: &span::Id, _follows: &span::Id) {}
-    fn enter(&self, _span: &tracing_core::span::Id) {}
-    fn exit(&self, _span: &tracing_core::span::Id) {}
+    fn enter(&self, _span: &span::Id) {}
+    fn exit(&self, _span: &span::Id) {}
 }
 
 fn subscriber_thread(idx: usize, register_sleep_micros: u64) -> JoinHandle<()> {

@@ -2,68 +2,67 @@
 name = "tracing-examples"
 version = "0.0.0"
 publish = false
-edition.workspace = true
+edition = "2018"
 rust-version.workspace = true
 
 [features]
 default = []
 
 [dev-dependencies]
-
 # tracing crates
-tracing = { path = "../tracing", version = "0.1.35" }
-tracing-core = { path = "../tracing-core", version = "0.1.28" }
-tracing-error = { path = "../tracing-error" }
-tracing-flame = { path = "../tracing-flame" }
-tracing-tower = { version = "0.1.0", path = "../tracing-tower" }
-tracing-subscriber = { path = "../tracing-subscriber", version = "0.3.0", features = ["json", "env-filter"] }
-tracing-futures = { version = "0.2.1", path = "../tracing-futures", features = ["futures-01"] }
-tracing-attributes = { path = "../tracing-attributes", version = "0.1.22" }
-tracing-serde = { path = "../tracing-serde" }
-tracing-appender = { path = "../tracing-appender", version = "0.2.0" }
-tracing-journald = { path = "../tracing-journald" }
+tracing = { workspace = true, default-features = true }
+tracing-core = { workspace = true, default-features = true }
+tracing-error = { workspace = true }
+tracing-flame = { workspace = true }
+tracing-tower = { workspace = true }
+tracing-subscriber = { workspace = true, default-features = true, features = ["json", "env-filter"] }
+tracing-futures = { workspace = true, default-features = true, features = ["futures-01"] }
+tracing-attributes = { workspace = true }
+tracing-serde = { workspace = true }
+tracing-appender = { workspace = true }
+tracing-journald = { workspace = true }
 
 # serde example
-serde_json = "1.0.150"
+serde_json = { workspace = true }
 
-futures = "0.3.32"
-tokio = { version = "1.52.3", features = ["full"] }
+futures = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
 
 # tower examples
-tower = { version = "0.5.3", features = ["full"] }
-http = "1.4.2"
-hyper = { version = "1.10.1", features = ["full"] }
-hyper-util = { version = "0.1.20", features = ["tokio", "server-auto", "client-legacy", "service", "http1", "http2"] }
-http-body-util = "0.1.3"
-rand = "0.10.1"
-bytes = "1"
-argh = "0.1.19"
+tower = { workspace = true, features = ["full"] }
+http = { workspace = true }
+hyper = { workspace = true, features = ["full"] }
+hyper-util = { workspace = true, features = ["tokio", "server-auto", "client-legacy", "service", "http1", "http2"] }
+http-body-util = { workspace = true }
+rand = { workspace = true }
+bytes = { workspace = true }
+argh = { workspace = true }
 
 # sloggish example
-nu-ansi-term = "0.50.3"
-humantime = "2.3.0"
-log = "0.4.33"
+nu-ansi-term = { workspace = true }
+humantime = { workspace = true }
+log = { workspace = true }
 
 # inferno example
-inferno = "0.12.6"
-tempfile = "3"
+inferno = { workspace = true }
+tempfile = { workspace = true }
 
 # fmt examples
-snafu = "0.9.1"
-thiserror = "2"
+snafu = { workspace = true }
+thiserror = { workspace = true }
 
 # env-filter-explorer example
-ansi-to-tui = "8.0.1"
-ratatui = "0.30.2"
-crossterm = "0.29.0"
-ratatui-textarea = "0.9.2"
+ansi-to-tui = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+ratatui-textarea = { workspace = true }
 
 # valuable examples
-valuable = { version = "0.1.1", features = ["derive"] }
+valuable = { workspace = true, features = ["derive"] }
 
 [target.'cfg(tracing_unstable)'.dependencies]
-tracing-core = { path = "../tracing-core", version = "0.1.28", features = ["valuable"]}
-tracing-subscriber = { path = "../tracing-subscriber", version = "0.3.0", features = ["json", "env-filter", "valuable"]}
+tracing-core = { workspace = true, default-features = true, features = ["valuable"] }
+tracing-subscriber = { workspace = true, default-features = true, features = ["json", "env-filter", "valuable"] }
 
 [lints]
 workspace = true

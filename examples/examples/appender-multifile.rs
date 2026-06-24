@@ -22,11 +22,11 @@ fn main() {
         .with_max_level(tracing::Level::TRACE)
         .init();
 
-    yak_shave::shave_all(6);
+    let _shaved = yak_shave::shave_all(6);
     tracing::info!("sleeping for a minute...");
 
     std::thread::sleep(std::time::Duration::from_secs(60));
 
     tracing::info!("okay, time to shave some more yaks!");
-    yak_shave::shave_all(10);
+    let _shaved = yak_shave::shave_all(10);
 }

@@ -32,7 +32,7 @@ ahash = { workspace = true, optional = true }
 
 [dev-dependencies]
 tracing = { workspace = true, default-features = true }
-tracing-subscriber = { workspace = true, default-features = true }
+tracing-subscriber = { workspace = true, default-features = true, features = ["env-filter"] }
 criterion = { workspace = true }
 
 [badges]

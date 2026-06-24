@@ -1,3 +1,5 @@
+//! Regression coverage for callsite registration re-entry.
+
 use std::{sync::mpsc, thread, time::Duration};
 use tracing::{
     Event,
@@ -8,7 +10,7 @@ use tracing::{
 
 #[test]
 fn register_callsite_doesnt_deadlock() {
-    pub struct EvilSubscriber;
+    struct EvilSubscriber;
 
     impl Subscriber for EvilSubscriber {
         fn register_callsite(&self, meta: &'static Metadata<'static>) -> Interest {

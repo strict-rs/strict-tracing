@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 #![deny(rust_2018_idioms)]
 #[path = "fmt/yak_shave.rs"]
 mod yak_shave;
@@ -13,7 +15,7 @@ fn main() {
 
     // Create a `fmt` subscriber that uses our custom event format, and set it
     // as the default.
-    tracing_subscriber::fmt().event_format(format).init();
+    fmt().event_format(format).init();
 
     // Shave some yaks!
     let number_of_yaks = 3;

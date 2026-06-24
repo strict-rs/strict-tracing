@@ -245,7 +245,7 @@ pub fn mock() -> MockLayerBuilder {
 /// [`MockLayerBuilder::named`]: fn@crate::layer::MockLayerBuilder::named
 /// [`layer`]: mod@crate::layer
 #[must_use]
-pub fn named(name: impl std::fmt::Display) -> MockLayerBuilder {
+pub fn named(name: impl fmt::Display) -> MockLayerBuilder {
     mock().named(name)
 }
 
@@ -874,7 +874,7 @@ impl MockLayer {
         current_scope: Option<tracing_subscriber::registry::Scope<'_, C>>,
         expected_scope: &mut [ExpectedSpan],
     ) where
-        C: for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
+        C: for<'lookup> LookupSpan<'lookup>,
     {
         let mut current_scope = current_scope.into_iter().flatten();
         let mut i = 0;
@@ -918,7 +918,7 @@ where
         println!("[{}] on_register_dispatch", self.name);
         let mut expected = self.expected.lock().unwrap();
         if let Some(Expect::OnRegisterDispatch) = expected.front() {
-            expected.pop_front();
+            let _matched = expected.pop_front();
         }
     }
 
@@ -1069,7 +1069,7 @@ where
                 _ => false,
             };
             if was_expected {
-                expected.pop_front();
+                let _matched = expected.pop_front();
             }
         }
     }
@@ -1093,18 +1093,18 @@ where
 impl fmt::Debug for MockLayer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut s = f.debug_struct("ExpectSubscriber");
-        s.field("name", &self.name);
+        let _builder = s.field("name", &self.name);
 
         if let Ok(expected) = self.expected.try_lock() {
-            s.field("expected", &expected);
+            let _builder = s.field("expected", &expected);
         } else {
-            s.field("expected", &format_args!("<locked>"));
+            let _builder = s.field("expected", &format_args!("<locked>"));
         }
 
         if let Ok(current) = self.current.try_lock() {
-            s.field("current", &format_args!("{:?}", &current));
+            let _builder = s.field("current", &format_args!("{:?}", &current));
         } else {
-            s.field("current", &format_args!("<locked>"));
+            let _builder = s.field("current", &format_args!("<locked>"));
         }
 
         s.finish()

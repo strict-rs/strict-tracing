@@ -1,3 +1,5 @@
+//! Event macro integration coverage.
+
 // These tests require the thread-local scoped dispatcher, which only works when
 // we have a standard library. The behaviour being tested should be the same
 // with the standard lib disabled.
@@ -8,6 +10,7 @@
 
 use tracing::{
     Level, debug, error,
+    field::debug as debug_value,
     field::{debug, display},
     info,
     subscriber::with_default,
@@ -58,12 +61,9 @@ event_without_message! {nonzeroi32_event_without_message: std::num::NonZeroI32::
 fn event_with_message() {
     let (subscriber, handle) = subscriber::mock()
         .event(
-            expect::event().with_fields(expect::field("message").with_value(
-                &tracing::field::debug(format_args!(
-                    "hello from my tracing::event! yak shaved = {:?}",
-                    true
-                )),
-            )),
+            expect::event().with_fields(expect::field("message").with_value(&debug_value(
+                format_args!("hello from my tracing::event! yak shaved = {:?}", true),
+            ))),
         )
         .only()
         .run_with_handle();
@@ -138,7 +138,7 @@ fn one_with_everything() {
             expect::event()
                 .with_fields(
                     expect::field("message")
-                        .with_value(&tracing::field::debug(format_args!(
+                        .with_value(&debug_value(format_args!(
                             "{:#x} make me one with{what:.>20}",
                             4_277_009_102u64,
                             what = "everything"

@@ -81,7 +81,7 @@ fn box_layer_is_layer() {
     use alloc::boxed::Box;
     let l: Box<dyn Layer<NoSubscriber> + Send + Sync> = Box::new(NopLayer);
     assert_layer(&l);
-    l.with_subscriber(NoSubscriber::default());
+    let _layered = l.with_subscriber(NoSubscriber::default());
 }
 
 #[test]

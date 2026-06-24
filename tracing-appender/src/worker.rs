@@ -67,7 +67,7 @@ impl<T: Write + Send + 'static> Worker<T> {
     }
 
     /// Creates a worker thread that processes a channel until it's disconnected
-    pub(crate) fn worker_thread(mut self, name: String) -> std::thread::JoinHandle<()> {
+    pub(crate) fn worker_thread(mut self, name: String) -> thread::JoinHandle<()> {
         thread::Builder::new()
             .name(name)
             .spawn(move || {

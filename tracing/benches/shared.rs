@@ -1,4 +1,6 @@
 #![allow(dead_code)]
+//! Shared helpers for `tracing` benchmarks.
+
 use criterion::{Bencher, measurement::WallTime};
 use std::hint::black_box;
 use tracing::{Event, Id, Metadata, field, span};
@@ -8,21 +10,21 @@ use std::{
     sync::{Mutex, MutexGuard},
 };
 
-pub fn for_all_recording(
+pub(crate) fn for_all_recording(
     group: &mut criterion::BenchmarkGroup<'_, WallTime>,
     mut iter: impl FnMut(&mut Bencher<'_, WallTime>),
 ) {
     // first, run benchmarks with no subscriber
-    group.bench_function("none", &mut iter);
+    let _benchmark = group.bench_function("none", &mut iter);
 
     // then, run benchmarks with a scoped default subscriber
     tracing::subscriber::with_default(EnabledSubscriber, || {
-        group.bench_function("scoped", &mut iter)
+        let _benchmark = group.bench_function("scoped", &mut iter);
     });
 
     let subscriber = VisitingSubscriber(Mutex::new(String::from("")));
     tracing::subscriber::with_default(subscriber, || {
-        group.bench_function("scoped_recording", &mut iter);
+        let _benchmark = group.bench_function("scoped_recording", &mut iter);
     });
 
     // finally, set a global default subscriber, and run the benchmarks again.
@@ -30,19 +32,19 @@ pub fn for_all_recording(
         .expect("global default should not have already been set!");
     let _ = log::set_logger(&NOP_LOGGER);
     log::set_max_level(log::LevelFilter::Trace);
-    group.bench_function("global", &mut iter);
+    let _benchmark = group.bench_function("global", &mut iter);
 }
 
-pub fn for_all_dispatches(
+pub(crate) fn for_all_dispatches(
     group: &mut criterion::BenchmarkGroup<'_, WallTime>,
     mut iter: impl FnMut(&mut Bencher<'_, WallTime>),
 ) {
     // first, run benchmarks with no subscriber
-    group.bench_function("none", &mut iter);
+    let _benchmark = group.bench_function("none", &mut iter);
 
     // then, run benchmarks with a scoped default subscriber
     tracing::subscriber::with_default(EnabledSubscriber, || {
-        group.bench_function("scoped", &mut iter)
+        let _benchmark = group.bench_function("scoped", &mut iter);
     });
 
     // finally, set a global default subscriber, and run the benchmarks again.
@@ -50,7 +52,7 @@ pub fn for_all_dispatches(
         .expect("global default should not have already been set!");
     let _ = log::set_logger(&NOP_LOGGER);
     log::set_max_level(log::LevelFilter::Trace);
-    group.bench_function("global", &mut iter);
+    let _benchmark = group.bench_function("global", &mut iter);
 }
 
 const NOP_LOGGER: NopLogger = NopLogger;
@@ -58,11 +60,11 @@ const NOP_LOGGER: NopLogger = NopLogger;
 struct NopLogger;
 
 impl log::Log for NopLogger {
-    fn enabled(&self, _metadata: &log::Metadata) -> bool {
+    fn enabled(&self, _metadata: &log::Metadata<'_>) -> bool {
         true
     }
 
-    fn log(&self, record: &log::Record) {
+    fn log(&self, record: &log::Record<'_>) {
         if self.enabled(record.metadata()) {
             let mut this = self;
             let _ = write!(this, "{}", record.args());
@@ -73,8 +75,8 @@ impl log::Log for NopLogger {
 }
 
 impl Write for &NopLogger {
-    fn write_str(&mut self, s: &str) -> std::fmt::Result {
-        black_box(s);
+    fn write_str(&mut self, s: &str) -> fmt::Result {
+        let _value = black_box(s);
         Ok(())
     }
 }

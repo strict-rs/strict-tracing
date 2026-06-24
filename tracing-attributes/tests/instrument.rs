@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use tracing::Level;
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
@@ -41,7 +43,7 @@ fn override_everything() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         my_fn();
         my_other_fn();
     });
@@ -91,7 +93,7 @@ fn fields() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         my_fn(2, false, "Cool".to_string());
         my_fn(3, true, "Still Cool".to_string());
     });
@@ -147,7 +149,7 @@ fn skip() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         my_fn(2, UnDebug(), UnDebug());
         my_fn(3, UnDebug(), UnDebug());
         my_fn2(2, UnDebug(), UnDebug());
@@ -184,7 +186,7 @@ fn generics() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         my_fn(Foo, false);
     });
 
@@ -217,7 +219,7 @@ fn methods() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         let foo = Foo;
         foo.my_fn(42);
     });
@@ -245,7 +247,7 @@ fn impl_trait_return_type() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         for _ in returns_impl_trait(10) {
             // nop
         }
@@ -270,7 +272,7 @@ fn name_ident() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         name();
     });
 
@@ -294,7 +296,7 @@ fn target_ident() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         target();
     });
 
@@ -319,7 +321,7 @@ fn target_name_ident() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         name_target();
     });
 
@@ -339,7 +341,7 @@ fn user_tracing_module() {
 
     mod tracing {
         #[allow(dead_code)]
-        pub fn my_other_fn() -> &'static str {
+        pub(crate) fn my_other_fn() -> &'static str {
             "test"
         }
     }

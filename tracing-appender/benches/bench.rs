@@ -1,5 +1,8 @@
+//! Benchmarks for synchronous and non-blocking appenders.
+
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::{
+    io::{self, Write},
     thread::{self, JoinHandle},
     time::Instant,
 };
@@ -26,26 +29,26 @@ impl MakeWriter<'_> for NoOpWriter {
     }
 }
 
-impl std::io::Write for NoOpWriter {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+impl Write for NoOpWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         Ok(buf.len())
     }
 
-    fn flush(&mut self) -> std::io::Result<()> {
+    fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
 }
 
 fn synchronous_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("synchronous");
-    group.bench_function("single_thread", |b| {
+    let _benchmark = group.bench_function("single_thread", |b| {
         let subscriber = tracing_subscriber::fmt().with_writer(NoOpWriter::new());
         tracing::subscriber::with_default(subscriber.finish(), || {
             b.iter(|| event!(Level::INFO, "event"))
         });
     });
 
-    group.bench_function("multiple_writers", |b| {
+    let _benchmark = group.bench_function("multiple_writers", |b| {
         b.iter_custom(|iters| {
             let mut handles: Vec<JoinHandle<()>> = Vec::new();
 
@@ -73,7 +76,7 @@ fn synchronous_benchmark(c: &mut Criterion) {
             }));
 
             for handle in handles {
-                let _ = handle.join();
+                let _join_result = handle.join();
             }
 
             start.elapsed()
@@ -84,7 +87,7 @@ fn synchronous_benchmark(c: &mut Criterion) {
 fn non_blocking_benchmark(c: &mut Criterion) {
     let mut group = c.benchmark_group("non_blocking");
 
-    group.bench_function("single_thread", |b| {
+    let _benchmark = group.bench_function("single_thread", |b| {
         let (non_blocking, _guard) = non_blocking(NoOpWriter::new());
         let subscriber = tracing_subscriber::fmt().with_writer(non_blocking);
 
@@ -93,7 +96,7 @@ fn non_blocking_benchmark(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("multiple_writers", |b| {
+    let _benchmark = group.bench_function("multiple_writers", |b| {
         b.iter_custom(|iters| {
             let (non_blocking, _guard) = non_blocking(NoOpWriter::new());
 
@@ -122,7 +125,7 @@ fn non_blocking_benchmark(c: &mut Criterion) {
             }));
 
             for handle in handles {
-                let _ = handle.join();
+                let _join_result = handle.join();
             }
 
             start.elapsed()

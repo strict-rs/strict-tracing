@@ -103,7 +103,7 @@ use core::{
     fmt,
     hash::{Hash, Hasher},
     ptr,
-    sync::atomic::{AtomicBool, AtomicPtr, AtomicU8, Ordering},
+    sync::atomic::{AtomicU8, Ordering},
 };
 
 use self::dispatchers::Dispatchers;
@@ -173,7 +173,7 @@ pub trait Callsite: Sync {
 /// Two `Identifier`s are equal if they both refer to the same callsite.
 ///
 /// [`Callsite`]: super::callsite::Callsite
-#[derive(Clone)]
+#[derive(Copy, Clone)]
 pub struct Identifier(
     /// **Warning**: The fields on this type are currently `pub` because it must
     /// be able to be constructed statically by macros. However, when `const
@@ -192,7 +192,6 @@ pub struct DefaultCallsite {
     interest: AtomicU8,
     registration: AtomicU8,
     meta: &'static Metadata<'static>,
-    next: AtomicPtr<Self>,
 }
 
 /// Clear and reregister interest on every [`Callsite`]
@@ -233,36 +232,18 @@ pub fn rebuild_interest_cache() {
 /// [`Callsite`]: crate::callsite::Callsite
 /// [reg-docs]: crate::callsite#registering-callsites
 pub fn register(callsite: &'static dyn Callsite) {
-    // Is this a `DefaultCallsite`? If so, use the fancy linked list!
-    if callsite.private_type_id(private::Private(())).0 == TypeId::of::<DefaultCallsite>() {
-        let callsite = unsafe {
-            // Safety: the pointer cast is safe because the type id of the
-            // provided callsite matches that of the target type for the cast
-            // (`DefaultCallsite`). Because user implementations of `Callsite`
-            // cannot override `private_type_id`, we can trust that the callsite
-            // is not lying about its type ID.
-            &*(callsite as *const dyn Callsite as *const DefaultCallsite)
-        };
-        CALLSITES.push_default(callsite);
-    } else {
-        CALLSITES.push_dyn(callsite);
-    }
-
+    CALLSITES.push(callsite);
     rebuild_callsite_interest(callsite, &DISPATCHERS.rebuilder());
 }
 
 static CALLSITES: Callsites = Callsites {
-    list_head: AtomicPtr::new(ptr::null_mut()),
-    has_locked_callsites: AtomicBool::new(false),
+    registry: Mutex::new(Vec::new()),
 };
 
 static DISPATCHERS: Dispatchers = Dispatchers::new();
 
-static LOCKED_CALLSITES: Mutex<Vec<&'static dyn Callsite>> = Mutex::new(Vec::new());
-
 struct Callsites {
-    list_head: AtomicPtr<DefaultCallsite>,
-    has_locked_callsites: AtomicBool,
+    registry: Mutex<Vec<&'static dyn Callsite>>,
 }
 
 // === impl DefaultCallsite ===
@@ -281,7 +262,6 @@ impl DefaultCallsite {
         Self {
             interest: AtomicU8::new(0xFF),
             meta,
-            next: AtomicPtr::new(ptr::null_mut()),
             registration: AtomicU8::new(Self::UNREGISTERED),
         }
     }
@@ -314,7 +294,7 @@ impl DefaultCallsite {
         ) {
             Ok(_) => {
                 // Okay, we advanced the state, try to register the callsite.
-                CALLSITES.push_default(self);
+                CALLSITES.push(self);
                 rebuild_callsite_interest(self, &DISPATCHERS.rebuilder());
                 self.registration.store(Self::REGISTERED, Ordering::Release);
             }
@@ -373,10 +353,7 @@ impl Callsite for DefaultCallsite {
 
 impl PartialEq for Identifier {
     fn eq(&self, other: &Identifier) -> bool {
-        core::ptr::eq(
-            self.0 as *const _ as *const (),
-            other.0 as *const _ as *const (),
-        )
+        ptr::addr_eq(self.0, other.0)
     }
 }
 
@@ -393,7 +370,7 @@ impl Hash for Identifier {
     where
         H: Hasher,
     {
-        (self.0 as *const dyn Callsite).hash(state)
+        ptr::from_ref(self.0).hash(state)
     }
 }
 
@@ -420,62 +397,23 @@ impl Callsites {
         LevelFilter::set_max(max_level);
     }
 
-    /// Push a `dyn Callsite` trait object to the callsite registry.
-    ///
-    /// This will attempt to lock the callsites vector.
-    fn push_dyn(&self, callsite: &'static dyn Callsite) {
-        let mut lock = LOCKED_CALLSITES.lock().unwrap();
-        self.has_locked_callsites.store(true, Ordering::Release);
-        lock.push(callsite);
-    }
-
-    /// Push a `DefaultCallsite` to the callsite registry.
-    ///
-    /// If we know the callsite being pushed is a `DefaultCallsite`, we can push
-    /// it to the linked list without having to acquire a lock.
-    fn push_default(&self, callsite: &'static DefaultCallsite) {
-        let mut head = self.list_head.load(Ordering::Acquire);
-
-        loop {
-            callsite.next.store(head, Ordering::Release);
-
-            assert_ne!(
-                callsite as *const _, head,
-                "Attempted to register a `DefaultCallsite` that already exists! \
-                This will cause an infinite loop when attempting to read from the \
-                callsite cache. This is likely a bug! You should only need to call \
-                `DefaultCallsite::register` once per `DefaultCallsite`."
-            );
-
-            match self.list_head.compare_exchange(
-                head,
-                callsite as *const _ as *mut _,
-                Ordering::AcqRel,
-                Ordering::Acquire,
-            ) {
-                Ok(_) => {
-                    break;
-                }
-                Err(current) => head = current,
-            }
+    /// Push a callsite to the callsite registry.
+    fn push(&self, callsite: &'static dyn Callsite) {
+        let mut registered = self.registry.lock().unwrap();
+        if registered
+            .iter()
+            .any(|registered| ptr::addr_eq(*registered, callsite))
+        {
+            return;
         }
+        registered.push(callsite);
     }
 
     /// Invokes the provided closure `f` with each callsite in the registry.
     fn for_each(&self, mut f: impl FnMut(&'static dyn Callsite)) {
-        let mut head = self.list_head.load(Ordering::Acquire);
-
-        while let Some(cs) = unsafe { head.as_ref() } {
-            f(cs);
-
-            head = cs.next.load(Ordering::Acquire);
-        }
-
-        if self.has_locked_callsites.load(Ordering::Acquire) {
-            let locked = LOCKED_CALLSITES.lock().unwrap();
-            for &cs in locked.iter() {
-                f(cs);
-            }
+        let registered = self.registry.lock().unwrap();
+        for &callsite in registered.iter() {
+            f(callsite);
         }
     }
 }

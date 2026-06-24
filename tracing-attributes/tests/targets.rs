@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
 use tracing_mock::*;
@@ -11,13 +13,13 @@ fn custom_target() {}
 mod my_mod {
     use tracing_attributes::instrument;
 
-    pub const MODULE_PATH: &str = module_path!();
+    pub(crate) const MODULE_PATH: &str = module_path!();
 
     #[instrument]
-    pub fn default_target() {}
+    pub(crate) fn default_target() {}
 
     #[instrument(target = "my_other_target")]
-    pub fn custom_target() {}
+    pub(crate) fn custom_target() {}
 }
 
 #[test]
@@ -56,7 +58,7 @@ fn default_targets() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         default_target();
         my_mod::default_target();
     });
@@ -100,7 +102,7 @@ fn custom_targets() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         custom_target();
         my_mod::custom_target();
     });

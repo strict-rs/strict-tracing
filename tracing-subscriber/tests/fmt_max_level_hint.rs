@@ -1,3 +1,4 @@
+//! Tests formatter max level hints.
 #![cfg(feature = "fmt")]
 use tracing_subscriber::filter::LevelFilter;
 

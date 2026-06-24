@@ -94,6 +94,22 @@ pub struct Layer {
     priority_mappings: PriorityMappings,
 }
 
+impl fmt::Debug for Layer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut debug = f.debug_struct("Layer");
+
+        #[cfg(unix)]
+        let _debug = debug.field("socket_path", &self.socket_path);
+
+        debug
+            .field("field_prefix", &self.field_prefix)
+            .field("syslog_identifier", &self.syslog_identifier)
+            .field("additional_fields", &self.additional_fields)
+            .field("priority_mappings", &self.priority_mappings)
+            .finish()
+    }
+}
+
 #[cfg(unix)]
 const SYSTEM_JOURNALD_PATH: &str = "/run/systemd/journal/socket";
 
@@ -177,7 +193,7 @@ impl Layer {
         };
         // Check that we can talk to journald, by sending empty payload which journald discards.
         // However if the socket didn't exist or if none listened we'd get an error here.
-        layer.send_payload(&[])?;
+        let _bytes_sent = layer.send_payload(&[])?;
         Ok(layer)
     }
 
@@ -293,10 +309,12 @@ impl Layer {
 
     #[cfg(unix)]
     fn send_payload(&self, payload: &[u8]) -> io::Result<usize> {
+        use rustix::io::Errno;
+
         self.socket
             .send_to(payload, &self.socket_path)
             .or_else(|error| {
-                if Some(libc::EMSGSIZE) == error.raw_os_error() {
+                if Some(Errno::MSGSIZE.raw_os_error()) == error.raw_os_error() {
                     self.send_large_payload(payload)
                 } else {
                     Err(error)
@@ -317,14 +335,15 @@ impl Layer {
     fn send_large_payload(&self, payload: &[u8]) -> io::Result<usize> {
         // If the payload's too large for a single datagram, send it through a memfd, see
         // https://systemd.io/JOURNAL_NATIVE_PROTOCOL/
-        use std::os::unix::prelude::AsRawFd;
+        use rustix::fd::AsFd;
+
         // Write the whole payload to a memfd
         let mut mem = memfd::create_sealable()?;
         mem.write_all(payload)?;
         // Fully seal the memfd to signal journald that its backing data won't resize anymore
         // and so is safe to mmap.
-        memfd::seal_fully(mem.as_raw_fd())?;
-        socket::send_one_fd_to(&self.socket, mem.as_raw_fd(), &self.socket_path)
+        memfd::seal_fully(&mem)?;
+        socket::send_one_fd_to(&self.socket, mem.as_fd(), &self.socket_path)
     }
 
     fn put_priority(&self, buf: &mut Vec<u8>, meta: &Metadata<'_>) {
@@ -362,7 +381,7 @@ fn user_journald_path() -> PathBuf {
         return PathBuf::from(runtime_dir).join("systemd/journal/socket");
     }
 
-    let uid = unsafe { libc::geteuid() };
+    let uid = rustix::process::geteuid();
     PathBuf::from("/run/user")
         .join(uid.to_string())
         .join("systemd/journal/socket")
@@ -426,7 +445,7 @@ where
         ));
 
         // At this point we can't handle the error anymore so just ignore it.
-        let _ = self.send_payload(&buf);
+        let _send_result = self.send_payload(&buf);
     }
 }
 
@@ -572,7 +591,7 @@ pub enum Priority {
 /// Mappings from tracing [`Level`]s to journald [priorities].
 ///
 /// [priorities]: Priority
-#[derive(Debug, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct PriorityMappings {
     /// Priority mapped to the `ERROR` level
     pub error: Priority,

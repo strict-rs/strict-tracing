@@ -133,7 +133,7 @@ impl Parse for InstrumentArgs {
                 if !args.skips.is_empty() {
                     return Err(input.error("expected either `skip` or `skip_all` argument"));
                 }
-                let _ = input.parse::<kw::skip_all>()?;
+                let _skip_all: kw::skip_all = input.parse()?;
                 args.skip_all = true;
             } else if lookahead.peek(kw::fields) {
                 if args.fields.is_some() {
@@ -141,15 +141,15 @@ impl Parse for InstrumentArgs {
                 }
                 args.fields = Some(input.parse()?);
             } else if lookahead.peek(kw::err) {
-                let _ = input.parse::<kw::err>();
+                drop(input.parse::<kw::err>());
                 let err_args = EventArgs::parse(input)?;
                 args.err_args = Some(err_args);
             } else if lookahead.peek(kw::ret) {
-                let _ = input.parse::<kw::ret>()?;
+                let _ret: kw::ret = input.parse()?;
                 let ret_args = EventArgs::parse(input)?;
                 args.ret_args = Some(ret_args);
             } else if lookahead.peek(Token![,]) {
-                let _ = input.parse::<Token![,]>()?;
+                let _comma: Token![,] = input.parse()?;
             } else {
                 // We found a token that we didn't expect!
                 // We want to emit warnings for these, rather than errors, so
@@ -158,7 +158,7 @@ impl Parse for InstrumentArgs {
                 args.parse_warnings.push(lookahead.error());
                 // Parse the unrecognized token tree to advance the parse
                 // stream, and throw it away so we can keep parsing.
-                let _ = input.parse::<proc_macro2::TokenTree>();
+                drop(input.parse::<proc_macro2::TokenTree>());
             }
         }
         Ok(args)
@@ -246,8 +246,8 @@ struct StrArg<T> {
 
 impl<T: Parse> Parse for StrArg<T> {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let _ = input.parse::<T>()?;
-        let _ = input.parse::<Token![=]>()?;
+        let _keyword: T = input.parse()?;
+        let _eq: Token![=] = input.parse()?;
         let value = input.parse()?;
         Ok(Self {
             value,
@@ -263,8 +263,8 @@ struct ExprArg<T> {
 
 impl<T: Parse> Parse for ExprArg<T> {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let _ = input.parse::<T>()?;
-        let _ = input.parse::<Token![=]>()?;
+        let _keyword: T = input.parse()?;
+        let _eq: Token![=] = input.parse()?;
         let value = input.parse()?;
         Ok(Self {
             value,
@@ -277,19 +277,15 @@ struct Skips(HashSet<Ident>);
 
 impl Parse for Skips {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let _ = input.parse::<kw::skip>();
+        drop(input.parse::<kw::skip>());
         let content;
         let _ = syn::parenthesized!(content in input);
         let names = content.parse_terminated(Ident::parse_any, Token![,])?;
         let mut skips = HashSet::new();
         for name in names {
-            if skips.contains(&name) {
-                return Err(syn::Error::new(
-                    name.span(),
-                    "tried to skip the same field twice",
-                ));
-            } else {
-                skips.insert(name);
+            let span = name.span();
+            if !skips.insert(name) {
+                return Err(syn::Error::new(span, "tried to skip the same field twice"));
             }
         }
         Ok(Self(skips))
@@ -340,7 +336,7 @@ impl ToTokens for FieldName {
 
 impl Parse for Fields {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let _ = input.parse::<kw::fields>();
+        drop(input.parse::<kw::fields>());
         let content;
         let _ = syn::parenthesized!(content in input);
         let fields = content.parse_terminated(Field::parse, Token![,])?;
@@ -358,14 +354,14 @@ impl Parse for Field {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
         let mut kind = FieldKind::Value;
         if input.peek(Token![%]) {
-            input.parse::<Token![%]>()?;
+            let _percent: Token![%] = input.parse()?;
             kind = FieldKind::Display;
         } else if input.peek(Token![?]) {
-            input.parse::<Token![?]>()?;
+            let _question: Token![?] = input.parse()?;
             kind = FieldKind::Debug;
         };
         // Parse name as either an expr between braces or a dotted identifier.
-        let name = if input.peek(syn::token::Brace) {
+        let name = if input.peek(Brace) {
             let content;
             let _ = syn::braced!(content in input);
             let expr = content.call(Expr::parse)?;
@@ -377,12 +373,12 @@ impl Parse for Field {
             )?)
         };
         let value = if input.peek(Token![=]) {
-            input.parse::<Token![=]>()?;
+            let _eq: Token![=] = input.parse()?;
             if input.peek(Token![%]) {
-                input.parse::<Token![%]>()?;
+                let _percent: Token![%] = input.parse()?;
                 kind = FieldKind::Display;
             } else if input.peek(Token![?]) {
-                input.parse::<Token![?]>()?;
+                let _question: Token![?] = input.parse()?;
                 kind = FieldKind::Debug;
             };
             Some(input.parse()?)

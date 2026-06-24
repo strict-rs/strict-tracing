@@ -4,7 +4,7 @@
 
 ## Architecture
 
-- `subscriber.rs` — the `Subscriber` trait, the contract every collector implements (`new_span`/`record`/`event`/`enter`/`exit`/`enabled`/`register_callsite`/`event_enabled`/`clone_span`/`try_close`). Many methods have default impls; `register_callsite` defaults to delegating to `enabled`. Also defines `Interest` (`always`/`sometimes`/`never`) and `NoSubscriber` (the no-op default).
+- `subscriber.rs` — the `Subscriber` trait, the contract every collector implements (`new_span`/`record`/`event`/`enter`/`exit`/`enabled`/`register_callsite`/`event_enabled`/`clone_span`/`try_close`). Many methods have default impls; `register_callsite` defaults to delegating to `enabled`. Also defines `Interest` (`always`/`sometimes`/`never`) and `NoSubscriber` (the `Copy` no-op default).
 - `dispatcher.rs` — `Dispatch`, a cloneable type-erased `Arc<dyn Subscriber>`, plus the machinery to install one: `with_default` (thread-local, scoped, **std-only**), `set_global_default` (process-wide, once), and `get_default`. `WeakDispatch`/`Dispatch::downgrade` exist so a `Subscriber` can hold a back-reference without a refcount cycle.
 - `callsite.rs` — the `Callsite` trait, `Identifier`, `DefaultCallsite` (the ready-made impl macros generate), and the **global callsite registry**. Each callsite caches a combined `Interest` so per-event filtering avoids calling `enabled`; `rebuild_interest_cache` invalidates it (also triggered automatically when a `Dispatch` is created/dropped). `dispatchers::Dispatchers` tracks active subscribers under `sync::Mutex`.
 - `metadata.rs` — `Metadata` (static name/target/level/fields/file/line/module/`Kind`), the `Level`/`LevelFilter` ordering types, and `Kind` (bit-flag consts `SPAN`/`EVENT`/`HINT`).
@@ -16,7 +16,7 @@ Data flow: instrumentation builds a static `Callsite`+`Metadata`; first use regi
 
 ## Features
 
-- `std` (default) — pulls in `std`; without it the crate is `no_std` but still **requires `liballoc`** (`extern crate alloc`). With `std` off, `with_default`/thread-local dispatch is unavailable (use `set_global_default`), and the vendored `spin/` module + `sync.rs` supply the spinlock-backed `Once`/`Mutex` that `std` otherwise provides.
+- `std` (default) — pulls in `std`; without it the crate is `no_std` but still **requires `liballoc`** (`extern crate alloc`). With `std` off, `with_default`/thread-local dispatch is unavailable (use `set_global_default`), and the external workspace `spin` dependency plus `sync.rs` supply the spinlock-backed `Mutex` shape expected by the callsite registry. The old vendored `src/spin/` module is gone.
 - `valuable` — unstable, gated behind `--cfg tracing_unstable` (a `cfg`, not a plain Cargo feature); the dependency lives under `[target.'cfg(tracing_unstable)'.dependencies]`.
 - `once_cell` — vestigial no-op feature kept for back-compat (a former implicit optional-dep feature); do not build new functionality on it.
 
@@ -29,4 +29,5 @@ Data flow: instrumentation builds a static `Callsite`+`Metadata`; first use regi
 ## Gotchas
 
 - This is the workspace's stability anchor: changing the `Subscriber`/`Callsite` trait surface or `Metadata`/`Field` layout breaks every downstream crate and external implementors. Treat additions as default-method/additive only unless a break is intended.
-- `lib.rs` enables `#![warn(missing_docs, unreachable_pub, ...)]` (CI builds with `-D warnings`): every new public item needs docs and the right visibility.
+- `Subscriber::downcast_raw` is the existing compatibility hook for object-safe downcasting. The workspace lint policy denies `unsafe_code`, so every remaining raw downcast implementation is locally allowed with an explicit `TODO(unsafe-forbid)` reason. Do not add new raw-pointer downcast paths when a safe `Any`-style reference can do the job.
+- `lib.rs` enables crate-level warnings and the manifest inherits `[lints] workspace = true`: every new public item needs docs, `Debug`/visibility need to satisfy the workspace lint policy, and intentionally ignored return values should use named `_foo` bindings rather than bare `let _ = ...`.

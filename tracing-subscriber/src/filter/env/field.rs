@@ -373,7 +373,7 @@ impl MatchDebug {
             pattern: &'a str,
         }
 
-        impl fmt::Write for Matcher<'_> {
+        impl Write for Matcher<'_> {
             fn write_str(&mut self, s: &str) -> fmt::Result {
                 // If the string is longer than the remaining expected string,
                 // we know it won't match, so bail.

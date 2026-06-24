@@ -235,7 +235,7 @@ impl Subscriber for Registry {
     }
 
     #[inline]
-    fn new_span(&self, attrs: &span::Attributes<'_>) -> span::Id {
+    fn new_span(&self, attrs: &span::Attributes<'_>) -> Id {
         let parent = if attrs.is_root() {
             None
         } else if attrs.is_contextual() {
@@ -272,9 +272,9 @@ impl Subscriber for Registry {
     /// This is intentionally not implemented, as recording fields
     /// on a span is the responsibility of layers atop of this registry.
     #[inline]
-    fn record(&self, _: &span::Id, _: &span::Record<'_>) {}
+    fn record(&self, _: &Id, _: &span::Record<'_>) {}
 
-    fn record_follows_from(&self, _span: &span::Id, _follows: &span::Id) {}
+    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
 
     fn event_enabled(&self, _event: &Event<'_>) -> bool {
         if self.has_per_layer_filters() {
@@ -287,20 +287,20 @@ impl Subscriber for Registry {
     /// is the responsibility of layers atop of this registry.
     fn event(&self, _: &Event<'_>) {}
 
-    fn enter(&self, id: &span::Id) {
+    fn enter(&self, id: &Id) {
         self.current_spans
             .get_or_default()
             .borrow_mut()
             .push(id.clone());
     }
 
-    fn exit(&self, id: &span::Id) {
+    fn exit(&self, id: &Id) {
         if let Some(spans) = self.current_spans.get() {
-            spans.borrow_mut().pop(id);
+            let _popped = spans.borrow_mut().pop(id);
         }
     }
 
-    fn clone_span(&self, id: &span::Id) -> span::Id {
+    fn clone_span(&self, id: &Id) -> Id {
         let span = self
             .get(id)
             .unwrap_or_else(|| panic!(
@@ -343,7 +343,7 @@ impl Subscriber for Registry {
     /// removes the span if it is zero.
     ///
     /// The allocated span slot will be reused when a new span is created.
-    fn try_close(&self, id: span::Id) -> bool {
+    fn try_close(&self, id: Id) -> bool {
         let span = match self.get(&id) {
             Some(span) => span,
             None if std::thread::panicking() => return false,
@@ -408,7 +408,7 @@ impl Drop for CloseGuard<'_> {
             // `on_close` call. If the span is closing, it's okay to remove the
             // span.
             if c == 1 && self.is_closing {
-                self.registry.spans.clear(id_to_idx(&self.id));
+                let _cleared = self.registry.spans.clear(id_to_idx(&self.id));
             }
         });
     }
@@ -761,7 +761,7 @@ mod tests {
         // passed the subscriber itself to `with_default`, we could see the span
         // be dropped when the subscriber itself is dropped, destroying the
         // registry.
-        let dispatch = dispatcher::Dispatch::new(subscriber);
+        let dispatch = Dispatch::new(subscriber);
 
         dispatcher::with_default(&dispatch, || {
             let span = tracing::debug_span!("span1");
@@ -789,7 +789,7 @@ mod tests {
         // passed the subscriber itself to `with_default`, we could see the span
         // be dropped when the subscriber itself is dropped, destroying the
         // registry.
-        let dispatch = dispatcher::Dispatch::new(subscriber);
+        let dispatch = Dispatch::new(subscriber);
 
         let span2 = dispatcher::with_default(&dispatch, || {
             let span = tracing::debug_span!("span1");
@@ -822,7 +822,7 @@ mod tests {
         // passed the subscriber itself to `with_default`, we could see the span
         // be dropped when the subscriber itself is dropped, destroying the
         // registry.
-        let dispatch = dispatcher::Dispatch::new(subscriber);
+        let dispatch = Dispatch::new(subscriber);
 
         dispatcher::with_default(&dispatch, || {
             let span1 = tracing::debug_span!("span1");
@@ -855,7 +855,7 @@ mod tests {
         let (close_layer, state) = CloseLayer::new();
         let subscriber = close_layer.with_subscriber(Registry::default());
 
-        let dispatch = dispatcher::Dispatch::new(subscriber);
+        let dispatch = Dispatch::new(subscriber);
 
         dispatcher::with_default(&dispatch, || {
             let span1 = tracing::info_span!("parent");
@@ -882,7 +882,7 @@ mod tests {
         let (close_layer, state) = CloseLayer::new();
         let subscriber = close_layer.with_subscriber(Registry::default());
 
-        let dispatch = dispatcher::Dispatch::new(subscriber);
+        let dispatch = Dispatch::new(subscriber);
 
         dispatcher::with_default(&dispatch, || {
             let span1 = tracing::info_span!("grandparent");

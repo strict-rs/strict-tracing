@@ -1,3 +1,4 @@
+//! Tests interest caching across multiple layer filters.
 #![cfg(feature = "registry")]
 use std::{
     collections::HashMap,

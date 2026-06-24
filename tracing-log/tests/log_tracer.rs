@@ -1,3 +1,5 @@
+//! Tests for forwarding `log` records into `tracing`.
+
 use std::sync::{Arc, Mutex};
 use tracing::subscriber::with_default;
 use tracing_core::span::{Attributes, Record};

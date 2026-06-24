@@ -1,3 +1,5 @@
+//! Benchmarks for log-to-tracing forwarding.
+
 use criterion::{Criterion, criterion_group, criterion_main};
 use log::trace;
 use std::sync::Arc;
@@ -22,7 +24,7 @@ where
             let callback = callback.clone();
 
             std::thread::spawn(move || {
-                started_count.fetch_add(1, Ordering::SeqCst);
+                let _previous = started_count.fetch_add(1, Ordering::SeqCst);
                 while !barrier.load(Ordering::SeqCst) {
                     std::thread::yield_now();
                 }
@@ -71,7 +73,7 @@ fn bench_logger(c: &mut Criterion) {
 
     const THREAD_COUNT: usize = 8;
 
-    c.bench_function("log_from_multiple_threads", |b| {
+    let _benchmark = c.bench_function("log_from_multiple_threads", |b| {
         b.iter_custom(|count| {
             let durations = run_on_many_threads(THREAD_COUNT, move || {
                 let start = Instant::now();

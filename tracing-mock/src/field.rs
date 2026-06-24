@@ -391,7 +391,7 @@ impl ExpectedFields {
     ///
     /// [`ExpectedField::and`]: fn@crate::field::ExpectedField::and
     pub fn and(mut self, field: ExpectedField) -> Self {
-        self.fields.insert(field.name, field.value);
+        let _previous = self.fields.insert(field.name, field.value);
         self
     }
 

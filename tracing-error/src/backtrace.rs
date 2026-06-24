@@ -116,7 +116,7 @@ impl SpanTrace {
     /// [fields]: tracing::field
     /// [`Metadata`]: tracing::Metadata
     pub fn with_spans(&self, f: impl FnMut(&'static Metadata<'static>, &str) -> bool) {
-        self.span.with_subscriber(|(id, s)| {
+        let _result = self.span.with_subscriber(|(id, s)| {
             if let Some(getcx) = s.downcast_ref::<WithContext>() {
                 getcx.with_context(s, id, f);
             }
@@ -134,7 +134,7 @@ impl SpanTrace {
             SpanTraceStatusInner::Empty
         } else {
             let mut status = None;
-            self.span.with_subscriber(|(_, s)| {
+            let _result = self.span.with_subscriber(|(_, s)| {
                 if s.downcast_ref::<WithContext>().is_some() {
                     status = Some(SpanTraceStatusInner::Captured);
                 }
@@ -250,7 +250,7 @@ impl fmt::Debug for SpanTrace {
         write!(f, "SpanTrace ")?;
         let mut dbg = f.debug_list();
         self.with_spans(|metadata, fields| {
-            dbg.entry(&DebugSpan { metadata, fields });
+            let _entry = dbg.entry(&DebugSpan { metadata, fields });
             true
         });
         dbg.finish()

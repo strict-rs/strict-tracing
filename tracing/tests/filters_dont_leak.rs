@@ -1,4 +1,5 @@
 #![cfg(feature = "std")]
+//! Filter leakage regression coverage.
 
 use tracing_mock::*;
 

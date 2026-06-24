@@ -113,29 +113,29 @@ pub(crate) trait HasAncestry {
 
 impl HasAncestry for &Event<'_> {
     fn is_contextual(&self) -> bool {
-        (self as &Event<'_>).is_contextual()
+        (*self).is_contextual()
     }
 
     fn is_root(&self) -> bool {
-        (self as &Event<'_>).is_root()
+        (*self).is_root()
     }
 
     fn parent(&self) -> Option<&span::Id> {
-        (self as &Event<'_>).parent()
+        (*self).parent()
     }
 }
 
 impl HasAncestry for &Attributes<'_> {
     fn is_contextual(&self) -> bool {
-        (self as &Attributes<'_>).is_contextual()
+        (*self).is_contextual()
     }
 
     fn is_root(&self) -> bool {
-        (self as &Attributes<'_>).is_root()
+        (*self).is_root()
     }
 
     fn parent(&self) -> Option<&span::Id> {
-        (self as &Attributes<'_>).parent()
+        (*self).parent()
     }
 }
 

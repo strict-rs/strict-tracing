@@ -7,6 +7,7 @@ use std::task::{Context, Poll};
 use tracing::Instrument;
 
 #[derive(Debug)]
+/// A service wrapper that creates a new span for each request.
 pub struct Service<S, R, G = fn(&R) -> tracing::Span>
 where
     S: tower_service::Service<R>,
@@ -27,6 +28,7 @@ mod layer {
     use super::*;
 
     #[derive(Debug)]
+    /// A Tower layer that applies request-span instrumentation.
     pub struct Layer<R, G = fn(&R) -> tracing::Span>
     where
         G: GetSpan<R> + Clone,
@@ -35,6 +37,7 @@ mod layer {
         _p: PhantomData<fn(R)>,
     }
 
+    /// Returns a layer that instruments each request with `get_span`.
     pub fn layer<R, G>(get_span: G) -> Layer<R, G>
     where
         G: GetSpan<R> + Clone,
@@ -77,11 +80,13 @@ pub use self::make::MakeService;
 
 #[cfg(feature = "tower-make")]
 #[cfg_attr(docsrs, doc(cfg(feature = "tower-make")))]
+/// Make-service adapters that add request-span instrumentation.
 pub mod make {
     use super::*;
     use pin_project_lite::pin_project;
 
     #[derive(Debug)]
+    /// A make-service wrapper that instruments produced services by request.
     pub struct MakeService<S, R, G = fn(&R) -> tracing::Span> {
         get_span: G,
         inner: S,
@@ -91,6 +96,7 @@ pub mod make {
     #[cfg(feature = "tower-layer")]
     #[cfg_attr(docsrs, doc(cfg(feature = "tower-layer")))]
     #[derive(Debug)]
+    /// A Tower layer that applies request-span instrumentation to make-services.
     pub struct MakeLayer<R, T, G = fn(&R) -> tracing::Span>
     where
         G: GetSpan<R> + Clone,
@@ -101,6 +107,7 @@ pub mod make {
 
     pin_project! {
         #[derive(Debug)]
+        /// Future returned by [`MakeService`].
         pub struct MakeFuture<F, R, G = fn(&R) -> tracing::Span> {
             get_span: Option<G>,
             #[pin]
@@ -111,6 +118,7 @@ pub mod make {
 
     #[cfg(feature = "tower-layer")]
     #[cfg_attr(docsrs, doc(cfg(feature = "tower-layer")))]
+    /// Returns a make-service layer that instruments each produced service by request.
     pub fn layer<R, T, G>(get_span: G) -> MakeLayer<R, T, G>
     where
         G: GetSpan<R> + Clone,
@@ -181,6 +189,7 @@ pub mod make {
     where
         G: GetSpan<R> + Clone,
     {
+        /// Creates a new request-instrumenting make-service.
         pub fn new<T>(inner: S, get_span: G) -> Self
         where
             S: tower_make::MakeService<T, R>,
@@ -269,6 +278,7 @@ where
     S: tower_service::Service<R>,
     G: GetSpan<R> + Clone,
 {
+    /// Creates a new request-instrumenting service.
     pub fn new(inner: S, get_span: G) -> Self {
         Service {
             get_span,

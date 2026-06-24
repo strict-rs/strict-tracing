@@ -35,6 +35,7 @@ once_cell = []
 maintenance = { status = "actively-developed" }
 
 [dependencies]
+spin = { workspace = true }
 
 [target.'cfg(tracing_unstable)'.dependencies]
 valuable = { workspace = true, optional = true }

@@ -1,4 +1,4 @@
-pub(crate) use crate::spin::MutexGuard;
+pub(crate) type MutexGuard<'a, T> = spin::mutex::MutexGuard<'a, T, spin::Spin>;
 
 /// This wraps `spin::Mutex` to return a `Result`, so that it can be
 /// used with code written against `std::sync::Mutex`.
@@ -7,13 +7,13 @@ pub(crate) use crate::spin::MutexGuard;
 /// by `lock` will always be `Ok`.
 #[derive(Debug, Default)]
 pub(crate) struct Mutex<T> {
-    inner: crate::spin::Mutex<T>,
+    inner: spin::Mutex<T>,
 }
 
 impl<T> Mutex<T> {
     pub(crate) const fn new(data: T) -> Self {
         Self {
-            inner: crate::spin::Mutex::new(data),
+            inner: spin::Mutex::new(data),
         }
     }
 

@@ -39,7 +39,7 @@ async fn write(stream: &mut TcpStream) -> io::Result<usize> {
 }
 
 #[tokio::main]
-pub async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     let addr = "127.0.0.1:6142".parse()?;
 
     tracing_subscriber::fmt()
@@ -51,7 +51,7 @@ pub async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // Note that this is the Tokio TcpStream, which is fully async.
     let mut stream = connect(&addr).await?;
 
-    write(&mut stream).await?;
+    let _bytes_written = write(&mut stream).await?;
 
     Ok(())
 }

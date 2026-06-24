@@ -1,3 +1,4 @@
+//! Tests cached layer filters alongside other layers.
 #![cfg(feature = "registry")]
 use tracing::Level;
 use tracing_mock::{

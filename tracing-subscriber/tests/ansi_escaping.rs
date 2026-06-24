@@ -1,3 +1,5 @@
+//! Tests ANSI escape sanitization in formatted output.
+
 use std::sync::{Arc, Mutex};
 use tracing_subscriber::fmt::MakeWriter;
 

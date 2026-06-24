@@ -25,11 +25,11 @@
 
 use bytes::Bytes;
 use futures::{
-    Future,
     future::{self, Ready},
+    Future,
 };
-use http::{Method, Request, Response, StatusCode, header};
-use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
+use http::{header, Method, Request, Response, StatusCode};
+use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
 use hyper::body::Incoming;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::{TokioExecutor, TokioIo};
@@ -49,10 +49,10 @@ use tokio::net::TcpListener;
 use tokio::{time, try_join};
 use tower::{Service, ServiceBuilder, ServiceExt};
 use tracing::{
-    self, Instrument as _, Level, Span, debug, error, info, info_span, span, trace, warn,
+    self, debug, error, info, info_span, span, trace, warn, Instrument as _, Level, Span,
 };
 use tracing_subscriber::{filter::EnvFilter, reload::Handle};
-use tracing_tower::{GetSpan, request_span, request_span::make};
+use tracing_tower::{request_span, request_span::make, GetSpan};
 
 type Err = Box<dyn Error + Send + Sync + 'static>;
 type RspBody = BoxBody<Bytes, Infallible>;
@@ -104,7 +104,7 @@ where
         let io = TokioIo::new(stream);
         let svc = make_svc.call(remote_addr).await?;
         let hyper_svc = TowerToHyperService::new(svc);
-        tokio::spawn(async move {
+        let _task = tokio::spawn(async move {
             if let Err(e) = auto::Builder::new(TokioExecutor::new())
                 .serve_connection(io, hyper_svc)
                 .await
@@ -124,7 +124,7 @@ where
         let (stream, _remote_addr) = listener.accept().await?;
         let io = TokioIo::new(stream);
         let hyper_svc = TowerToHyperService::new(admin.clone());
-        tokio::spawn(async move {
+        let _task = tokio::spawn(async move {
             if let Err(e) = auto::Builder::new(TokioExecutor::new())
                 .serve_connection(io, hyper_svc)
                 .await
@@ -255,7 +255,7 @@ where
 {
     type Response = Response<RspBody>;
     type Error = Err;
-    type Future = Pin<Box<dyn Future<Output = Result<Response<RspBody>, Err>> + std::marker::Send>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Response<RspBody>, Err>> + Send>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -295,9 +295,7 @@ where
         use std::str;
         let body = str::from_utf8(bytes.as_ref()).map_err(|e| format!("{}", e))?;
         trace!(request.body = ?body);
-        let new_filter = body
-            .parse::<tracing_subscriber::filter::EnvFilter>()
-            .map_err(|e| format!("{}", e))?;
+        let new_filter = body.parse::<EnvFilter>().map_err(|e| format!("{}", e))?;
         self.handle.reload(new_filter).map_err(|e| format!("{}", e))
     }
 }
@@ -314,7 +312,7 @@ fn empty() -> Bytes {
 }
 
 impl HandleError {
-    fn bad_request(e: impl std::error::Error + Send + 'static) -> Self {
+    fn bad_request(e: impl Error + Send + 'static) -> Self {
         HandleError::BadRequest(Box::new(e))
     }
 }
@@ -330,7 +328,7 @@ impl fmt::Display for HandleError {
     }
 }
 
-impl std::error::Error for HandleError {}
+impl Error for HandleError {}
 
 impl fmt::Display for WrongMethod {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -338,7 +336,7 @@ impl fmt::Display for WrongMethod {
     }
 }
 
-impl std::error::Error for WrongMethod {}
+impl Error for WrongMethod {}
 
 fn gen_uri(authority: &str) -> (usize, String) {
     static ALPHABET: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -357,10 +355,10 @@ async fn load_gen(addr: SocketAddr) -> Result<(), Err> {
         .layer(request_span::layer(req_span))
         .timeout(Duration::from_millis(200))
         .service(client);
-    let mut interval = tokio::time::interval(Duration::from_millis(50));
+    let mut interval = time::interval(Duration::from_millis(50));
 
     loop {
-        interval.tick().await;
+        let _instant = interval.tick().await;
         let authority = format!("{}", addr);
         let mut svc = svc.clone().ready_oneshot().await?;
 
@@ -410,7 +408,7 @@ async fn load_gen(addr: SocketAddr) -> Result<(), Err> {
             .await
         }
         .instrument(info_span!(target: "gen", "generated_request", remote.addr=%addr).or_current());
-        tokio::spawn(f);
+        let _task = tokio::spawn(f);
     }
 }
 

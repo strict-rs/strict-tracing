@@ -1,3 +1,4 @@
+//! Tests event enabling behavior for subscriber layers.
 #![cfg(feature = "registry")]
 
 use std::sync::{Arc, Mutex};

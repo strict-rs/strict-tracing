@@ -38,6 +38,7 @@ use core::{
     cell::{Cell, RefCell},
     marker::PhantomData,
     ops::Deref,
+    ptr,
 };
 use std::thread_local;
 use tracing_core::{
@@ -747,7 +748,7 @@ where
         // to be able to perform any other registration steps. However, we'll
         // ignore its `Interest`.
         if !interest.is_never() {
-            self.layer.register_callsite(metadata);
+            let _layer_interest = self.layer.register_callsite(metadata);
         }
 
         // Add our `Interest` to the current sum of per-layer filter `Interest`s
@@ -870,15 +871,23 @@ where
 
     #[doc(hidden)]
     #[inline]
+    #[allow(
+        unsafe_code,
+        reason = "TODO(unsafe-forbid): preserve Filtered<Layer>::downcast_raw until safe Any references replace it."
+    )]
     unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
         match id {
-            id if id == TypeId::of::<Self>() => Some(self as *const _ as *const ()),
-            id if id == TypeId::of::<L>() => Some(&self.layer as *const _ as *const ()),
-            id if id == TypeId::of::<F>() => Some(&self.filter as *const _ as *const ()),
+            id if id == TypeId::of::<Self>() => Some(ptr::from_ref(self).cast::<()>()),
+            id if id == TypeId::of::<L>() => Some(ptr::from_ref(&self.layer).cast::<()>()),
+            id if id == TypeId::of::<F>() => Some(ptr::from_ref(&self.filter).cast::<()>()),
             id if id == TypeId::of::<MagicPlfDowncastMarker>() => {
-                Some(&self.id as *const _ as *const ())
+                Some(ptr::from_ref(&self.id).cast::<()>())
             }
-            _ => unsafe { self.layer.downcast_raw(id) },
+            _ => unsafe {
+                // SAFETY: This forwards the existing raw downcast
+                // compatibility hook. A safe `Any` replacement should cover this.
+                self.layer.downcast_raw(id)
+            },
         }
     }
 }
@@ -1074,10 +1083,10 @@ impl fmt::Debug for FilterMap {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let alt = f.alternate();
         let mut s = f.debug_struct("FilterMap");
-        s.field("disabled_by", &format_args!("{:?}", &FmtBitset(self.bits)));
+        let _builder = s.field("disabled_by", &format_args!("{:?}", &FmtBitset(self.bits)));
 
         if alt {
-            s.field("bits", &format_args!("{:b}", self.bits));
+            let _builder = s.field("bits", &format_args!("{:b}", self.bits));
         }
 
         s.finish()
@@ -1297,7 +1306,8 @@ pub(crate) fn subscriber_has_plf<S>(subscriber: &S) -> bool
 where
     S: Subscriber,
 {
-    (subscriber as &dyn Subscriber).is::<MagicPlfDowncastMarker>()
+    let subscriber: &dyn Subscriber = subscriber;
+    subscriber.is::<MagicPlfDowncastMarker>()
 }
 
 /// Does a type implementing `Layer` contain any per-layer filters?
@@ -1306,8 +1316,12 @@ where
     L: Layer<S>,
     S: Subscriber,
 {
+    #[allow(
+        unsafe_code,
+        reason = "TODO(unsafe-forbid): preserve per-layer filter marker probing through Layer::downcast_raw."
+    )]
     unsafe {
-        // Safety: we're not actually *doing* anything with this pointer --- we
+        // SAFETY: we're not actually *doing* anything with this pointer --- we
         // only care about the `Option`, which we're turning into a `bool`. So
         // even if the layer decides to be evil and give us some kind of invalid
         // pointer, we don't ever dereference it, so this is always safe.
@@ -1324,7 +1338,7 @@ impl fmt::Debug for FmtBitset {
         for bit in 0..64 {
             // if the `bit`-th bit is set, add it to the debug set
             if self.0 & (1 << bit) != 0 {
-                set.entry(&bit);
+                let _set = set.entry(&bit);
             }
         }
         set.finish()

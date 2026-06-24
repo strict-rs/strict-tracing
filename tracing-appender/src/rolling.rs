@@ -225,7 +225,7 @@ impl RollingFileAppender {
     }
 }
 
-impl io::Write for RollingFileAppender {
+impl Write for RollingFileAppender {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let now = self.now();
         let writer = self.writer.get_mut();
@@ -262,7 +262,7 @@ impl<'a> tracing_subscriber::fmt::writer::MakeWriter<'a> for RollingFileAppender
     }
 }
 
-impl fmt::Debug for RollingFileAppender {
+impl Debug for RollingFileAppender {
     // This manual impl is required because of the `now` field (only present
     // with `cfg(test)`), which is not `Debug`...
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -580,7 +580,7 @@ impl Rotation {
 
 // === impl RollingWriter ===
 
-impl io::Write for RollingWriter<'_> {
+impl Write for RollingWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         (&*self.0).write(buf)
     }
@@ -601,7 +601,7 @@ impl Inner {
         log_filename_suffix: Option<String>,
         log_latest_symlink_name: Option<String>,
         max_files: Option<usize>,
-    ) -> Result<(Self, RwLock<File>), builder::InitError> {
+    ) -> Result<(Self, RwLock<File>), InitError> {
         let log_directory = directory.as_ref().to_path_buf();
         let date_format = rotation.date_format();
         let next_date = rotation.next_date(&now);
@@ -797,7 +797,7 @@ fn create_writer(
 ) -> Result<File, InitError> {
     let path = directory.join(filename);
     let mut open_options = OpenOptions::new();
-    open_options.append(true).create(true);
+    let _options = open_options.append(true).create(true);
 
     let new_file = open_options.open(&path).or_else(|_| {
         if let Some(parent) = path.parent() {
@@ -810,7 +810,7 @@ fn create_writer(
 
     if let Some(symlink_name) = latest_symlink_name {
         let symlink_path = directory.join(symlink_name);
-        let _ = symlink::remove_symlink_file(&symlink_path);
+        let _remove_result = symlink::remove_symlink_file(&symlink_path);
         symlink::symlink_file(path, symlink_path).map_err(InitError::ctx(
             "failed to create symlink to latest log file",
         ))?;

@@ -828,19 +828,19 @@ impl fmt::Debug for ExpectedSpan {
         let mut s = f.debug_struct("MockSpan");
 
         if let Some(id) = self.id() {
-            s.field("id", &id);
+            let _builder = s.field("id", &id);
         }
 
         if let Some(name) = self.name() {
-            s.field("name", &name);
+            let _builder = s.field("name", &name);
         }
 
         if let Some(level) = self.level() {
-            s.field("level", &format_args!("{:?}", level));
+            let _builder = s.field("level", &format_args!("{:?}", level));
         }
 
         if let Some(target) = self.target() {
-            s.field("target", &target);
+            let _builder = s.field("target", &target);
         }
 
         s.finish()
@@ -940,23 +940,23 @@ impl fmt::Debug for NewSpan {
         let mut s = f.debug_struct("NewSpan");
 
         if let Some(name) = self.span.name() {
-            s.field("name", &name);
+            let _builder = s.field("name", &name);
         }
 
         if let Some(level) = self.span.level() {
-            s.field("level", &format_args!("{:?}", level));
+            let _builder = s.field("level", &format_args!("{:?}", level));
         }
 
         if let Some(target) = self.span.target() {
-            s.field("target", &target);
+            let _builder = s.field("target", &target);
         }
 
         if let Some(ref parent) = self.ancestry {
-            s.field("parent", &format_args!("{:?}", parent));
+            let _builder = s.field("parent", &format_args!("{:?}", parent));
         }
 
         if !self.fields.is_empty() {
-            s.field("fields", &self.fields);
+            let _builder = s.field("fields", &self.fields);
         }
 
         s.finish()
@@ -987,7 +987,8 @@ impl ExpectedId {
     }
 
     pub(crate) fn set(&self, span_id: u64) -> Result<(), SetActualSpanIdError> {
-        self.inner
+        let _previous = self
+            .inner
             .compare_exchange(Self::UNSET, span_id, Ordering::Relaxed, Ordering::Relaxed)
             .map_err(|current| SetActualSpanIdError {
                 previous_span_id: current,

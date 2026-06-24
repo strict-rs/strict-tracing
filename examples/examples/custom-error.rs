@@ -36,7 +36,7 @@ impl fmt::Display for FooError {
 }
 
 #[tracing::instrument]
-fn do_something(foo: &str) -> Result<&'static str, impl Error + Send + Sync + 'static> {
+fn do_something(foo: &str) -> Result<&'static str, impl Error + Send + Sync + 'static + use<>> {
     do_another_thing(42, false)
 }
 
@@ -44,7 +44,7 @@ fn do_something(foo: &str) -> Result<&'static str, impl Error + Send + Sync + 's
 fn do_another_thing(
     answer: usize,
     will_succeed: bool,
-) -> Result<&'static str, impl Error + Send + Sync + 'static> {
+) -> Result<&'static str, impl Error + Send + Sync + 'static + use<>> {
     Err(FooError::new("something broke, lol"))
 }
 

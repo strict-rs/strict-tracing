@@ -1,3 +1,4 @@
+//! Tests reloadable filters updating log max levels.
 #![cfg(all(feature = "env-filter", feature = "tracing-log"))]
 
 use tracing::{self, Level};

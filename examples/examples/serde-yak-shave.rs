@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tracing::debug;
@@ -14,7 +16,8 @@ use serde_json::json;
 #[path = "fmt/yak_shave.rs"]
 mod yak_shave;
 
-pub struct JsonSubscriber {
+#[derive(Debug)]
+struct JsonSubscriber {
     next_id: AtomicUsize, // you need to assign span IDs, so you need a counter
 }
 

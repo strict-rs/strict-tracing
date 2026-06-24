@@ -100,7 +100,7 @@ pub trait MakeWriter<'a> {
     ///
     /// [`io::Write`]: std::io::Write
     /// [`make_writer`]: MakeWriter::make_writer
-    type Writer: io::Write;
+    type Writer: Write;
 
     /// Returns an instance of [`Writer`].
     ///
@@ -512,7 +512,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
 /// [`io::stdout`]: std::io::stdout
 /// [`io::stderr`]: std::io::stderr
 /// [`print!`]: std::print!
-#[derive(Default, Debug)]
+#[derive(Copy, Clone, Default, Debug)]
 pub struct TestWriter {
     /// Whether or not to use `stderr` instead of the default `stdout` as
     /// the underlying stream to write to.
@@ -571,7 +571,7 @@ pub enum EitherWriter<A, B> {
 /// event's [`Metadata`].
 ///
 /// [writer]: std::io::Write
-pub type OptionalWriter<T> = EitherWriter<T, std::io::Sink>;
+pub type OptionalWriter<T> = EitherWriter<T, io::Sink>;
 
 /// A [`MakeWriter`] combinator that only returns an enabled [writer] for spans
 /// and events with metadata at or below a specified verbosity [`Level`].
@@ -682,7 +682,7 @@ pub(in crate::fmt) struct WriteAdaptor<'a> {
 impl<'a, F, W> MakeWriter<'a> for F
 where
     F: Fn() -> W,
-    W: io::Write,
+    W: Write,
 {
     type Writer = W;
 
@@ -693,7 +693,7 @@ where
 
 impl<'a, W> MakeWriter<'a> for Arc<W>
 where
-    &'a W: io::Write + 'a,
+    &'a W: Write + 'a,
 {
     type Writer = &'a W;
     fn make_writer(&'a self) -> Self::Writer {
@@ -722,7 +722,7 @@ impl TestWriter {
     }
 }
 
-impl io::Write for TestWriter {
+impl Write for TestWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let out_str = String::from_utf8_lossy(buf);
         if self.use_stderr {
@@ -807,7 +807,7 @@ where
 
 impl<'a, W> MakeWriter<'a> for Mutex<W>
 where
-    W: io::Write + 'a,
+    W: Write + 'a,
 {
     type Writer = MutexGuardWriter<'a, W>;
 
@@ -816,9 +816,9 @@ where
     }
 }
 
-impl<W> io::Write for MutexGuardWriter<'_, W>
+impl<W> Write for MutexGuardWriter<'_, W>
 where
-    W: io::Write,
+    W: Write,
 {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
@@ -841,17 +841,17 @@ where
     }
 
     #[inline]
-    fn write_fmt(&mut self, fmt: std::fmt::Arguments<'_>) -> io::Result<()> {
+    fn write_fmt(&mut self, fmt: fmt::Arguments<'_>) -> io::Result<()> {
         self.0.write_fmt(fmt)
     }
 }
 
 // === impl EitherWriter ===
 
-impl<A, B> io::Write for EitherWriter<A, B>
+impl<A, B> Write for EitherWriter<A, B>
 where
-    A: io::Write,
-    B: io::Write,
+    A: Write,
+    B: Write,
 {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
@@ -886,7 +886,7 @@ where
     }
 
     #[inline]
-    fn write_fmt(&mut self, fmt: std::fmt::Arguments<'_>) -> io::Result<()> {
+    fn write_fmt(&mut self, fmt: fmt::Arguments<'_>) -> io::Result<()> {
         match self {
             EitherWriter::A(a) => a.write_fmt(fmt),
             EitherWriter::B(b) => b.write_fmt(fmt),
@@ -904,7 +904,7 @@ impl<T> OptionalWriter<T> {
     /// [disabled writer]: std::io::sink
     #[inline]
     pub fn none() -> Self {
-        EitherWriter::B(std::io::sink())
+        EitherWriter::B(io::sink())
     }
 
     /// Returns an enabled writer of type `T`.
@@ -1076,10 +1076,10 @@ macro_rules! impl_tee {
     }
 }
 
-impl<A, B> io::Write for Tee<A, B>
+impl<A, B> Write for Tee<A, B>
 where
-    A: io::Write,
-    B: io::Write,
+    A: Write,
+    B: Write,
 {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
@@ -1106,7 +1106,7 @@ where
     }
 
     #[inline]
-    fn write_fmt(&mut self, fmt: std::fmt::Arguments<'_>) -> io::Result<()> {
+    fn write_fmt(&mut self, fmt: fmt::Arguments<'_>) -> io::Result<()> {
         impl_tee!(self.write_fmt(fmt));
         Ok(())
     }
@@ -1130,7 +1130,7 @@ impl<'a, A, B, W> MakeWriter<'a> for OrElse<A, B>
 where
     A: MakeWriter<'a, Writer = OptionalWriter<W>>,
     B: MakeWriter<'a>,
-    W: io::Write,
+    W: Write,
 {
     type Writer = EitherWriter<W, B::Writer>;
 
@@ -1154,9 +1154,9 @@ where
 // === impl ArcWriter ===
 
 #[allow(deprecated)]
-impl<W> io::Write for ArcWriter<W>
+impl<W> Write for ArcWriter<W>
 where
-    for<'a> &'a W: io::Write,
+    for<'a> &'a W: Write,
 {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
@@ -1179,7 +1179,7 @@ where
     }
 
     #[inline]
-    fn write_fmt(&mut self, fmt: std::fmt::Arguments<'_>) -> io::Result<()> {
+    fn write_fmt(&mut self, fmt: fmt::Arguments<'_>) -> io::Result<()> {
         (&*self.0).write_fmt(fmt)
     }
 }
@@ -1193,7 +1193,7 @@ impl<'a> WriteAdaptor<'a> {
     }
 }
 #[cfg(any(feature = "json", feature = "time"))]
-impl io::Write for WriteAdaptor<'_> {
+impl Write for WriteAdaptor<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         let s =
             std::str::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -1257,7 +1257,7 @@ mod test {
         assert!(actual.contains(expected.as_str()));
     }
 
-    fn has_lines(buf: &Mutex<Vec<u8>>, msgs: &[(tracing::Level, &str)]) {
+    fn has_lines(buf: &Mutex<Vec<u8>>, msgs: &[(Level, &str)]) {
         let actual = String::from_utf8(buf.try_lock().unwrap().to_vec()).unwrap();
         let mut expected_lines = msgs.iter();
         for line in actual.lines() {

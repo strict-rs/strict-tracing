@@ -78,6 +78,8 @@ use tracing_core::{
     subscriber::{Interest, Subscriber},
     Dispatch, Event, LevelFilter, Metadata,
 };
+#[cfg(feature = "tracing-log")]
+use tracing_log::{log, AsLog};
 
 /// Wraps a `Layer` or `Filter`, allowing it to be reloaded dynamically at runtime.
 #[derive(Debug)]
@@ -185,8 +187,12 @@ where
     }
 
     #[doc(hidden)]
+    #[allow(
+        unsafe_code,
+        reason = "TODO(unsafe-forbid): preserve reload Layer::downcast_raw marker forwarding until safe Any references replace it."
+    )]
     unsafe fn downcast_raw(&self, id: TypeId) -> Option<*const ()> {
-        // Safety: it is generally unsafe to downcast through a reload, because
+        // SAFETY: it is generally unsafe to downcast through a reload, because
         // the pointer can be invalidated after the lock is dropped.
         // `NoneLayerMarker` is a special case because it
         // is never dereferenced.
@@ -197,6 +203,8 @@ where
         // actually point to the global static singleton `NoneLayerMarker`,
         // rather than to a field inside the lock.
         if id == TypeId::of::<layer::NoneLayerMarker>() {
+            // SAFETY: this forwards only the `NoneLayerMarker` probe, which
+            // is used as a boolean and points at a static marker.
             unsafe { return try_lock!(self.inner.read(), else return None).downcast_raw(id) }
         }
 
@@ -208,9 +216,9 @@ where
 
 #[cfg(all(feature = "registry", feature = "std"))]
 #[cfg_attr(docsrs, doc(cfg(all(feature = "registry", feature = "std"))))]
-impl<S, L> crate::layer::Filter<S> for Layer<L, S>
+impl<S, L> layer::Filter<S> for Layer<L, S>
 where
-    L: crate::layer::Filter<S> + 'static,
+    L: layer::Filter<S> + 'static,
     S: Subscriber,
 {
     #[inline]
@@ -323,9 +331,7 @@ impl<L, S> Handle<L, S> {
         // *after* rebuilding the interest cache, as that's when the `tracing`
         // max level filter is re-computed.
         #[cfg(feature = "tracing-log")]
-        tracing_log::log::set_max_level(tracing_log::AsLog::as_log(
-            &crate::filter::LevelFilter::current(),
-        ));
+        log::set_max_level(AsLog::as_log(&LevelFilter::current()));
 
         Ok(())
     }

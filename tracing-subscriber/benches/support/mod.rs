@@ -23,27 +23,27 @@ impl MultithreadedBench {
 
     pub(super) fn thread(&self, f: impl FnOnce() + Send + 'static) -> &Self {
         self.thread_with_setup(|start| {
-            start.wait();
+            let _wait = start.wait();
             f()
         })
     }
 
     pub(super) fn thread_with_setup(&self, f: impl FnOnce(&Barrier) + Send + 'static) -> &Self {
         let this = self.clone();
-        thread::spawn(move || {
+        let _thread = thread::spawn(move || {
             let dispatch = this.dispatch.clone();
             tracing::dispatcher::with_default(&dispatch, move || {
                 f(&this.start);
-                this.end.wait();
+                let _wait = this.end.wait();
             })
         });
         self
     }
 
     pub(super) fn run(&self) -> Duration {
-        self.start.wait();
+        let _wait = self.start.wait();
         let t0 = Instant::now();
-        self.end.wait();
+        let _wait = self.end.wait();
         t0.elapsed()
     }
 }

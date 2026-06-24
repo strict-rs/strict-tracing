@@ -415,7 +415,7 @@ where
         write!(&mut stack, " {}", samples.as_nanos())
             .expect("expected: write to String never fails");
 
-        let _ = writeln!(*self.out.lock().unwrap(), "{}", stack);
+        let _write_result = writeln!(*self.out.lock().unwrap(), "{}", stack);
     }
 
     fn on_exit(&self, id: &span::Id, ctx: Context<'_, S>) {
@@ -460,7 +460,7 @@ where
             "expected: write to String never fails"
         );
 
-        let _ = writeln!(*expect!(self.out.lock()), "{}", stack);
+        let _write_result = writeln!(*expect!(self.out.lock()), "{}", stack);
     }
 }
 

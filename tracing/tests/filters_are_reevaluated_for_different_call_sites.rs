@@ -1,3 +1,5 @@
+//! Filter re-evaluation coverage for distinct callsites with matching names.
+
 // Tests that depend on a count of the number of times their filter is evaluated
 // cant exist in the same file with other tests that add subscribers to the
 // registry. The registry was changed so that each time a new dispatcher is
@@ -29,11 +31,11 @@ fn filters_are_reevaluated_for_different_call_sites() {
             println!("Filter: {:?}", meta.name());
             match meta.name() {
                 "charlie" => {
-                    charlie_count2.fetch_add(1, Ordering::Relaxed);
+                    let _previous = charlie_count2.fetch_add(1, Ordering::Relaxed);
                     false
                 }
                 "dave" => {
-                    dave_count2.fetch_add(1, Ordering::Relaxed);
+                    let _previous = dave_count2.fetch_add(1, Ordering::Relaxed);
                     true
                 }
                 _ => false,

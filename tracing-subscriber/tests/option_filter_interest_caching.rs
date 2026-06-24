@@ -1,3 +1,5 @@
+//! Tests interest caching for optional filters.
+
 // A separate test crate for `Option<Filter>` for isolation from other tests
 // that may influence the interest cache.
 
@@ -28,7 +30,7 @@ fn none_interest_cache() {
     let layer_filter_fn = layer_filter_fn.with_filter(filter::filter_fn({
         let times_filtered = Arc::clone(&times_filtered);
         move |_| {
-            times_filtered.fetch_add(1, Ordering::Relaxed);
+            let _previous = times_filtered.fetch_add(1, Ordering::Relaxed);
             true
         }
     }));

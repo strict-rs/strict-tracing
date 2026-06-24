@@ -5,7 +5,7 @@
 ## Architecture
 
 - `lib.rs` defines the two blanket extension traits and their wrapper types. `Instrument` (implemented for all `Sized` types) wraps a value in `Instrumented<T>`, which enters the attached `Span` on every poll/drop; `WithSubscriber` (gated on `std`) wraps in `WithDispatch<T>`, which sets a `Dispatch` as the thread-default while the inner value is polled. The actual `Future`/`Stream`/`Sink` impls for these wrappers are conditional on the integration features below.
-- `Instrumented<T>` has two definitions: under `std-future` it is a `pin_project!` struct storing `inner: ManuallyDrop<T>` so `PinnedDrop` can enter the span *before* dropping `T` (see the `span_and_inner_pin_mut`/`into_inner` SAFETY comments — `ManuallyDrop` + `mem::forget` is load-bearing); without `std-future` it is a plain `{ inner, span }` struct.
+- `Instrumented<T>` has two definitions: under `std-future` it is a `pin_project!` struct storing `inner: ManuallyDrop<T>` so `PinnedDrop` can enter the span *before* dropping `T` (see the `span_and_inner_pin_mut`/`into_inner` SAFETY comments — `ManuallyDrop` + `mem::forget` is load-bearing); without `std-future` it is a plain `{ inner, span }` struct. The remaining unsafe projection/drop code is locally allowed under `TODO(unsafe-forbid)` reasons; keep those blocks narrow.
 - `executor/` instruments task spawners. `futures_01.rs` impls futures 0.1's `Executor`; its `tokio_executor` submodule (`tokio-executor` feature, implied by `tokio`) impls `tokio_executor::Executor`/`TypedExecutor` for the wrappers, and its `tokio_runtime` submodule (`tokio` only) adds tokio 0.1 `Runtime`/`current_thread` conveniences. `futures_03.rs` impls futures 0.3's `Spawn`/`LocalSpawn` from `futures-task`. `mod.rs` just `cfg`-gates these.
 - `stdlib.rs` re-exports `std::*` or `core`/`alloc` (as `crate::stdlib::...`) so the crate can build `no_std` when `std` is off.
 
@@ -22,3 +22,4 @@
 
 - `cargo nextest run -p tracing-futures` runs the inline `#[cfg(test)]` modules plus the one integration test, `tests/std_future.rs`. Most tests are feature-gated: the futures 0.1 / 0.3 unit-test modules need `--features futures-01` / `--features futures-03`, and `std_future.rs` needs `futures-03` (it uses `tracing_test::{PollN, block_on_future}` and `tracing_mock`).
 - CI's `cargo minimal-versions check --feature-powerset` step excludes `futures-01 futures_01 tokio tokio_01 tokio-executor` for this crate (those legacy deps don't satisfy minimal-versions), so a full powerset check locally will hit combinations CI deliberately skips.
+- The `std-future` path now imports `Future`/`Poll` through `stdlib`; keep `no_std` compatibility by routing std/core/alloc references through `stdlib.rs` instead of sprinkling direct `std::...` paths.

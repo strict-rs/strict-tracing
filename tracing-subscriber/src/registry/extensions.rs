@@ -136,29 +136,21 @@ impl ExtensionsInner {
     pub(crate) fn insert<T: Send + Sync + 'static>(&mut self, val: T) -> Option<T> {
         self.map
             .insert(TypeId::of::<T>(), Box::new(val))
-            .and_then(|boxed| {
-                #[allow(warnings)]
-                {
-                    (boxed as Box<dyn Any + 'static>)
-                        .downcast()
-                        .ok()
-                        .map(|boxed| *boxed)
-                }
-            })
+            .and_then(|boxed| boxed.downcast().ok().map(|boxed| *boxed))
     }
 
     /// Get a reference to a type previously inserted on this `Extensions`.
     pub(crate) fn get<T: 'static>(&self) -> Option<&T> {
         self.map
             .get(&TypeId::of::<T>())
-            .and_then(|boxed| (&**boxed as &(dyn Any + 'static)).downcast_ref())
+            .and_then(|boxed| boxed.downcast_ref())
     }
 
     /// Get a mutable reference to a type previously inserted on this `Extensions`.
     pub(crate) fn get_mut<T: 'static>(&mut self) -> Option<&mut T> {
         self.map
             .get_mut(&TypeId::of::<T>())
-            .and_then(|boxed| (&mut **boxed as &mut (dyn Any + 'static)).downcast_mut())
+            .and_then(|boxed| boxed.downcast_mut())
     }
 
     /// Remove a type from this `Extensions`.
@@ -166,13 +158,7 @@ impl ExtensionsInner {
     /// If a extension of this type existed, it will be returned.
     pub(crate) fn remove<T: Send + Sync + 'static>(&mut self) -> Option<T> {
         self.map.remove(&TypeId::of::<T>()).and_then(|boxed| {
-            #[allow(warnings)]
-            {
-                (boxed as Box<dyn Any + 'static>)
-                    .downcast()
-                    .ok()
-                    .map(|boxed| *boxed)
-            }
+            boxed.downcast().ok().map(|boxed| *boxed)
         })
     }
 
@@ -207,8 +193,8 @@ mod tests {
     fn test_extensions() {
         let mut extensions = ExtensionsInner::new();
 
-        extensions.insert(5i32);
-        extensions.insert(MyType(10));
+        let _previous = extensions.insert(5i32);
+        let _previous = extensions.insert(MyType(10));
 
         assert_eq!(extensions.get(), Some(&5i32));
         assert_eq!(extensions.get_mut(), Some(&mut 5i32));
@@ -223,9 +209,9 @@ mod tests {
     #[test]
     fn clear_retains_capacity() {
         let mut extensions = ExtensionsInner::new();
-        extensions.insert(5i32);
-        extensions.insert(MyType(10));
-        extensions.insert(true);
+        let _previous = extensions.insert(5i32);
+        let _previous = extensions.insert(MyType(10));
+        let _previous = extensions.insert(true);
 
         assert_eq!(extensions.map.len(), 3);
         let prev_capacity = extensions.map.capacity();
@@ -255,8 +241,8 @@ mod tests {
 
         let val1_dropped = Arc::downgrade(&val1.0);
         let val2_dropped = Arc::downgrade(&val2.0);
-        extensions.insert(val1);
-        extensions.insert(val2);
+        let _previous = extensions.insert(val1);
+        let _previous = extensions.insert(val2);
 
         assert!(val1_dropped.upgrade().is_some());
         assert!(val2_dropped.upgrade().is_some());

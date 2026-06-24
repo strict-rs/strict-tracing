@@ -7,6 +7,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 #[derive(Debug)]
+/// A service wrapper that enters a span while polling readiness and calling.
 pub struct Service<S> {
     inner: S,
     span: tracing::Span,
@@ -22,6 +23,7 @@ mod layer {
     use super::*;
 
     #[derive(Debug)]
+    /// A Tower layer that instruments a service with a span.
     pub struct Layer<S, R, G = fn(&S) -> tracing::Span>
     where
         G: GetSpan<S>,
@@ -31,6 +33,7 @@ mod layer {
         _p: PhantomData<fn(S, R)>,
     }
 
+    /// Returns a layer that instruments services with spans from `get_span`.
     pub fn layer<S, R, G>(get_span: G) -> Layer<S, R, G>
     where
         G: GetSpan<S>,
@@ -73,11 +76,13 @@ mod layer {
 
 #[cfg(feature = "tower-layer")]
 #[cfg_attr(docsrs, doc(cfg(feature = "tower-layer")))]
+/// Make-service adapters that enter spans while creating services.
 pub mod make {
     use super::*;
     use pin_project_lite::pin_project;
 
     #[derive(Debug)]
+    /// A make-service wrapper that enters a span while creating services.
     pub struct MakeService<M, T, R, G = fn(&T) -> tracing::Span>
     where
         G: GetSpan<T>,
@@ -89,6 +94,7 @@ pub mod make {
 
     pin_project! {
         #[derive(Debug)]
+        /// Future returned by [`MakeService`].
         pub struct MakeFuture<F> {
             #[pin]
             inner: F,
@@ -97,6 +103,7 @@ pub mod make {
     }
 
     #[derive(Debug)]
+    /// A Tower layer that instruments make-service targets with spans.
     pub struct MakeLayer<T, R, G = fn(&T) -> tracing::Span>
     where
         G: GetSpan<T> + Clone,
@@ -107,6 +114,7 @@ pub mod make {
 
     #[cfg(feature = "tower-layer")]
     #[cfg_attr(docsrs, doc(cfg(feature = "tower-layer")))]
+    /// Returns a layer that instruments make-service targets with spans.
     pub fn layer<T, R, G>(get_span: G) -> MakeLayer<T, R, G>
     where
         G: GetSpan<T> + Clone,
@@ -194,6 +202,7 @@ pub mod make {
     where
         G: GetSpan<T>,
     {
+        /// Creates a new make-service instrumented with spans from `get_span`.
         pub fn new(inner: M, get_span: G) -> Self {
             MakeService {
                 get_span,
@@ -217,6 +226,7 @@ pub mod make {
 // === impl Service ===
 
 impl<S> Service<S> {
+    /// Creates a service wrapper that enters `span` around service operations.
     pub fn new(inner: S, span: tracing::Span) -> Self {
         Self { inner, span }
     }

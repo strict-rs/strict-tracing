@@ -1,3 +1,5 @@
+//! Empty span benchmarks.
+
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
@@ -8,13 +10,13 @@ fn bench(c: &mut Criterion) {
     shared::for_all_dispatches(&mut group, |b| {
         b.iter(|| {
             let span = tracing::span::Span::none();
-            black_box(&span);
+            let _value = black_box(&span);
         })
     });
-    group.bench_function("baseline_struct", |b| {
+    let _benchmark = group.bench_function("baseline_struct", |b| {
         b.iter(|| {
             let span = FakeEmptySpan::new();
-            black_box(&span);
+            let _value = black_box(&span);
         })
     });
 }
@@ -35,8 +37,8 @@ impl FakeEmptySpan {
 
 impl Drop for FakeEmptySpan {
     fn drop(&mut self) {
-        black_box(&self.inner);
-        black_box(&self.meta);
+        let _inner = black_box(&self.inner);
+        let _meta = black_box(&self.meta);
     }
 }
 

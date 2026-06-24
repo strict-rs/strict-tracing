@@ -1,3 +1,4 @@
+//! Tests interest caching for vector subscriber layers.
 #![cfg(feature = "registry")]
 use std::{
     collections::HashMap,

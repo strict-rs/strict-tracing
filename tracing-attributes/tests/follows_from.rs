@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use tracing::{Id, Level, Span, subscriber::with_default};
 use tracing_attributes::instrument;
 use tracing_mock::{expect, subscriber};
@@ -32,7 +34,7 @@ fn follows_from_sync_test() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         let cause_a = tracing::span!(Level::TRACE, "cause_a");
         let cause_b = tracing::span!(Level::TRACE, "cause_b");
         let cause_c = tracing::span!(Level::TRACE, "cause_c");
@@ -65,14 +67,14 @@ fn follows_from_async_test() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
-        block_on_future(async {
+    let _result = with_default(subscriber, || {
+        let _result = block_on_future(async {
             let cause_a = tracing::span!(Level::TRACE, "cause_a");
             let cause_b = tracing::span!(Level::TRACE, "cause_b");
             let cause_c = tracing::span!(Level::TRACE, "cause_c");
 
             with_follows_from_async(&[cause_a, cause_b, cause_c]).await
-        })
+        });
     });
 
     handle.assert_finished();
@@ -94,7 +96,7 @@ fn follows_from_current_test() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         tracing::span!(Level::TRACE, "cause").in_scope(follows_from_current)
     });
 

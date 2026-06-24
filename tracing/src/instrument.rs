@@ -272,6 +272,10 @@ pin_project! {
     }
 
     impl<T> PinnedDrop for Instrumented<T> {
+        #[allow(
+            unsafe_code,
+            reason = "TODO(unsafe-forbid): preserve infallible Instrumented<T> API until fallible Option<T> redesign"
+        )]
         fn drop(this: Pin<&mut Self>) {
             let this = this.project();
             let _enter = this.span.enter();
@@ -290,6 +294,10 @@ pin_project! {
 impl<'a, T> InstrumentedProj<'a, T> {
     /// Get a mutable reference to the [`Span`] a pinned mutable reference to
     /// the wrapped type.
+    #[allow(
+        unsafe_code,
+        reason = "TODO(unsafe-forbid): preserve infallible Instrumented<T> pin projection until a fallible projection API replaces it"
+    )]
     fn span_and_inner_pin_mut(self) -> (&'a mut Span, Pin<&'a mut T>) {
         // SAFETY: As long as `ManuallyDrop<T>` does not move, `T` won't move
         //         and `inner` is valid, because `ManuallyDrop::drop` is called
@@ -301,6 +309,10 @@ impl<'a, T> InstrumentedProj<'a, T> {
 
 impl<'a, T> InstrumentedProjRef<'a, T> {
     /// Get a reference to the [`Span`] a pinned reference to the wrapped type.
+    #[allow(
+        unsafe_code,
+        reason = "TODO(unsafe-forbid): preserve infallible Instrumented<T> pin projection until a fallible projection API replaces it"
+    )]
     fn span_and_inner_pin_ref(self) -> (&'a Span, Pin<&'a T>) {
         // SAFETY: As long as `ManuallyDrop<T>` does not move, `T` won't move
         //         and `inner` is valid, because `ManuallyDrop::drop` is called
@@ -366,6 +378,10 @@ impl<T> Instrumented<T> {
     /// Consumes the `Instrumented`, returning the wrapped type.
     ///
     /// Note that this drops the span.
+    #[allow(
+        unsafe_code,
+        reason = "TODO(unsafe-forbid): preserve Instrumented<T>::into_inner until fallible API"
+    )]
     pub fn into_inner(self) -> T {
         // To manually destructure `Instrumented` without `Drop`, we
         // move it into a ManuallyDrop and use pointers to its fields

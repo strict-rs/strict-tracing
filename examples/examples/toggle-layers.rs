@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 #![deny(rust_2018_idioms)]
 /// This is a example showing how `Layer` can be enabled or disabled by
 /// by wrapping them with an `Option`. This example shows `fmt` and `json`

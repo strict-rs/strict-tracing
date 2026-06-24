@@ -1,6 +1,9 @@
+//! Macro concat compatibility coverage.
+
 use tracing::{Level, enabled, event, span};
 
 #[macro_export]
+/// Local macro that intentionally shadows `concat!`.
 macro_rules! concat {
     () => {};
 }

@@ -376,7 +376,7 @@ impl EnvFilter {
     /// ```
     ///
     /// [`ERROR`]: tracing::Level::ERROR
-    pub fn try_new<S: AsRef<str>>(dirs: S) -> Result<Self, directive::ParseError> {
+    pub fn try_new<S: AsRef<str>>(dirs: S) -> Result<Self, ParseError> {
         Self::builder().parse(dirs)
     }
 
@@ -572,7 +572,7 @@ impl EnvFilter {
         let by_cs = try_lock!(self.by_cs.read());
         if let Some(cs) = by_cs.get(&attrs.metadata().callsite()) {
             let span = cs.to_span_match(attrs);
-            try_lock!(self.by_id.write()).insert(id.clone(), span);
+            let _previous = try_lock!(self.by_id.write()).insert(id.clone(), span);
         }
     }
 
@@ -603,7 +603,7 @@ impl EnvFilter {
             return;
         }
         if self.cares_about_span(id) {
-            self.scope.get_or_default().borrow_mut().pop();
+            let _exited = self.scope.get_or_default().borrow_mut().pop();
         }
     }
 
@@ -622,7 +622,7 @@ impl EnvFilter {
         }
 
         let mut spans = try_lock!(self.by_id.write());
-        spans.remove(&id);
+        let _removed = spans.remove(&id);
     }
 
     /// Informs the filter that the span with the provided `id` recorded the
@@ -660,7 +660,7 @@ impl EnvFilter {
             // should always be enabled, since it influences filtering.
             if let Some(matcher) = self.dynamics.matcher(metadata) {
                 let mut by_cs = try_lock!(self.by_cs.write(), else return self.base_interest());
-                by_cs.insert(metadata.callsite(), matcher);
+                let _previous = by_cs.insert(metadata.callsite(), matcher);
                 return Interest::always();
             }
         }
@@ -764,7 +764,7 @@ feature! {
 }
 
 impl FromStr for EnvFilter {
-    type Err = directive::ParseError;
+    type Err = ParseError;
 
     fn from_str(spec: &str) -> Result<Self, Self::Err> {
         Self::try_new(spec)
@@ -815,8 +815,8 @@ impl fmt::Display for EnvFilter {
 
 // ===== impl FromEnvError =====
 
-impl From<directive::ParseError> for FromEnvError {
-    fn from(p: directive::ParseError) -> Self {
+impl From<ParseError> for FromEnvError {
+    fn from(p: ParseError) -> Self {
         Self {
             kind: ErrorKind::Parse(p),
         }
@@ -853,15 +853,15 @@ impl Error for FromEnvError {
 mod tests {
     use super::*;
     use alloc::format;
-    use std::println;
+    use std::{mem::size_of_val, println};
     use tracing_core::field::FieldSet;
     use tracing_core::*;
 
     struct NoSubscriber;
     impl Subscriber for NoSubscriber {
         #[inline]
-        fn register_callsite(&self, _: &'static Metadata<'static>) -> subscriber::Interest {
-            subscriber::Interest::always()
+        fn register_callsite(&self, _: &'static Metadata<'static>) -> Interest {
+            Interest::always()
         }
         fn new_span(&self, _: &span::Attributes<'_>) -> span::Id {
             span::Id::from_u64(0xDEAD)
@@ -996,7 +996,7 @@ mod tests {
             println!(
                 "size_of_val({:?})\n -> {}B",
                 s,
-                std::mem::size_of_val(&filter)
+                size_of_val(&filter)
             );
         }
 

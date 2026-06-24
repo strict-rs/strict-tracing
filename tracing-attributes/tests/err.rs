@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 use tracing::Level;
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
@@ -32,13 +34,13 @@ fn test() {
         .drop_span(span)
         .only()
         .run_with_handle();
-    with_default(subscriber, || err().ok());
+    let _result = with_default(subscriber, || err().ok());
     handle.assert_finished();
 }
 
 #[instrument(err)]
 fn err_early_return() -> Result<u8, TryFromIntError> {
-    u8::try_from(1234)?;
+    let _value = u8::try_from(1234)?;
     Ok(5)
 }
 
@@ -53,7 +55,7 @@ fn test_early_return() {
         .drop_span(span)
         .only()
         .run_with_handle();
-    with_default(subscriber, || err_early_return().ok());
+    let _result = with_default(subscriber, || err_early_return().ok());
     handle.assert_finished();
 }
 
@@ -61,7 +63,7 @@ fn test_early_return() {
 async fn err_async(polls: usize) -> Result<u8, TryFromIntError> {
     let future = PollN::new_ok(polls);
     tracing::trace!(awaiting = true);
-    future.await.ok();
+    let _result = future.await.ok();
     u8::try_from(1234)
 }
 
@@ -85,8 +87,8 @@ fn test_async() {
         .drop_span(span)
         .only()
         .run_with_handle();
-    with_default(subscriber, || {
-        block_on_future(async { err_async(2).await }).ok();
+    let _result = with_default(subscriber, || {
+        let _result = block_on_future(async { err_async(2).await }).ok();
     });
     handle.assert_finished();
 }
@@ -108,7 +110,7 @@ fn test_mut() {
         .drop_span(span)
         .only()
         .run_with_handle();
-    with_default(subscriber, || err_mut(&mut 0).ok());
+    let _result = with_default(subscriber, || err_mut(&mut 0).ok());
     handle.assert_finished();
 }
 
@@ -116,7 +118,7 @@ fn test_mut() {
 async fn err_mut_async(polls: usize, out: &mut u8) -> Result<(), TryFromIntError> {
     let future = PollN::new_ok(polls);
     tracing::trace!(awaiting = true);
-    future.await.ok();
+    let _result = future.await.ok();
     *out = u8::try_from(1234)?;
     Ok(())
 }
@@ -141,8 +143,8 @@ fn test_mut_async() {
         .drop_span(span)
         .only()
         .run_with_handle();
-    with_default(subscriber, || {
-        block_on_future(async { err_mut_async(2, &mut 0).await }).ok();
+    let _result = with_default(subscriber, || {
+        let _result = block_on_future(async { err_mut_async(2, &mut 0).await }).ok();
     });
     handle.assert_finished();
 }
@@ -169,7 +171,7 @@ fn impl_trait_return_type() {
         .only()
         .run_with_handle();
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         for _ in returns_impl_trait(10).unwrap() {
             // nop
         }
@@ -203,7 +205,7 @@ fn test_err_dbg() {
         .drop_span(span)
         .only()
         .run_with_handle();
-    with_default(subscriber, || err_dbg().ok());
+    let _result = with_default(subscriber, || err_dbg().ok());
     handle.assert_finished();
 }
 
@@ -224,7 +226,7 @@ fn test_err_display_default() {
         .drop_span(span)
         .only()
         .run_with_handle();
-    with_default(subscriber, || err().ok());
+    let _result = with_default(subscriber, || err().ok());
     handle.assert_finished();
 }
 
@@ -248,7 +250,7 @@ fn test_err_custom_target() {
 
     let subscriber = subscriber.with(filter);
 
-    with_default(subscriber, || {
+    let _result = with_default(subscriber, || {
         let error_span = tracing::error_span!(target: "my_target", "error_span");
 
         {
@@ -275,7 +277,7 @@ fn test_err_info() {
         .drop_span(span)
         .only()
         .run_with_handle();
-    with_default(subscriber, || err_info().ok());
+    let _result = with_default(subscriber, || err_info().ok());
     handle.assert_finished();
 }
 
@@ -304,7 +306,7 @@ fn test_err_dbg_info() {
         .drop_span(span)
         .only()
         .run_with_handle();
-    with_default(subscriber, || err_dbg_info().ok());
+    let _result = with_default(subscriber, || err_dbg_info().ok());
     handle.assert_finished();
 }
 
@@ -324,6 +326,6 @@ fn test_err_warn_info() {
         .drop_span(span)
         .only()
         .run_with_handle();
-    with_default(subscriber, || err_warn_info().ok());
+    let _result = with_default(subscriber, || err_warn_info().ok());
     handle.assert_finished();
 }

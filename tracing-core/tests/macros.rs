@@ -1,3 +1,5 @@
+//! Macro API compatibility coverage.
+
 use tracing_core::{
     callsite::Callsite,
     metadata,
@@ -12,15 +14,24 @@ fn metadata_macro_api() {
     struct TestCallsite;
 
     impl Callsite for TestCallsite {
-        fn set_interest(&self, _: Interest) {
-            unimplemented!("test")
-        }
+        fn set_interest(&self, _: Interest) {}
+
         fn metadata(&self) -> &Metadata<'_> {
-            unimplemented!("test")
+            &TEST_METADATA
         }
     }
 
     static CALLSITE: TestCallsite = TestCallsite;
+    static TEST_METADATA: Metadata<'static> = Metadata::new(
+        "test_metadata",
+        "test_target",
+        Level::DEBUG,
+        None,
+        None,
+        None,
+        tracing_core::field::FieldSet::new(&[], tracing_core::identify_callsite!(&CALLSITE)),
+        Kind::SPAN,
+    );
     let _metadata = metadata! {
         name: "test_metadata",
         target: "test_target",

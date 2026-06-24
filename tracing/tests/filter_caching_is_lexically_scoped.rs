@@ -1,3 +1,5 @@
+//! Filter caching coverage for repeated calls from the same lexical callsite.
+
 // Tests that depend on a count of the number of times their filter is evaluated
 // can't exist in the same file with other tests that add subscribers to the
 // registry. The registry was changed so that each time a new dispatcher is
@@ -18,11 +20,11 @@ use std::sync::{
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
 fn filter_caching_is_lexically_scoped() {
-    pub fn my_great_function() -> bool {
+    fn my_great_function() -> bool {
         span!(Level::TRACE, "emily").in_scope(|| true)
     }
 
-    pub fn my_other_function() -> bool {
+    fn my_other_function() -> bool {
         span!(Level::TRACE, "frank").in_scope(|| true)
     }
 
@@ -32,7 +34,7 @@ fn filter_caching_is_lexically_scoped() {
     let subscriber = subscriber::mock()
         .with_filter(move |meta| match meta.name() {
             "emily" | "frank" => {
-                count2.fetch_add(1, Ordering::Relaxed);
+                let _previous = count2.fetch_add(1, Ordering::Relaxed);
                 true
             }
             _ => false,

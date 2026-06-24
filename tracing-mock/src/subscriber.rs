@@ -260,9 +260,13 @@ pub struct MockHandle(Arc<Mutex<VecDeque<Expect>>>, String);
 /// [`subscriber`]: mod@crate::subscriber
 #[must_use]
 pub fn mock() -> MockSubscriber<fn(&Metadata<'_>) -> bool> {
+    fn allow_all(_: &Metadata<'_>) -> bool {
+        true
+    }
+
     MockSubscriber {
         expected: VecDeque::new(),
-        filter: (|_: &Metadata<'_>| true) as for<'r, 's> fn(&'r Metadata<'s>) -> _,
+        filter: allow_all,
         max_level: None,
         name: thread::current()
             .name()
@@ -1088,7 +1092,7 @@ where
         println!("[{}] on_register_dispatch", self.name);
         let mut expected = self.expected.lock().unwrap();
         if let Some(Expect::OnRegisterDispatch) = expected.front() {
-            expected.pop_front();
+            let _matched = expected.pop_front();
         }
     }
 
@@ -1234,7 +1238,7 @@ where
                 &self.name,
             );
         }
-        spans.insert(
+        let _previous = spans.insert(
             id.clone(),
             SpanState {
                 id: id.clone(),
@@ -1262,7 +1266,7 @@ where
     }
 
     fn exit(&self, id: &Id) {
-        if std::thread::panicking() {
+        if thread::panicking() {
             // `exit()` can be called in `drop` impls, so we must guard against
             // double panics.
             println!("[{}] exit {:?} while panicking", self.name, id);
@@ -1325,7 +1329,7 @@ where
             false
         };
         if was_expected {
-            expected.pop_front();
+            let _matched = expected.pop_front();
         }
         id.clone()
     }
@@ -1356,13 +1360,13 @@ where
                 Some(Expect::DropSpan(span)) => {
                     // Don't assert if this function was called while panicking,
                     // as failing the assertion can cause a double panic.
-                    if !::std::thread::panicking() {
+                    if !thread::panicking() {
                         assert_eq!(name, span.name());
                     }
                     true
                 }
                 Some(Expect::Event(_)) => {
-                    if !::std::thread::panicking() {
+                    if !thread::panicking() {
                         assert!(is_event, "[{}] expected an event", self.name);
                     }
                     true
@@ -1370,7 +1374,7 @@ where
                 _ => false,
             };
             if was_expected {
-                expected.pop_front();
+                let _matched = expected.pop_front();
             }
         }
     }
@@ -1392,7 +1396,7 @@ impl<F> Running<F>
 where
     F: Fn(&Metadata<'_>) -> bool,
 {
-    fn lookup_current(&self) -> Option<span::Id> {
+    fn lookup_current(&self) -> Option<Id> {
         let stack = self.current.lock().unwrap();
         stack.last().cloned()
     }

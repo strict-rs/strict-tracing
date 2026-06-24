@@ -1,3 +1,5 @@
+//! Example binary for tracing workspace checks.
+
 #![deny(rust_2018_idioms)]
 #[path = "fmt/yak_shave.rs"]
 mod yak_shave;

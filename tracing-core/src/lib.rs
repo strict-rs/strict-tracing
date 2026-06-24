@@ -266,14 +266,9 @@ macro_rules! metadata {
     };
 }
 
-// Trimmed-down vendored version of spin 0.5.2 (0387621)
-// Dependency of no_std lazy_static, not required in a std build
-#[cfg(not(feature = "std"))]
-pub(crate) mod spin;
-
 #[cfg(not(feature = "std"))]
 #[doc(hidden)]
-pub type Once = self::spin::Once<()>;
+pub type Once = spin::Once<()>;
 
 #[cfg(feature = "std")]
 pub use std::sync::Once;

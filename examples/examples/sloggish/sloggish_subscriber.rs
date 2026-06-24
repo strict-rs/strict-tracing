@@ -12,8 +12,8 @@
 //! [`slog` README]: https://github.com/slog-rs/slog#terminal-output-example
 use nu_ansi_term::{Color, Style};
 use tracing::{
-    Id, Level, Subscriber,
     field::{Field, Visit},
+    Id, Level, Subscriber,
 };
 
 use std::{
@@ -22,8 +22,8 @@ use std::{
     fmt,
     io::{self, Write},
     sync::{
-        Mutex,
         atomic::{AtomicUsize, Ordering},
+        Mutex,
     },
     thread,
     time::SystemTime,
@@ -31,12 +31,12 @@ use std::{
 
 /// Tracks the currently executing span on a per-thread basis.
 #[derive(Clone)]
-pub struct CurrentSpanPerThread {
+struct CurrentSpanPerThread {
     current: &'static thread::LocalKey<RefCell<Vec<Id>>>,
 }
 
 impl CurrentSpanPerThread {
-    pub fn new() -> Self {
+    fn new() -> Self {
         thread_local! {
             static CURRENT: RefCell<Vec<Id>> = const { RefCell::new(Vec::new()) };
         };
@@ -45,25 +45,25 @@ impl CurrentSpanPerThread {
 
     /// Returns the [`Id`](::Id) of the span in which the current thread is
     /// executing, or `None` if it is not inside of a span.
-    pub fn id(&self) -> Option<Id> {
+    fn id(&self) -> Option<Id> {
         self.current
             .with(|current| current.borrow().last().cloned())
     }
 
-    pub fn enter(&self, span: Id) {
+    fn enter(&self, span: Id) {
         self.current.with(|current| {
             current.borrow_mut().push(span);
         })
     }
 
-    pub fn exit(&self) {
+    fn exit(&self) {
         self.current.with(|current| {
             let _ = current.borrow_mut().pop();
         })
     }
 }
 
-pub struct SloggishSubscriber {
+pub(crate) struct SloggishSubscriber {
     // TODO: this can probably be unified with the "stack" that's used for
     // printing?
     current: CurrentSpanPerThread,
@@ -147,7 +147,7 @@ impl Visit for Event<'_> {
 }
 
 impl SloggishSubscriber {
-    pub fn new(indent_amount: usize) -> Self {
+    pub(crate) fn new(indent_amount: usize) -> Self {
         Self {
             current: CurrentSpanPerThread::new(),
             indent_amount,
@@ -198,26 +198,26 @@ impl Subscriber for SloggishSubscriber {
         true
     }
 
-    fn new_span(&self, span: &tracing::span::Attributes<'_>) -> tracing::Id {
+    fn new_span(&self, span: &tracing::span::Attributes<'_>) -> Id {
         let next = self.ids.fetch_add(1, Ordering::SeqCst) as u64;
-        let id = tracing::Id::from_u64(next);
+        let id = Id::from_u64(next);
         let span = Span::new(self.current.id(), span);
-        self.spans.lock().unwrap().insert(id.clone(), span);
+        let _previous_span = self.spans.lock().unwrap().insert(id.clone(), span);
         id
     }
 
-    fn record(&self, span: &tracing::Id, values: &tracing::span::Record<'_>) {
+    fn record(&self, span: &Id, values: &tracing::span::Record<'_>) {
         let mut spans = self.spans.lock().expect("mutex poisoned!");
         if let Some(span) = spans.get_mut(span) {
             values.record(span);
         }
     }
 
-    fn record_follows_from(&self, _span: &tracing::Id, _follows: &tracing::Id) {
+    fn record_follows_from(&self, _span: &Id, _follows: &Id) {
         // unimplemented
     }
 
-    fn enter(&self, span_id: &tracing::Id) {
+    fn enter(&self, span_id: &Id) {
         self.current.enter(span_id.clone());
         let mut stderr = self.stderr.lock();
         let mut stack = self.stack.lock().unwrap();
@@ -268,12 +268,12 @@ impl Subscriber for SloggishSubscriber {
     }
 
     #[inline]
-    fn exit(&self, _span: &tracing::Id) {
+    fn exit(&self, _span: &Id) {
         // TODO: unify stack with current span
         self.current.exit();
     }
 
-    fn try_close(&self, _id: tracing::Id) -> bool {
+    fn try_close(&self, _id: Id) -> bool {
         // TODO: GC unneeded spans.
         false
     }

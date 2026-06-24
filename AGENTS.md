@@ -58,6 +58,8 @@ cargo test --no-default-features -p tracing
 cargo nextest run --profile ci --all-features -p tracing-subscriber
 ```
 
+Linting is part of the workspace contract, not a per-crate afterthought. Every member manifest inherits `[lints] workspace = true`; the root `Cargo.toml` carries the rustc/rustdoc/Clippy levels, and `clippy.toml` carries thresholds plus disallowed macros, methods, and types. Prefer structural fixes over new `#[allow]`s. When a legacy compatibility hook still needs an allow, keep it local, include a `reason = "..."`, and preserve the existing `TODO(unsafe-forbid)` breadcrumbs instead of broadening the exception.
+
 ## Feature-flag conventions
 
 Features are the trickiest part of editing this workspace — internalize these before touching any `Cargo.toml`:
@@ -74,6 +76,8 @@ Features are the trickiest part of editing this workspace — internalize these 
 - **UI / compile-fail tests use a forked `trybuild`** pulled as a git dependency (`ssh://git@github.com/strict-rs/strict-trybuild.git`, branch `strict`). Editing `tracing-attributes/tests/ui.rs` or any `*.stderr` fixture requires that git dep to resolve.
 - **Releases go through `bin/publish <crate> <version>`** (`-d`/`--dry-run` to verify only). It enforces the cargo-hack feature-powerset gate before publishing; see `CONTRIBUTING.md` for the path-dependency release ordering.
 - **Docs build is nightly + `--cfg docsrs`**: `RUSTDOCFLAGS="--cfg docsrs" cargo +nightly doc --no-deps` (Netlify additionally sets `--cfg tracing_unstable`).
+- **Cargo profiles are explicit in the root manifest**: release uses thin LTO, one codegen unit, `panic = "abort"`, symbol stripping, and overflow checks; dev optimizes third-party deps; test keeps overflow checks on. Do not duplicate those settings in member manifests.
+- **`cargo-machete` root metadata exists** with an empty `ignored` list. If a dependency looks unused, prove whether it is feature-gated/generated/test-only before adding it to the ignore list.
 
 ## Commit messages
 

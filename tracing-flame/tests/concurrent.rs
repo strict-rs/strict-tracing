@@ -1,3 +1,5 @@
+//! Concurrent flame layer integration tests.
+
 use std::thread::sleep;
 use std::time::Duration;
 use tracing::{Level, span};

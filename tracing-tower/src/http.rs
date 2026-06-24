@@ -1,6 +1,7 @@
 macro_rules! make_req_fns {
     ($($name:ident, $level:expr),+) => {
         $(
+            #[doc = concat!("Creates a request span at `", stringify!($level), "` level.")]
             #[inline]
             pub fn $name<A>(req: &http::Request<A>) -> tracing::Span {
                 tracing::span!(
@@ -21,6 +22,7 @@ make_req_fns! {
 }
 
 #[inline]
+/// Creates a debug-level request span including the request version.
 pub fn debug_request<A>(req: &http::Request<A>) -> tracing::Span {
     tracing::span!(
         tracing::Level::DEBUG,
@@ -32,6 +34,7 @@ pub fn debug_request<A>(req: &http::Request<A>) -> tracing::Span {
 }
 
 #[inline]
+/// Creates a trace-level request span including the request headers.
 pub fn trace_request<A>(req: &http::Request<A>) -> tracing::Span {
     tracing::span!(
         tracing::Level::TRACE,

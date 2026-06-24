@@ -1,4 +1,5 @@
 #![cfg(feature = "std")]
+//! No-subscriber behavior coverage.
 
 use tracing_mock::subscriber;
 

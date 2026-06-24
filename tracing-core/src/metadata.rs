@@ -86,7 +86,7 @@ pub struct Metadata<'a> {
 }
 
 /// Indicates whether the callsite is a span or event.
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Kind(u8);
 
 /// Describes the level of verbosity of a span or event.
@@ -239,7 +239,7 @@ pub struct Level(LevelInner);
 pub struct LevelFilter(Option<Level>);
 
 /// Indicates that a string could not be parsed to a valid level.
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct ParseLevelFilterError(());
 
 static MAX_LEVEL: AtomicUsize = AtomicUsize::new(LevelFilter::OFF_USIZE);
@@ -343,25 +343,26 @@ impl<'a> Metadata<'a> {
 impl fmt::Debug for Metadata<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut meta = f.debug_struct("Metadata");
-        meta.field("name", &self.name)
+        let _builder = meta
+            .field("name", &self.name)
             .field("target", &self.target)
             .field("level", &self.level);
 
         if let Some(path) = self.module_path() {
-            meta.field("module_path", &path);
+            let _builder = meta.field("module_path", &path);
         }
 
         match (self.file(), self.line()) {
             (Some(file), Some(line)) => {
-                meta.field("location", &format_args!("{}:{}", file, line));
+                let _builder = meta.field("location", &format_args!("{}:{}", file, line));
             }
             (Some(file), None) => {
-                meta.field("file", &format_args!("{}", file));
+                let _builder = meta.field("file", &format_args!("{}", file));
             }
 
             // Note: a line num with no file is a kind of weird case that _probably_ never occurs...
             (None, Some(line)) => {
-                meta.field("line", &line);
+                let _builder = meta.field("line", &line);
             }
             (None, None) => {}
         };
@@ -672,17 +673,35 @@ impl LevelFilter {
 
     // These consts are necessary because `as` casts are not allowed as
     // match patterns.
-    const ERROR_USIZE: usize = LevelInner::Error as usize;
-    const WARN_USIZE: usize = LevelInner::Warn as usize;
-    const INFO_USIZE: usize = LevelInner::Info as usize;
-    const DEBUG_USIZE: usize = LevelInner::Debug as usize;
-    const TRACE_USIZE: usize = LevelInner::Trace as usize;
-    // Using the value of the last variant + 1 ensures that we match the value
-    // for `Option::None` as selected by the niche optimization for
-    // `LevelFilter`. If this is the case, converting a `usize` value into a
-    // `LevelFilter` (in `LevelFilter::current`) will be an identity conversion,
-    // rather than generating a lookup table.
-    const OFF_USIZE: usize = LevelInner::Error as usize + 1;
+    const TRACE_USIZE: usize = 0;
+    const DEBUG_USIZE: usize = 1;
+    const INFO_USIZE: usize = 2;
+    const WARN_USIZE: usize = 3;
+    const ERROR_USIZE: usize = 4;
+    const OFF_USIZE: usize = 5;
+
+    const fn encode(self) -> usize {
+        match self.0 {
+            None => Self::OFF_USIZE,
+            Some(Level(LevelInner::Error)) => Self::ERROR_USIZE,
+            Some(Level(LevelInner::Warn)) => Self::WARN_USIZE,
+            Some(Level(LevelInner::Info)) => Self::INFO_USIZE,
+            Some(Level(LevelInner::Debug)) => Self::DEBUG_USIZE,
+            Some(Level(LevelInner::Trace)) => Self::TRACE_USIZE,
+        }
+    }
+
+    const fn decode(value: usize) -> Self {
+        match value {
+            Self::ERROR_USIZE => Self::ERROR,
+            Self::WARN_USIZE => Self::WARN,
+            Self::INFO_USIZE => Self::INFO,
+            Self::DEBUG_USIZE => Self::DEBUG,
+            Self::TRACE_USIZE => Self::TRACE,
+            Self::OFF_USIZE => Self::OFF,
+            _ => Self::OFF,
+        }
+    }
 
     /// Returns a `LevelFilter` that matches the most verbose [`Level`] that any
     /// currently active [`Subscriber`] will enable.
@@ -702,55 +721,15 @@ impl LevelFilter {
     /// [`Subscriber`]: super::Subscriber
     #[inline(always)]
     pub fn current() -> Self {
-        match MAX_LEVEL.load(Ordering::Relaxed) {
-            Self::ERROR_USIZE => Self::ERROR,
-            Self::WARN_USIZE => Self::WARN,
-            Self::INFO_USIZE => Self::INFO,
-            Self::DEBUG_USIZE => Self::DEBUG,
-            Self::TRACE_USIZE => Self::TRACE,
-            Self::OFF_USIZE => Self::OFF,
-            #[cfg(debug_assertions)]
-            unknown => unreachable!(
-                "/!\\ `LevelFilter` representation seems to have changed! /!\\ \n\
-                This is a bug (and it's pretty bad). Please contact the `tracing` \
-                maintainers. Thank you and I'm sorry.\n \
-                The offending repr was: {:?}",
-                unknown,
-            ),
-            #[cfg(not(debug_assertions))]
-            _ => unsafe {
-                // Using `unreachable_unchecked` here (rather than
-                // `unreachable!()`) is necessary to ensure that rustc generates
-                // an identity conversion from integer -> discriminant, rather
-                // than generating a lookup table. We want to ensure this
-                // function is a single `mov` instruction (on x86) if at all
-                // possible, because it is called *every* time a span/event
-                // callsite is hit; and it is (potentially) the only code in the
-                // hottest path for skipping a majority of callsites when level
-                // filtering is in use.
-                //
-                // safety: This branch is only truly unreachable if we guarantee
-                // that no values other than the possible enum discriminants
-                // will *ever* be present. The `AtomicUsize` is initialized to
-                // the `OFF` value. It is only set by the `set_max` function,
-                // which takes a `LevelFilter` as a parameter. This restricts
-                // the inputs to `set_max` to the set of valid discriminants.
-                // Therefore, **as long as `MAX_VALUE` is only ever set by
-                // `set_max`**, this is safe.
-                core::hint::unreachable_unchecked()
-            },
-        }
+        Self::decode(MAX_LEVEL.load(Ordering::Relaxed))
     }
 
-    pub(crate) fn set_max(LevelFilter(level): LevelFilter) {
-        let val = match level {
-            Some(Level(level)) => level as usize,
-            None => Self::OFF_USIZE,
-        };
+    pub(crate) fn set_max(filter: LevelFilter) {
+        let val = filter.encode();
 
         // using an AcqRel swap ensures an ordered relationship of writes to the
         // max level.
-        MAX_LEVEL.swap(val, Ordering::AcqRel);
+        let _previous_max_level = MAX_LEVEL.swap(val, Ordering::AcqRel);
     }
 }
 
@@ -809,7 +788,7 @@ impl FromStr for LevelFilter {
 }
 
 /// Returned if parsing a `Level` fails.
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct ParseLevelError {
     _p: (),
 }
@@ -1055,7 +1034,6 @@ impl PartialOrd<Level> for LevelFilter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use core::mem;
 
     #[test]
     fn level_from_str() {
@@ -1090,33 +1068,18 @@ mod tests {
     }
 
     #[test]
-    fn level_filter_is_usize_sized() {
-        assert_eq!(
-            mem::size_of::<LevelFilter>(),
-            mem::size_of::<usize>(),
-            "`LevelFilter` is no longer `usize`-sized! global MAX_LEVEL may now be invalid!"
-        )
-    }
-
-    #[test]
-    fn level_filter_reprs() {
+    fn level_filter_encoding_round_trips() {
         let mapping = [
-            (LevelFilter::OFF, LevelInner::Error as usize + 1),
-            (LevelFilter::ERROR, LevelInner::Error as usize),
-            (LevelFilter::WARN, LevelInner::Warn as usize),
-            (LevelFilter::INFO, LevelInner::Info as usize),
-            (LevelFilter::DEBUG, LevelInner::Debug as usize),
-            (LevelFilter::TRACE, LevelInner::Trace as usize),
+            (LevelFilter::OFF, LevelFilter::OFF_USIZE),
+            (LevelFilter::ERROR, LevelFilter::ERROR_USIZE),
+            (LevelFilter::WARN, LevelFilter::WARN_USIZE),
+            (LevelFilter::INFO, LevelFilter::INFO_USIZE),
+            (LevelFilter::DEBUG, LevelFilter::DEBUG_USIZE),
+            (LevelFilter::TRACE, LevelFilter::TRACE_USIZE),
         ];
         for &(filter, expected) in &mapping {
-            let repr = unsafe {
-                // safety: The entire purpose of this test is to assert that the
-                // actual repr matches what we expect it to be --- we're testing
-                // that *other* unsafe code is sound using the transmuted value.
-                // We're not going to do anything with it that might be unsound.
-                mem::transmute::<LevelFilter, usize>(filter)
-            };
-            assert_eq!(expected, repr, "repr changed for {:?}", filter)
+            assert_eq!(expected, filter.encode());
+            assert_eq!(filter, LevelFilter::decode(expected));
         }
     }
 }

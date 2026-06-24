@@ -123,8 +123,6 @@
 //! currently default `Dispatch`. This is used primarily by `tracing`
 //! instrumentation.
 
-use core::ptr::addr_of;
-
 use crate::{
     Event, LevelFilter, Metadata, callsite, span,
     subscriber::{self, NoSubscriber, Subscriber},
@@ -141,6 +139,7 @@ use core::{
 use std::{
     cell::{Cell, Ref, RefCell},
     error,
+    sync::OnceLock,
 };
 
 /// `Dispatch` trace data to a [`Subscriber`].
@@ -198,9 +197,10 @@ const UNINITIALIZED: usize = 0;
 const INITIALIZING: usize = 1;
 const INITIALIZED: usize = 2;
 
-static mut GLOBAL_DISPATCH: Dispatch = Dispatch {
-    subscriber: Kind::Global(&NO_SUBSCRIBER),
-};
+#[cfg(feature = "std")]
+static GLOBAL_DISPATCH: OnceLock<Dispatch> = OnceLock::new();
+#[cfg(not(feature = "std"))]
+static GLOBAL_DISPATCH: spin::Once<Dispatch> = spin::Once::new();
 static NONE: Dispatch = Dispatch {
     subscriber: Kind::Global(&NO_SUBSCRIBER),
 };
@@ -307,21 +307,13 @@ pub fn set_global_default(dispatcher: Dispatch) -> Result<(), SetGlobalDefaultEr
         )
         .is_ok()
     {
-        let subscriber = {
-            let subscriber = match dispatcher.subscriber {
-                Kind::Global(s) => s,
-                Kind::Scoped(s) => unsafe {
-                    // safety: this leaks the subscriber onto the heap. the
-                    // reference count will always be at least 1, because the
-                    // global default will never be dropped.
-                    &*Arc::into_raw(s)
-                },
-            };
-            Kind::Global(subscriber)
-        };
-        unsafe {
-            GLOBAL_DISPATCH = Dispatch { subscriber };
+        #[cfg(feature = "std")]
+        if GLOBAL_DISPATCH.set(dispatcher).is_err() {
+            GLOBAL_INIT.store(INITIALIZED, Ordering::SeqCst);
+            return Err(SetGlobalDefaultError { _no_construct: () });
         }
+        #[cfg(not(feature = "std"))]
+        let _dispatch = GLOBAL_DISPATCH.call_once(|| dispatcher);
         GLOBAL_INIT.store(INITIALIZED, Ordering::SeqCst);
         EXISTS.store(true, Ordering::Release);
         Ok(())
@@ -341,6 +333,7 @@ pub fn has_been_set() -> bool {
 }
 
 /// Returned if setting the global dispatcher fails.
+#[derive(Copy, Clone)]
 pub struct SetGlobalDefaultError {
     _no_construct: (),
 }
@@ -446,11 +439,8 @@ fn get_global() -> &'static Dispatch {
     if GLOBAL_INIT.load(Ordering::SeqCst) != INITIALIZED {
         return &NONE;
     }
-    unsafe {
-        // This is safe given the invariant that setting the global dispatcher
-        // also sets `GLOBAL_INIT` to `INITIALIZED`.
-        &*addr_of!(GLOBAL_DISPATCH)
-    }
+
+    GLOBAL_DISPATCH.get().unwrap_or(&NONE)
 }
 
 #[cfg(feature = "std")]
@@ -846,7 +836,7 @@ impl State {
             .ok()
             .flatten();
         EXISTS.store(true, Ordering::Release);
-        SCOPED_COUNT.fetch_add(1, Ordering::Release);
+        let _previous_scoped_count = SCOPED_COUNT.fetch_add(1, Ordering::Release);
         DefaultGuard(prior)
     }
 
@@ -894,7 +884,7 @@ impl Drop for DefaultGuard {
         // could then also attempt to access the same thread local
         // state -- causing a clash.
         let prev = CURRENT_STATE.try_with(|state| state.default.replace(self.0.take()));
-        SCOPED_COUNT.fetch_sub(1, Ordering::Release);
+        let _previous_scoped_count = SCOPED_COUNT.fetch_sub(1, Ordering::Release);
         drop(prev)
     }
 }
@@ -905,6 +895,7 @@ mod test {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
+    #[cfg(feature = "std")]
     use crate::{
         callsite::Callsite,
         metadata::{Kind, Level, Metadata},
@@ -923,8 +914,11 @@ mod test {
         assert!(dispatcher.downcast_ref::<NoSubscriber>().is_some());
     }
 
+    #[cfg(feature = "std")]
     struct TestCallsite;
+    #[cfg(feature = "std")]
     static TEST_CALLSITE: TestCallsite = TestCallsite;
+    #[cfg(feature = "std")]
     static TEST_META: Metadata<'static> = metadata! {
         name: "test",
         target: module_path!(),
@@ -934,6 +928,7 @@ mod test {
         kind: Kind::EVENT
     };
 
+    #[cfg(feature = "std")]
     impl Callsite for TestCallsite {
         fn set_interest(&self, _: Interest) {}
         fn metadata(&self) -> &Metadata<'_> {
@@ -987,7 +982,7 @@ mod test {
         // won't cause an infinite loop of new spans.
 
         fn mk_span() {
-            get_default(|current| {
+            let _span = get_default(|current| {
                 current.new_span(&span::Attributes::new(
                     &TEST_META,
                     &TEST_META.fields().value_set(&[]),

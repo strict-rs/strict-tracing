@@ -1,3 +1,4 @@
+//! Tests dispatch registration hooks.
 #![cfg(all(feature = "registry", feature = "std"))]
 //! Test that `on_register_dispatch` is called on both layers when a layered
 //! subscriber is set as the default.

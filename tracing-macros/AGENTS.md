@@ -4,7 +4,7 @@
 
 ## Architecture
 
-- `src/lib.rs` is the entire crate (~46 lines). It re-exports `tracing` (as a `#[doc(hidden)]` `pub use`) and defines two `#[macro_export]` macros:
+- `src/lib.rs` is the entire crate (~51 lines) and now has crate-level docs so it satisfies the workspace `missing_docs` policy. It re-exports `tracing` (as a `#[doc(hidden)]` `pub use`) and defines two `#[macro_export]` macros:
   - `dbg!` — a `tracing`-flavored analogue of `std::dbg!`: evaluates an expression, emits it as a field via `tracing::event!` (default level `DEBUG`, overridable with `level:` / `target:`), and returns the value.
   - `trace_dbg!` — a thin wrapper that forwards to `dbg!`.
 

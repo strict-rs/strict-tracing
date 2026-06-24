@@ -19,11 +19,11 @@ mod yak_shave;
 
 use std::io;
 use tracing_subscriber::{
-    Layer,
     filter::{LevelFilter, Targets},
     fmt,
     layer::SubscriberExt,
     util::SubscriberInitExt,
+    Layer,
 };
 
 fn main() {

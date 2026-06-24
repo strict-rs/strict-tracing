@@ -1,3 +1,5 @@
+//! Maximum-level hint coverage.
+
 use tracing::Level;
 use tracing_mock::*;
 
