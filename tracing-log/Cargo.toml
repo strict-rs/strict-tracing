@@ -21,19 +21,20 @@ rust-version.workspace = true
 default = ["log-tracer", "std"]
 std = ["log/std"]
 log-tracer = []
-interest-cache = ["lru", "ahash"]
+interest-cache = ["lru", "ahash", "parking_lot"]
 
 [dependencies]
 tracing-core = { workspace = true, default-features = true }
 log = { workspace = true }
-once_cell = { workspace = true }
 lru = { workspace = true, optional = true }
 ahash = { workspace = true, optional = true }
+parking_lot = { workspace = true, optional = true }
 
 [dev-dependencies]
 tracing = { workspace = true, default-features = true }
 tracing-subscriber = { workspace = true, default-features = true, features = ["env-filter"] }
 criterion = { workspace = true }
+strict-test-support = { workspace = true }
 
 [badges]
 maintenance = { status = "actively-maintained" }

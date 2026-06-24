@@ -1,4 +1,5 @@
 //! Events represent single points in time during the execution of a program.
+use crate::dispatcher::get_default;
 use crate::parent::Parent;
 use crate::span::Id;
 use crate::{Metadata, field};
@@ -21,8 +22,11 @@ use crate::{Metadata, field};
 /// [fields]: super::field
 #[derive(Debug)]
 pub struct Event<'a> {
+    /// Values recorded with the event.
     fields: &'a field::ValueSet<'a>,
+    /// Metadata describing the callsite that emitted the event.
     metadata: &'static Metadata<'static>,
+    /// Parent relationship requested for the event.
     parent: Parent,
 }
 
@@ -30,8 +34,8 @@ impl<'a> Event<'a> {
     /// Constructs a new `Event` with the specified metadata and set of values,
     /// and observes it with the current subscriber.
     pub fn dispatch(metadata: &'static Metadata<'static>, fields: &'a field::ValueSet<'_>) {
-        let event = Event::new(metadata, fields);
-        crate::dispatcher::get_default(|current| {
+        let event = Self::new(metadata, fields);
+        get_default(|current| {
             current.event(&event);
         });
     }
@@ -39,8 +43,12 @@ impl<'a> Event<'a> {
     /// Returns a new `Event` in the current span, with the specified metadata
     /// and set of values.
     #[inline]
-    pub fn new(metadata: &'static Metadata<'static>, fields: &'a field::ValueSet<'a>) -> Self {
-        Event {
+    #[must_use]
+    pub const fn new(
+        metadata: &'static Metadata<'static>,
+        fields: &'a field::ValueSet<'a>,
+    ) -> Self {
+        Self {
             fields,
             metadata,
             parent: Parent::Current,
@@ -50,19 +58,17 @@ impl<'a> Event<'a> {
     /// Returns a new `Event` as a child of the specified span, with the
     /// provided metadata and set of values.
     #[inline]
+    #[must_use]
     pub fn new_child_of(
         parent: impl Into<Option<Id>>,
         metadata: &'static Metadata<'static>,
         fields: &'a field::ValueSet<'a>,
     ) -> Self {
-        let parent = match parent.into() {
-            Some(p) => Parent::Explicit(p),
-            None => Parent::Root,
-        };
-        Event {
+        let resolved_parent = parent.into().map_or(Parent::Root, Parent::Explicit);
+        Self {
             fields,
             metadata,
-            parent,
+            parent: resolved_parent,
         }
     }
 
@@ -74,7 +80,7 @@ impl<'a> Event<'a> {
         fields: &'a field::ValueSet<'_>,
     ) {
         let event = Self::new_child_of(parent, metadata, fields);
-        crate::dispatcher::get_default(|current| {
+        get_default(|current| {
             current.event(&event);
         });
     }
@@ -88,19 +94,22 @@ impl<'a> Event<'a> {
     }
 
     /// Returns an iterator over the set of values on this `Event`.
-    pub fn fields(&self) -> field::Iter {
+    #[must_use]
+    pub const fn fields(&self) -> field::Iter {
         self.fields.field_set().iter()
     }
 
     /// Returns [metadata] describing this `Event`.
     ///
     /// [metadata]: super::Metadata
-    pub fn metadata(&self) -> &'static Metadata<'static> {
+    #[must_use]
+    pub const fn metadata(&self) -> &'static Metadata<'static> {
         self.metadata
     }
 
     /// Returns true if the new event should be a root.
-    pub fn is_root(&self) -> bool {
+    #[must_use]
+    pub const fn is_root(&self) -> bool {
         matches!(self.parent, Parent::Root)
     }
 
@@ -111,7 +120,8 @@ impl<'a> Event<'a> {
     /// that span should be the new event's parent. Otherwise, if the current
     /// thread is _not_ inside a span, then the new event will be the root of its
     /// own trace tree.
-    pub fn is_contextual(&self) -> bool {
+    #[must_use]
+    pub const fn is_contextual(&self) -> bool {
         matches!(self.parent, Parent::Current)
     }
 
@@ -119,10 +129,11 @@ impl<'a> Event<'a> {
     ///
     /// Otherwise (if the new event is a root or is a child of the current span),
     /// returns `None`.
-    pub fn parent(&self) -> Option<&Id> {
+    #[must_use]
+    pub const fn parent(&self) -> Option<&Id> {
         match self.parent {
-            Parent::Explicit(ref p) => Some(p),
-            _ => None,
+            Parent::Explicit(ref parent) => Some(parent),
+            Parent::Root | Parent::Current => None,
         }
     }
 }

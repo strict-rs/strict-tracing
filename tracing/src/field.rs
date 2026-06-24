@@ -113,7 +113,7 @@
 //! [`event`]: crate::Subscriber::event
 pub use tracing_core::field::*;
 
-use crate::Metadata;
+use crate::{Metadata, sealed::Sealed};
 
 /// Trait implemented to allow a type to be used as a field key.
 ///
@@ -126,7 +126,7 @@ use crate::Metadata;
 /// string comparisons. Thus, if possible, once the key for a field is known, it
 /// should be used whenever possible.
 /// </pre>
-pub trait AsField: crate::sealed::Sealed {
+pub trait AsField: Sealed {
     /// Attempts to convert `&self` into a `Field` with the specified `metadata`.
     ///
     /// If `metadata` defines this field, then the field is returned. Otherwise,
@@ -139,22 +139,14 @@ pub trait AsField: crate::sealed::Sealed {
 impl AsField for Field {
     #[inline]
     fn as_field(&self, metadata: &Metadata<'_>) -> Option<Field> {
-        if self.callsite() == metadata.callsite() {
-            Some(self.clone())
-        } else {
-            None
-        }
+        (self.callsite() == metadata.callsite()).then_some(*self)
     }
 }
 
 impl AsField for &Field {
     #[inline]
     fn as_field(&self, metadata: &Metadata<'_>) -> Option<Field> {
-        if self.callsite() == metadata.callsite() {
-            Some((*self).clone())
-        } else {
-            None
-        }
+        (self.callsite() == metadata.callsite()).then_some(**self)
     }
 }
 
@@ -165,6 +157,6 @@ impl AsField for str {
     }
 }
 
-impl crate::sealed::Sealed for Field {}
-impl crate::sealed::Sealed for &Field {}
-impl crate::sealed::Sealed for str {}
+impl Sealed for Field {}
+impl Sealed for &Field {}
+impl Sealed for str {}

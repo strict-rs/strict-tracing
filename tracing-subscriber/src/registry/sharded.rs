@@ -532,11 +532,12 @@ impl Clear for DataInner {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::{layer::Context, registry::LookupSpan, Layer};
     use std::{
         collections::HashMap,
-        dbg, println,
+        println,
         sync::{Arc, Mutex, Weak},
         vec::Vec,
     };
@@ -553,7 +554,6 @@ mod tests {
         S: Subscriber + for<'a> LookupSpan<'a>,
     {
         fn on_close(&self, id: Id, ctx: Context<'_, S>) {
-            dbg!(format_args!("closing {:?}", id));
             assert!(&ctx.span(&id).is_some());
         }
     }
@@ -594,7 +594,6 @@ mod tests {
         closed: Vec<(&'static str, Weak<()>)>,
     }
 
-    #[allow(dead_code)] // Field is exercised via checking `Arc::downgrade()`
     struct SetRemoved(Arc<()>);
 
     impl<S> Layer<S> for CloseLayer
@@ -722,7 +721,6 @@ mod tests {
             )
         }
 
-        #[allow(unused)] // may want this for future tests
         fn assert_last_closed(&self, span: Option<&str>) {
             let lock = self.state.lock().unwrap();
             let last = lock.closed.last().map(|(span, _)| span);

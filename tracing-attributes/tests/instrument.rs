@@ -8,10 +8,8 @@ use tracing_mock::*;
 // Reproduces a compile error when an instrumented function body contains inner
 // attributes (https://github.com/tokio-rs/tracing/issues/2294).
 #[deny(unused_variables)]
-#[allow(dead_code, clippy::mixed_attributes_style)]
 #[instrument]
 fn repro_2294() {
-    #![allow(unused_variables)]
     let i = 42;
 }
 
@@ -69,9 +67,9 @@ fn fields() {
         .new_span(
             span.clone().with_fields(
                 expect::field("arg1")
-                    .with_value(&2usize)
+                    .with_value(&2_usize)
                     .and(expect::field("arg2").with_value(&false))
-                    .and(expect::field("arg3").with_value(&"Cool".to_string()))
+                    .and(expect::field("arg3").with_value(&"Cool".to_owned()))
                     .only(),
             ),
         )
@@ -81,9 +79,9 @@ fn fields() {
         .new_span(
             span2.clone().with_fields(
                 expect::field("arg1")
-                    .with_value(&3usize)
+                    .with_value(&3_usize)
                     .and(expect::field("arg2").with_value(&true))
-                    .and(expect::field("arg3").with_value(&"Still Cool".to_string()))
+                    .and(expect::field("arg3").with_value(&"Still Cool".to_owned()))
                     .only(),
             ),
         )
@@ -94,8 +92,8 @@ fn fields() {
         .run_with_handle();
 
     let _result = with_default(subscriber, || {
-        my_fn(2, false, "Cool".to_string());
-        my_fn(3, true, "Still Cool".to_string());
+        my_fn(2, false, "Cool".to_owned());
+        my_fn(3, true, "Still Cool".to_owned());
     });
 
     handle.assert_finished();
@@ -129,7 +127,7 @@ fn skip() {
     let (subscriber, handle) = subscriber::mock()
         .new_span(
             span.clone()
-                .with_fields(expect::field("arg1").with_value(&2usize).only()),
+                .with_fields(expect::field("arg1").with_value(&2_usize).only()),
         )
         .enter(span.clone())
         .exit(span.clone())
@@ -137,7 +135,7 @@ fn skip() {
         .new_span(
             span2
                 .clone()
-                .with_fields(expect::field("arg1").with_value(&3usize).only()),
+                .with_fields(expect::field("arg1").with_value(&3_usize).only()),
         )
         .enter(span2.clone())
         .exit(span2.clone())
@@ -210,7 +208,7 @@ fn methods() {
             span.clone().with_fields(
                 expect::field("self")
                     .with_value(&format_args!("Foo"))
-                    .and(expect::field("arg1").with_value(&42usize)),
+                    .and(expect::field("arg1").with_value(&42_usize)),
             ),
         )
         .enter(span.clone())
@@ -239,7 +237,7 @@ fn impl_trait_return_type() {
     let (subscriber, handle) = subscriber::mock()
         .new_span(
             span.clone()
-                .with_fields(expect::field("x").with_value(&10usize).only()),
+                .with_fields(expect::field("x").with_value(&10_usize).only()),
         )
         .enter(span.clone())
         .exit(span.clone())
@@ -334,13 +332,11 @@ fn user_tracing_module() {
 
     // Reproduces https://github.com/tokio-rs/tracing/issues/3119
     #[instrument(fields(f = Empty))]
-    #[allow(dead_code)]
     fn my_fn() {
         assert_eq!("test", tracing::my_other_fn());
     }
 
     mod tracing {
-        #[allow(dead_code)]
         pub(crate) fn my_other_fn() -> &'static str {
             "test"
         }

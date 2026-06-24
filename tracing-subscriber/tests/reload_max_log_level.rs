@@ -1,6 +1,5 @@
 //! Tests reloadable filters updating log max levels.
 #![cfg(all(feature = "env-filter", feature = "tracing-log"))]
-
 use tracing::{self, Level};
 use tracing_mock::{expect, subscriber};
 use tracing_subscriber::{filter::LevelFilter, prelude::*, reload};

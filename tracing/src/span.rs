@@ -324,6 +324,7 @@ use crate::{
     Metadata,
     dispatcher::{self, Dispatch},
     field,
+    sealed::Sealed,
 };
 use core::{
     fmt,
@@ -334,7 +335,7 @@ use core::{
 };
 
 /// Trait implemented by types which have a span `Id`.
-pub trait AsId: crate::sealed::Sealed {
+pub trait AsId: Sealed {
     /// Returns the `Id` of the span that `self` corresponds to, or `None` if
     /// this corresponds to a disabled span.
     fn as_id(&self) -> Option<&Id>;
@@ -551,7 +552,7 @@ impl Span {
     pub fn current() -> Span {
         dispatcher::get_default(|dispatch| {
             if let Some((id, meta)) = dispatch.current_span().into_inner() {
-                let id = dispatch.clone_span(&id);
+                let id = dispatch.clone_span(id);
                 Self {
                     inner: Some(Inner::new(id, dispatch)),
                     meta: Some(meta),
@@ -1039,6 +1040,7 @@ impl Span {
     /// [async tasks]: std::task
     /// [`instrument`]: crate::instrument::Instrument::instrument
     /// [`in_current_span`]: crate::instrument::Instrument::in_current_span
+    #[must_use]
     pub fn or_current(self) -> Self {
         if self.is_disabled() {
             return Self::current();
@@ -1049,7 +1051,7 @@ impl Span {
     #[inline(always)]
     fn do_enter(&self) {
         if let Some(inner) = self.inner.as_ref() {
-            inner.subscriber.enter(&inner.id);
+            inner.subscriber.enter(inner.id);
         }
 
         if_log_enabled! { crate::Level::TRACE, {
@@ -1066,7 +1068,7 @@ impl Span {
     #[inline(always)]
     fn do_exit(&self) {
         if let Some(inner) = self.inner.as_ref() {
-            inner.subscriber.exit(&inner.id);
+            inner.subscriber.exit(inner.id);
         }
 
         if_log_enabled! { crate::Level::TRACE, {
@@ -1213,8 +1215,8 @@ impl Span {
         if let Some(meta) = self.meta
             && let Some(field) = field.as_field(meta)
         {
-            let value: &dyn field::Value = &value;
-            let values = [(&field, Some(value))];
+            let value_ref: &dyn field::Value = &value;
+            let values = [(&field, Some(value_ref))];
             let value_set = meta.fields().value_set(&values);
             let _span = self.record_all(&value_set);
         }
@@ -1509,16 +1511,16 @@ impl Inner {
     /// returns `Ok(())` if the other span was added as a precedent of this
     /// span, or an error if this was not possible.
     fn follows_from(&self, from: &Id) {
-        self.subscriber.record_follows_from(&self.id, from)
+        self.subscriber.record_follows_from(self.id, *from);
     }
 
     /// Returns the span's ID.
     fn id(&self) -> Id {
-        self.id.clone()
+        self.id
     }
 
     fn record(&self, values: &Record<'_>) {
-        self.subscriber.record(&self.id, values)
+        self.subscriber.record(self.id, values);
     }
 
     fn new(id: Id, subscriber: &Dispatch) -> Self {
@@ -1544,7 +1546,7 @@ impl Hash for Inner {
 impl Clone for Inner {
     fn clone(&self) -> Self {
         Inner {
-            id: self.subscriber.clone_span(&self.id),
+            id: self.subscriber.clone_span(self.id),
             subscriber: self.subscriber.clone(),
         }
     }
@@ -1611,7 +1613,6 @@ struct PhantomNotSend {
     ghost: PhantomData<dyn Sync>,
 }
 
-#[allow(non_upper_case_globals)]
 const PhantomNotSend: PhantomNotSend = PhantomNotSend { ghost: PhantomData };
 
 #[cfg(test)]

@@ -227,7 +227,7 @@ pub trait WithSubscriber: Sized {
     fn with_current_subscriber(self) -> WithDispatch<Self> {
         WithDispatch {
             inner: self,
-            dispatcher: dispatcher::get_default(|default| default.clone()),
+            dispatcher: dispatcher::get_default(Clone::clone),
         }
     }
 }
@@ -300,37 +300,44 @@ impl<T> Instrumented<T> {
     /// instrumented by and a pinned mutable reference to the inner value.
     ///
     /// This is useful for implementing poll-type functions on foreign traits.
+    #[must_use]
     pub fn span_and_inner_pin_mut(self: Pin<&mut Self>) -> (&mut Span, Option<Pin<&mut T>>) {
         let this = self.project();
         (this.span, this.inner.as_pin_mut())
     }
 
     /// Borrows the `Span` that this type is instrumented by.
-    pub fn span(&self) -> &Span {
+    #[must_use]
+    pub const fn span(&self) -> &Span {
         &self.span
     }
 
     /// Mutably borrows the `Span` that this type is instrumented by.
-    pub fn span_mut(&mut self) -> &mut Span {
+    #[must_use]
+    pub const fn span_mut(&mut self) -> &mut Span {
         &mut self.span
     }
 
     /// Borrows the wrapped type.
-    pub fn inner(&self) -> Option<&T> {
+    #[must_use]
+    pub const fn inner(&self) -> Option<&T> {
         self.inner.as_ref()
     }
 
     /// Mutably borrows the wrapped type.
-    pub fn inner_mut(&mut self) -> Option<&mut T> {
+    #[must_use]
+    pub const fn inner_mut(&mut self) -> Option<&mut T> {
         self.inner.as_mut()
     }
 
     /// Get a pinned reference to the wrapped type.
+    #[must_use]
     pub fn inner_pin_ref(self: Pin<&Self>) -> Option<Pin<&T>> {
         self.project_ref().inner.as_pin_ref()
     }
 
     /// Get a pinned mutable reference to the wrapped type.
+    #[must_use]
     pub fn inner_pin_mut(self: Pin<&mut Self>) -> Option<Pin<&mut T>> {
         self.project().inner.as_pin_mut()
     }
@@ -338,6 +345,7 @@ impl<T> Instrumented<T> {
     /// Consumes the `Instrumented`, returning the wrapped type.
     ///
     /// Note that this drops the span.
+    #[must_use]
     pub fn into_inner(mut self) -> Option<T> {
         self.inner.take()
     }
@@ -366,26 +374,31 @@ impl<T: Sized> WithSubscriber for T {}
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 impl<T> WithDispatch<T> {
     /// Borrows the [`Dispatch`] that is entered when this type is polled.
-    pub fn dispatcher(&self) -> &Dispatch {
+    #[must_use]
+    pub const fn dispatcher(&self) -> &Dispatch {
         &self.dispatcher
     }
 
     /// Borrows the wrapped type.
-    pub fn inner(&self) -> &T {
+    #[must_use]
+    pub const fn inner(&self) -> &T {
         &self.inner
     }
 
     /// Mutably borrows the wrapped type.
-    pub fn inner_mut(&mut self) -> &mut T {
+    #[must_use]
+    pub const fn inner_mut(&mut self) -> &mut T {
         &mut self.inner
     }
 
     /// Get a pinned reference to the wrapped type.
+    #[must_use]
     pub fn inner_pin_ref(self: Pin<&Self>) -> Pin<&T> {
         self.project_ref().inner
     }
 
     /// Get a pinned mutable reference to the wrapped type.
+    #[must_use]
     pub fn inner_pin_mut(self: Pin<&mut Self>) -> Pin<&mut T> {
         self.project().inner
     }
@@ -393,6 +406,7 @@ impl<T> WithDispatch<T> {
     /// Consumes the `Instrumented`, returning the wrapped type.
     ///
     /// Note that this drops the span.
+    #[must_use]
     pub fn into_inner(self) -> T {
         self.inner
     }

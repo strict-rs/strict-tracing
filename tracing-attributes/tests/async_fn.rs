@@ -17,7 +17,6 @@ async fn test_async_fn(polls: usize) -> Result<(), ()> {
 
 // Reproduces a compile error when returning an `impl Trait` from an
 // instrumented async fn (see https://github.com/tokio-rs/tracing/issues/1615)
-#[allow(dead_code)] // this is just here to test whether it compiles.
 #[instrument]
 async fn test_ret_impl_trait(n: i32) -> Result<impl Iterator<Item = i32>, ()> {
     Ok((0..10).filter(move |x| *x < n))
@@ -25,23 +24,19 @@ async fn test_ret_impl_trait(n: i32) -> Result<impl Iterator<Item = i32>, ()> {
 
 // Reproduces a compile error when returning an `impl Trait` from an
 // instrumented async fn (see https://github.com/tokio-rs/tracing/issues/1615)
-#[allow(dead_code)] // this is just here to test whether it compiles.
 #[instrument(err)]
 async fn test_ret_impl_trait_err(n: i32) -> Result<impl Iterator<Item = i32>, &'static str> {
     Ok((0..10).filter(move |x| *x < n))
 }
 
 #[instrument]
-#[allow(dead_code)]
 async fn test_async_fn_empty() {}
 
 // Reproduces a compile error when an instrumented function body contains inner
 // attributes (https://github.com/tokio-rs/tracing/issues/2294).
 #[deny(unused_variables)]
-#[allow(dead_code, clippy::mixed_attributes_style)]
 #[instrument]
 async fn repro_async_2294() {
-    #![allow(unused_variables)]
     let i = 42;
 }
 
@@ -51,7 +46,6 @@ async fn repro_async_2294() {
 // with the rustfmt-generated formatting, the lint will not be triggered!
 #[rustfmt::skip]
 #[deny(clippy::suspicious_else_formatting)]
-#[allow(dead_code)]
 async fn repro_1613(var: bool) {
     println!(
         "{}",
@@ -63,14 +57,12 @@ async fn repro_1613(var: bool) {
 // and https://github.com/rust-lang/rust-clippy/issues/7760
 #[instrument]
 #[deny(clippy::suspicious_else_formatting)]
-#[allow(dead_code)]
 async fn repro_1613_2() {
     // hello world
     // else
 }
 
 // Reproduces https://github.com/tokio-rs/tracing/issues/1831
-#[allow(dead_code)] // this is just here to test whether it compiles.
 #[instrument]
 #[deny(unused_braces)]
 fn repro_1831() -> Pin<Box<dyn Future<Output = ()>>> {
@@ -79,10 +71,8 @@ fn repro_1831() -> Pin<Box<dyn Future<Output = ()>>> {
 
 // This replicates the pattern used to implement async trait methods on nightly using the
 // `type_alias_impl_trait` feature
-#[allow(dead_code)] // this is just here to test whether it compiles.
 #[instrument(ret, err)]
 #[deny(unused_braces)]
-#[allow(clippy::manual_async_fn)]
 fn repro_1831_2() -> impl Future<Output = Result<(), Infallible>> {
     async { Ok(()) }
 }
@@ -209,14 +199,14 @@ fn async_fn_with_async_trait() {
         .enter(span.clone())
         .new_span(span3.clone())
         .enter(span3.clone())
-        .event(expect::event().with_fields(expect::field("val").with_value(&2u64)))
+        .event(expect::event().with_fields(expect::field("val").with_value(&2_u64)))
         .exit(span3.clone())
         .enter(span3.clone())
         .exit(span3.clone())
         .drop_span(span3)
         .new_span(span2.clone().with_fields(expect::field("self")))
         .enter(span2.clone())
-        .event(expect::event().with_fields(expect::field("val").with_value(&5u64)))
+        .event(expect::event().with_fields(expect::field("val").with_value(&5_u64)))
         .exit(span2.clone())
         .enter(span2.clone())
         .exit(span2.clone())
@@ -266,10 +256,10 @@ fn async_fn_with_async_trait_and_fields_expressions() {
         .new_span(
             span.clone().with_fields(
                 expect::field("_v")
-                    .with_value(&5usize)
+                    .with_value(&5_usize)
                     .and(expect::field("test").with_value(&tracing::field::debug(10)))
-                    .and(expect::field("val").with_value(&42u64))
-                    .and(expect::field("val2").with_value(&42u64)),
+                    .and(expect::field("val").with_value(&42_u64))
+                    .and(expect::field("val2").with_value(&42_u64)),
             ),
         )
         .enter(span.clone())
@@ -428,7 +418,6 @@ fn out_of_scope_fields() {
 
 #[test]
 fn manual_impl_future() {
-    #[allow(clippy::manual_async_fn)]
     #[instrument]
     fn manual_impl_future() -> impl Future<Output = ()> {
         async {

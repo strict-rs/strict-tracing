@@ -6,7 +6,10 @@ use tracing_mock::*;
 use tracing_subscriber::{filter::EnvFilter, prelude::*};
 
 #[test]
-#[cfg_attr(not(flaky_tests), ignore)]
+#[cfg_attr(
+    not(flaky_tests),
+    ignore = "field-filter expectations are flaky without the explicit flaky_tests cfg"
+)]
 fn field_filter_events() {
     let filter: EnvFilter = "[{thing}]=debug".parse().expect("filter should parse");
     let (subscriber, finished) = subscriber::mock()
@@ -36,7 +39,10 @@ fn field_filter_events() {
 }
 
 #[test]
-#[cfg_attr(not(flaky_tests), ignore)]
+#[cfg_attr(
+    not(flaky_tests),
+    ignore = "field-filter expectations are flaky without the explicit flaky_tests cfg"
+)]
 fn field_filter_spans() {
     let filter: EnvFilter = "[{enabled=true}]=debug"
         .parse()

@@ -8,7 +8,7 @@ mod shared;
 fn bench(c: &mut Criterion) {
     shared::for_all_dispatches(&mut c.benchmark_group("Dispatch::get_clone"), |b| {
         b.iter(|| {
-            let current = tracing::dispatcher::get_default(|current| current.clone());
+            let current = tracing::dispatcher::get_default(Clone::clone);
             let _value = black_box(current);
         })
     });

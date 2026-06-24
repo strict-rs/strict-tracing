@@ -3,7 +3,6 @@
 
 // these are publicly re-exported, but the compiler doesn't realize
 // that for some reason.
-#[allow(unreachable_pub)]
 pub use self::{builder::Builder, directive::Directive, field::BadName as BadFieldName};
 mod builder;
 mod directive;
@@ -896,7 +895,7 @@ mod tests {
             None,
             None,
             None,
-            FieldSet::new(&[], identify_callsite!(&Cs)),
+            &FieldSet::new(&[], identify_callsite!(&Cs)),
             Kind::SPAN,
         );
 
@@ -914,7 +913,7 @@ mod tests {
             None,
             None,
             None,
-            FieldSet::new(&[], identify_callsite!(&Cs)),
+            &FieldSet::new(&[], identify_callsite!(&Cs)),
             Kind::SPAN,
         );
 
@@ -932,7 +931,7 @@ mod tests {
             None,
             None,
             None,
-            FieldSet::new(&[], identify_callsite!(&Cs)),
+            &FieldSet::new(&[], identify_callsite!(&Cs)),
             Kind::SPAN,
         );
 
@@ -951,7 +950,7 @@ mod tests {
             None,
             None,
             None,
-            FieldSet::new(&["field"], identify_callsite!(&Cs)),
+            &FieldSet::new(&["field"], identify_callsite!(&Cs)),
             Kind::SPAN,
         );
 
@@ -970,7 +969,7 @@ mod tests {
             None,
             None,
             None,
-            FieldSet::new(&["field"], identify_callsite!(&Cs)),
+            &FieldSet::new(&["field"], identify_callsite!(&Cs)),
             Kind::SPAN,
         );
 

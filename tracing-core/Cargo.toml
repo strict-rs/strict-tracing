@@ -26,7 +26,7 @@ rust-version.workspace = true
 
 [features]
 default = ["std", "valuable?/std"]
-std = []
+std = ["dep:parking_lot"]
 # used to be an implicit feature from an optional dependency
 # FIXME: remove with the next breaking-change release
 once_cell = []
@@ -35,7 +35,11 @@ once_cell = []
 maintenance = { status = "actively-developed" }
 
 [dependencies]
+parking_lot = { workspace = true, optional = true }
 spin = { workspace = true }
+
+[dev-dependencies]
+strict-test-support = { workspace = true }
 
 [target.'cfg(tracing_unstable)'.dependencies]
 valuable = { workspace = true, optional = true }

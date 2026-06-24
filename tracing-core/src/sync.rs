@@ -1,23 +1,48 @@
-pub(crate) type MutexGuard<'a, T> = spin::mutex::MutexGuard<'a, T, spin::Spin>;
+//! Internal synchronization facade for the callsite registry.
 
-/// This wraps `spin::Mutex` to return a `Result`, so that it can be
-/// used with code written against `std::sync::Mutex`.
-///
-/// Since `spin::Mutex` doesn't support poisoning, the `Result` returned
-/// by `lock` will always be `Ok`.
+#[cfg(feature = "std")]
+pub use parking_lot::{Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
+#[cfg(not(feature = "std"))]
+pub type MutexGuard<'a, T> = spin::mutex::MutexGuard<'a, T, spin::Spin>;
+
+/// Builds a mutex for statics and const initializers.
+#[cfg(feature = "std")]
+pub const fn mutex<T>(data: T) -> Mutex<T> {
+    parking_lot::const_mutex(data)
+}
+
+/// Builds a read/write lock for statics and const initializers.
+#[cfg(feature = "std")]
+pub const fn rwlock<T>(data: T) -> RwLock<T> {
+    parking_lot::const_rwlock(data)
+}
+
+/// Non-poisoning mutex used in `no_std` builds.
+#[cfg(not(feature = "std"))]
 #[derive(Debug, Default)]
-pub(crate) struct Mutex<T> {
+pub struct Mutex<T> {
+    /// Spin-backed lock storage.
     inner: spin::Mutex<T>,
 }
 
+#[cfg(not(feature = "std"))]
 impl<T> Mutex<T> {
-    pub(crate) const fn new(data: T) -> Self {
+    /// Returns a new spin-backed mutex.
+    pub const fn new(data: T) -> Self {
         Self {
             inner: spin::Mutex::new(data),
         }
     }
 
-    pub(crate) fn lock(&self) -> Result<MutexGuard<'_, T>, ()> {
-        Ok(self.inner.lock())
+    /// Acquires the lock.
+    pub fn lock(&self) -> MutexGuard<'_, T> {
+        self.inner.lock()
     }
+}
+
+/// Builds a mutex for statics and const initializers.
+#[cfg(not(feature = "std"))]
+pub const fn mutex<T>(data: T) -> Mutex<T> {
+    Mutex::new(data)
 }

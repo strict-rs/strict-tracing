@@ -98,7 +98,6 @@ fn instrumented_fn() {}
 #[instrument(level = "debug")]
 async fn instrumented_async_fn() {}
 
-#[allow(clippy::manual_async_fn)]
 #[instrument(level = "debug")]
 fn instrumented_manual_async() -> impl Future<Output = ()> {
     async move {}

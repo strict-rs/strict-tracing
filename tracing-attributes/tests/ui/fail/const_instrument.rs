@@ -1,4 +1,3 @@
-#![allow(unreachable_code)]
 
 #[tracing::instrument]
 const fn unit() {

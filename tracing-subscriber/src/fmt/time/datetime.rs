@@ -271,7 +271,7 @@ impl From<std::time::SystemTime> for DateTime {
         // Note(dcb): this bit is rearranged slightly to avoid integer overflow.
         let mut days: i64 = (t / 86_400) - (LEAPOCH / 86_400);
         let mut remsecs: i32 = (t % 86_400) as i32;
-        if remsecs < 0i32 {
+        if remsecs < 0_i32 {
             remsecs += 86_400;
             days -= 1
         }
@@ -384,10 +384,10 @@ mod tests {
             1,
         );
 
-        case("2038-01-19T03:14:07.000000Z", i32::MAX as i64, 0);
-        case("2038-01-19T03:14:08.000000Z", i32::MAX as i64 + 1, 0);
-        case("1901-12-13T20:45:52.000000Z", i32::MIN as i64, 0);
-        case("1901-12-13T20:45:51.000000Z", i32::MIN as i64 - 1, 0);
+        case("2038-01-19T03:14:07.000000Z", i64::from(i32::MAX), 0);
+        case("2038-01-19T03:14:08.000000Z", i64::from(i32::MAX) + 1, 0);
+        case("1901-12-13T20:45:52.000000Z", i64::from(i32::MIN), 0);
+        case("1901-12-13T20:45:51.000000Z", i64::from(i32::MIN) - 1, 0);
 
         // Skipping these tests on windows as std::time::SystemTime range is low
         // on Windows compared with that of Unix which can cause the following
@@ -399,20 +399,20 @@ mod tests {
             case("-292277022657-01-27T08:29:53.000000Z", i64::MIN + 1, 0);
         }
 
-        case("1900-01-01T00:00:00.000000Z", -2208988800, 0);
-        case("1899-12-31T23:59:59.000000Z", -2208988801, 0);
-        case("2345-06-07T08:09:01.000000Z", 11847456541, 0);
+        case("1900-01-01T00:00:00.000000Z", -2_208_988_800, 0);
+        case("1899-12-31T23:59:59.000000Z", -2_208_988_801, 0);
+        case("2345-06-07T08:09:01.000000Z", 11_847_456_541, 0);
 
         // Skipping pre-1601 dates on Windows: as of Rust 1.94, SystemTime
         // subtraction panics when the result would be before the Windows
         // FILETIME epoch (1601-01-01). See Rust 1.94.0 compatibility notes.
         #[cfg(not(target_os = "windows"))]
         {
-            case("1234-05-06T07:08:09.000000Z", -23215049511, 0);
-            case("0000-01-01T00:00:00.000000Z", -62167219200, 0);
-            case("-0001-12-31T23:59:59.000000Z", -62167219201, 0);
-            case("-1234-05-06T07:08:09.000000Z", -101097651111, 0);
-            case("-2345-06-07T08:09:01.000000Z", -136154620259, 0);
+            case("1234-05-06T07:08:09.000000Z", -23_215_049_511, 0);
+            case("0000-01-01T00:00:00.000000Z", -62_167_219_200, 0);
+            case("-0001-12-31T23:59:59.000000Z", -62_167_219_201, 0);
+            case("-1234-05-06T07:08:09.000000Z", -101_097_651_111, 0);
+            case("-2345-06-07T08:09:01.000000Z", -136_154_620_259, 0);
         }
     }
 }

@@ -17,7 +17,7 @@ fn layer_filter_interests_are_cached() {
             .lock()
             .unwrap()
             .entry(meta.callsite())
-            .or_insert(0usize) += 1;
+            .or_insert(0_usize) += 1;
         meta.level() == &Level::INFO
     });
 

@@ -7,7 +7,6 @@
 //! API than `std::sync::RwLock` (it does not support poisoning on panics), we
 //! wrap it with a type that provides the same method signatures. This allows us
 //! to transparently swap `parking_lot` in without changing code at the callsite.
-#[allow(unused_imports)] // may be used later;
 pub(crate) use std::sync::{LockResult, PoisonError, TryLockResult};
 
 #[cfg(not(feature = "parking_lot"))]
@@ -44,7 +43,6 @@ mod parking_lot_impl {
         }
 
         #[inline]
-        #[allow(dead_code)] // may be used later;
         pub(crate) fn try_read(&self) -> TryLockResult<RwLockReadGuard<'_, T>> {
             self.inner.try_read().ok_or(TryLockError::WouldBlock)
         }

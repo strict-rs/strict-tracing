@@ -27,7 +27,6 @@ fn handles_to_the_same_span_are_equal() {
 
         // The purpose of this test is to assert that two clones of the same
         // span are equal, so the clone here is kind of the whole point :)
-        #[allow(clippy::redundant_clone)]
         let foo2 = foo1.clone();
 
         // Two handles that point to the same span are equal.
@@ -208,7 +207,6 @@ fn cloning_a_span_calls_clone_span() {
     with_default(subscriber, || {
         let span = tracing::span!(Level::TRACE, "foo");
         // Allow the "redundant" `.clone` since it is used to call into the `.clone_span` hook.
-        #[allow(clippy::redundant_clone)]
         let _span2 = span.clone();
     });
 

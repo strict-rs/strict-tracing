@@ -2,7 +2,7 @@
 #![deny(rust_2018_idioms)]
 
 use tracing_macros::dbg;
-use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt as _};
 
 fn factorial(n: u32) -> u32 {
     if dbg!(n <= 1) {

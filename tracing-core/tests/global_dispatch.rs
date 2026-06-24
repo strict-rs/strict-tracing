@@ -1,36 +1,48 @@
 //! Global dispatcher integration coverage.
 
-mod common;
+#[cfg(test)]
+mod tests {
+    mod common {
+        include!("common/mod.rs");
+    }
 
-use common::*;
-use tracing_core::dispatcher::*;
-#[test]
-fn global_dispatch() {
-    set_global_default(Dispatch::new(TestSubscriberA)).expect("global dispatch set failed");
-    get_default(|current| {
-        assert!(
-            current.is::<TestSubscriberA>(),
-            "global dispatch get failed"
-        )
-    });
+    use common::*;
+    use strict_test_support::{TestFailure, ensure, ensure_ok};
+    use tracing_core::dispatcher::*;
 
-    #[cfg(feature = "std")]
-    with_default(&Dispatch::new(TestSubscriberB), || {
+    #[test]
+    fn global_dispatch() -> Result<(), TestFailure> {
+        ensure_ok(
+            set_global_default(Dispatch::new(TestSubscriberA)),
+            "global dispatch set failed",
+        )?;
         get_default(|current| {
-            assert!(
-                current.is::<TestSubscriberB>(),
-                "thread-local override of global dispatch failed"
+            ensure(
+                current.is::<TestSubscriberA>(),
+                "global dispatch get failed",
             )
-        });
-    });
+        })?;
 
-    get_default(|current| {
-        assert!(
-            current.is::<TestSubscriberA>(),
-            "reset to global override failed"
+        #[cfg(feature = "std")]
+        with_default(&Dispatch::new(TestSubscriberB), || {
+            get_default(|current| {
+                ensure(
+                    current.is::<TestSubscriberB>(),
+                    "thread-local override of global dispatch failed",
+                )
+            })
+        })?;
+
+        get_default(|current| {
+            ensure(
+                current.is::<TestSubscriberA>(),
+                "reset to global override failed",
+            )
+        })?;
+
+        ensure(
+            set_global_default(Dispatch::new(TestSubscriberA)).is_err(),
+            "double global dispatch set must fail",
         )
-    });
-
-    let _error = set_global_default(Dispatch::new(TestSubscriberA))
-        .expect_err("double global dispatch set succeeded");
+    }
 }

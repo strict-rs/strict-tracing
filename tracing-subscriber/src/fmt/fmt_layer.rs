@@ -864,7 +864,6 @@ macro_rules! with_event_from_span {
         let meta = $span.metadata();
         let cs = meta.callsite();
         let fs = field::FieldSet::new(&[$($field),*], cs);
-        #[allow(unused)]
         let mut iter = fs.iter();
         let v = [$(
             (&iter.next().unwrap(), {

@@ -34,6 +34,7 @@ pin-project-lite = { workspace = true }
 criterion = { workspace = true }
 futures = { workspace = true }
 log = { workspace = true }
+strict-test-support = { workspace = true }
 tracing-mock = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]

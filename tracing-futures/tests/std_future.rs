@@ -3,7 +3,7 @@
 use std::{future::Future, pin::Pin, task};
 
 use futures::FutureExt as _;
-use tracing::Instrument;
+use tracing::Instrument as _;
 use tracing::{Level, subscriber::with_default};
 use tracing_mock::{expect, subscriber};
 use tracing_test::{PollN, block_on_future};
@@ -57,7 +57,6 @@ fn span_on_drop() {
         }
     }
 
-    #[allow(dead_code)] // Field unused, but logs on `Drop`
     struct Fut(Option<AssertSpanOnDrop>);
 
     impl Future for Fut {

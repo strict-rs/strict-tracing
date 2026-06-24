@@ -70,7 +70,7 @@ impl Subscriber for TestSubscriber {
         true
     }
     fn new_span(&self, _span: &span::Attributes<'_>) -> span::Id {
-        span::Id::from_u64(0)
+        span::Id::from_u64(1)
     }
     fn record(&self, _span: &span::Id, _values: &span::Record<'_>) {}
     fn record_follows_from(&self, _span: &span::Id, _follows: &span::Id) {}

@@ -3,7 +3,6 @@ use tracing_core::{
     subscriber::{Interest, Subscriber},
 };
 
-#[allow(unreachable_pub)] // https://github.com/rust-lang/rust/issues/57411
 pub use tracing_core::metadata::{LevelFilter, ParseLevelFilterError as ParseError};
 
 // === impl LevelFilter ===

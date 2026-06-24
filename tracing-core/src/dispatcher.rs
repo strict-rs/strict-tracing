@@ -29,13 +29,13 @@
 //! #   span::{Attributes, Id, Record}
 //! # };
 //! # impl tracing_core::Subscriber for FooSubscriber {
-//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(0) }
-//! #   fn record(&self, _: &Id, _: &Record) {}
+//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_non_zero_u64(core::num::NonZeroU64::MIN) }
+//! #   fn record(&self, _: Id, _: &Record) {}
 //! #   fn event(&self, _: &Event) {}
-//! #   fn record_follows_from(&self, _: &Id, _: &Id) {}
+//! #   fn record_follows_from(&self, _: Id, _: Id) {}
 //! #   fn enabled(&self, _: &Metadata) -> bool { false }
-//! #   fn enter(&self, _: &Id) {}
-//! #   fn exit(&self, _: &Id) {}
+//! #   fn enter(&self, _: Id) {}
+//! #   fn exit(&self, _: Id) {}
 //! # }
 //! # impl FooSubscriber { fn new() -> Self { FooSubscriber } }
 //! use dispatcher::Dispatch;
@@ -52,13 +52,13 @@
 //! #   span::{Attributes, Id, Record}
 //! # };
 //! # impl tracing_core::Subscriber for FooSubscriber {
-//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(0) }
-//! #   fn record(&self, _: &Id, _: &Record) {}
+//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_non_zero_u64(core::num::NonZeroU64::MIN) }
+//! #   fn record(&self, _: Id, _: &Record) {}
 //! #   fn event(&self, _: &Event) {}
-//! #   fn record_follows_from(&self, _: &Id, _: &Id) {}
+//! #   fn record_follows_from(&self, _: Id, _: Id) {}
 //! #   fn enabled(&self, _: &Metadata) -> bool { false }
-//! #   fn enter(&self, _: &Id) {}
-//! #   fn exit(&self, _: &Id) {}
+//! #   fn enter(&self, _: Id) {}
+//! #   fn exit(&self, _: Id) {}
 //! # }
 //! # impl FooSubscriber { fn new() -> Self { FooSubscriber } }
 //! # let my_subscriber = FooSubscriber::new();
@@ -87,13 +87,13 @@
 //! #   span::{Attributes, Id, Record}
 //! # };
 //! # impl tracing_core::Subscriber for FooSubscriber {
-//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(0) }
-//! #   fn record(&self, _: &Id, _: &Record) {}
+//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_non_zero_u64(core::num::NonZeroU64::MIN) }
+//! #   fn record(&self, _: Id, _: &Record) {}
 //! #   fn event(&self, _: &Event) {}
-//! #   fn record_follows_from(&self, _: &Id, _: &Id) {}
+//! #   fn record_follows_from(&self, _: Id, _: Id) {}
 //! #   fn enabled(&self, _: &Metadata) -> bool { false }
-//! #   fn enter(&self, _: &Id) {}
-//! #   fn exit(&self, _: &Id) {}
+//! #   fn enter(&self, _: Id) {}
+//! #   fn exit(&self, _: Id) {}
 //! # }
 //! # impl FooSubscriber { fn new() -> Self { FooSubscriber } }
 //! # let my_subscriber = FooSubscriber::new();
@@ -145,6 +145,7 @@ use std::{
 /// `Dispatch` trace data to a [`Subscriber`].
 #[derive(Clone)]
 pub struct Dispatch {
+    /// Subscriber target receiving forwarded trace data.
     subscriber: Kind<Arc<dyn Subscriber + Send + Sync>>,
 }
 
@@ -158,7 +159,7 @@ pub struct Dispatch {
 ///
 /// A `WeakDispatch` may be created from a [`Dispatch`] by calling the
 /// [`Dispatch::downgrade`] method. The primary use for creating a
-/// [`WeakDispatch`] is to allow a Subscriber` to hold a cyclical reference to
+/// [`WeakDispatch`] is to allow a `Subscriber` to hold a cyclical reference to
 /// itself without creating a memory leak. See [here] for details.
 ///
 /// This type is analogous to the [`std::sync::Weak`] type, but for a
@@ -168,12 +169,16 @@ pub struct Dispatch {
 /// [here]: Subscriber#avoiding-memory-leaks
 #[derive(Clone)]
 pub struct WeakDispatch {
+    /// Weak subscriber target upgraded before dispatching.
     subscriber: Kind<Weak<dyn Subscriber + Send + Sync>>,
 }
 
+/// Subscriber storage for global and scoped dispatchers.
 #[derive(Clone)]
 enum Kind<T> {
+    /// Process-wide subscriber that is never reference-counted.
     Global(&'static (dyn Subscriber + Send + Sync)),
+    /// Reference-counted subscriber installed by a scoped dispatcher.
     Scoped(T),
 }
 
@@ -187,23 +192,33 @@ std::thread_local! {
     };
 }
 
+/// Records whether any dispatcher has ever been installed.
 static EXISTS: AtomicBool = AtomicBool::new(false);
+/// Initialization state for the global dispatcher.
 static GLOBAL_INIT: AtomicUsize = AtomicUsize::new(UNINITIALIZED);
 
 #[cfg(feature = "std")]
+/// Count of scoped dispatchers currently installed on this process.
 static SCOPED_COUNT: AtomicUsize = AtomicUsize::new(0);
 
+/// Global dispatcher has not been initialized.
 const UNINITIALIZED: usize = 0;
+/// A thread is initializing the global dispatcher.
 const INITIALIZING: usize = 1;
+/// Global dispatcher initialization completed.
 const INITIALIZED: usize = 2;
 
 #[cfg(feature = "std")]
+/// Lazily initialized global dispatcher for `std` builds.
 static GLOBAL_DISPATCH: OnceLock<Dispatch> = OnceLock::new();
 #[cfg(not(feature = "std"))]
+/// Lazily initialized global dispatcher for `no_std` builds.
 static GLOBAL_DISPATCH: spin::Once<Dispatch> = spin::Once::new();
+/// Fallback dispatcher used when no subscriber has been installed.
 static NONE: Dispatch = Dispatch {
     subscriber: Kind::Global(&NO_SUBSCRIBER),
 };
+/// Shared subscriber that drops every span and event.
 static NO_SUBSCRIBER: NoSubscriber = NoSubscriber::new();
 
 /// The dispatch state of a thread.
@@ -260,7 +275,7 @@ pub fn with_default<T>(dispatcher: &Dispatch, f: impl FnOnce() -> T) -> T {
 }
 
 /// Sets the dispatch as the default dispatch for the duration of the lifetime
-/// of the returned DefaultGuard
+/// of the returned `DefaultGuard`.
 ///
 /// <pre class="ignore" style="white-space:normal;font:inherit;">
 ///     <strong>Note</strong>: This function required the Rust standard library.
@@ -285,6 +300,11 @@ pub fn set_default(dispatcher: &Dispatch) -> DefaultGuard {
 ///
 /// Can only be set once; subsequent attempts to set the global default will fail.
 /// Returns `Err` if the global default has already been set.
+///
+/// # Errors
+///
+/// Returns [`SetGlobalDefaultError`] if a global default dispatcher was already
+/// installed by an earlier call.
 ///
 /// <div class="example-wrap" style="display:inline-block"><pre class="compile_fail" style="white-space:normal;font:inherit;">
 ///     <strong>Warning</strong>: In general, libraries should <em>not</em> call
@@ -327,7 +347,7 @@ pub fn set_global_default(dispatcher: Dispatch) -> Result<(), SetGlobalDefaultEr
 /// This may be used to completely elide trace points if tracing is not in use
 /// at all or has yet to be initialized.
 #[doc(hidden)]
-#[inline(always)]
+#[inline]
 pub fn has_been_set() -> bool {
     EXISTS.load(Ordering::Relaxed)
 }
@@ -335,6 +355,7 @@ pub fn has_been_set() -> bool {
 /// Returned if setting the global dispatcher fails.
 #[derive(Copy, Clone)]
 pub struct SetGlobalDefaultError {
+    /// Prevents constructing this error outside the crate.
     _no_construct: (),
 }
 
@@ -357,6 +378,7 @@ impl fmt::Display for SetGlobalDefaultError {
 impl error::Error for SetGlobalDefaultError {}
 
 impl SetGlobalDefaultError {
+    /// Display text shared by every formatter implementation.
     const MESSAGE: &'static str = "a global default trace dispatcher has already been set";
 }
 
@@ -381,7 +403,10 @@ where
     CURRENT_STATE
         .try_with(|state| {
             if let Some(entered) = state.enter() {
-                return f(&entered.current());
+                if let Some(current) = entered.current() {
+                    return f(&current);
+                }
+                return f(get_global());
             }
 
             f(&NONE)
@@ -409,7 +434,11 @@ pub fn get_current<T>(f: impl FnOnce(&Dispatch) -> T) -> Option<T> {
     CURRENT_STATE
         .try_with(|state| {
             let entered = state.enter()?;
-            Some(f(&entered.current()))
+            if let Some(current) = entered.current() {
+                Some(f(&current))
+            } else {
+                Some(f(get_global()))
+            }
         })
         .ok()?
 }
@@ -435,6 +464,7 @@ where
 }
 
 #[inline]
+/// Returns the installed global dispatcher or the no-subscriber fallback.
 fn get_global() -> &'static Dispatch {
     if GLOBAL_INIT.load(Ordering::SeqCst) != INITIALIZED {
         return &NONE;
@@ -444,13 +474,15 @@ fn get_global() -> &'static Dispatch {
 }
 
 #[cfg(feature = "std")]
+/// Weak registrar stored in the callsite dispatch registry.
 pub(crate) struct Registrar(Kind<Weak<dyn Subscriber + Send + Sync>>);
 
 impl Dispatch {
     /// Returns a new `Dispatch` that discards events and spans.
     #[inline]
+    #[must_use]
     pub fn none() -> Self {
-        Dispatch {
+        Self {
             subscriber: Kind::Global(&NO_SUBSCRIBER),
         }
     }
@@ -462,7 +494,7 @@ impl Dispatch {
     where
         S: Subscriber + Send + Sync + 'static,
     {
-        let me = Dispatch {
+        let me = Self {
             subscriber: Kind::Scoped(Arc::new(subscriber)),
         };
         callsite::register_dispatch(&me);
@@ -470,6 +502,7 @@ impl Dispatch {
     }
 
     #[cfg(feature = "std")]
+    /// Returns a weak registrar used for future callsite interest rebuilds.
     pub(crate) fn registrar(&self) -> Registrar {
         Registrar(self.subscriber.downgrade())
     }
@@ -488,17 +521,19 @@ impl Dispatch {
     ///
     /// [`Arc::downgrade`]: std::sync::Arc::downgrade
     /// [here]: Subscriber#avoiding-memory-leaks
+    #[must_use]
     pub fn downgrade(&self) -> WeakDispatch {
         WeakDispatch {
             subscriber: self.subscriber.downgrade(),
         }
     }
 
-    #[inline(always)]
+    #[inline]
+    /// Returns the subscriber backing this dispatch.
     pub(crate) fn subscriber(&self) -> &(dyn Subscriber + Send + Sync) {
         match self.subscriber {
-            Kind::Global(s) => s,
-            Kind::Scoped(ref s) => s.as_ref(),
+            Kind::Global(subscriber) => subscriber,
+            Kind::Scoped(ref subscriber) => subscriber.as_ref(),
         }
     }
 
@@ -511,6 +546,7 @@ impl Dispatch {
     /// [`Subscriber`]: super::subscriber::Subscriber
     /// [`register_callsite`]: super::subscriber::Subscriber::register_callsite
     #[inline]
+    #[must_use]
     pub fn register_callsite(&self, metadata: &'static Metadata<'static>) -> subscriber::Interest {
         self.subscriber().register_callsite(metadata)
     }
@@ -541,6 +577,7 @@ impl Dispatch {
     /// [`Subscriber`]: super::subscriber::Subscriber
     /// [`new_span`]: super::subscriber::Subscriber::new_span
     #[inline]
+    #[must_use]
     pub fn new_span(&self, span: &span::Attributes<'_>) -> span::Id {
         self.subscriber().new_span(span)
     }
@@ -553,8 +590,8 @@ impl Dispatch {
     /// [`Subscriber`]: super::subscriber::Subscriber
     /// [`record`]: super::subscriber::Subscriber::record
     #[inline]
-    pub fn record(&self, span: &span::Id, values: &span::Record<'_>) {
-        self.subscriber().record(span, values)
+    pub fn record(&self, span: span::Id, values: &span::Record<'_>) {
+        self.subscriber().record(span, values);
     }
 
     /// Adds an indication that `span` follows from the span with the id
@@ -566,8 +603,8 @@ impl Dispatch {
     /// [`Subscriber`]: super::subscriber::Subscriber
     /// [`record_follows_from`]: super::subscriber::Subscriber::record_follows_from
     #[inline]
-    pub fn record_follows_from(&self, span: &span::Id, follows: &span::Id) {
-        self.subscriber().record_follows_from(span, follows)
+    pub fn record_follows_from(&self, span: span::Id, follows: span::Id) {
+        self.subscriber().record_follows_from(span, follows);
     }
 
     /// Returns true if a span with the specified [metadata] would be
@@ -580,6 +617,7 @@ impl Dispatch {
     /// [`Subscriber`]: super::subscriber::Subscriber
     /// [`enabled`]: super::subscriber::Subscriber::enabled
     #[inline]
+    #[must_use]
     pub fn enabled(&self, metadata: &Metadata<'_>) -> bool {
         self.subscriber().enabled(metadata)
     }
@@ -600,14 +638,14 @@ impl Dispatch {
         }
     }
 
-    /// Records that a span has been can_enter.
+    /// Records that a span has been `can_enter`.
     ///
     /// This calls the [`enter`] function on the [`Subscriber`] that this
     /// `Dispatch` forwards to.
     ///
     /// [`Subscriber`]: super::subscriber::Subscriber
     /// [`enter`]: super::subscriber::Subscriber::enter
-    pub fn enter(&self, span: &span::Id) {
+    pub fn enter(&self, span: span::Id) {
         self.subscriber().enter(span);
     }
 
@@ -618,7 +656,7 @@ impl Dispatch {
     ///
     /// [`Subscriber`]: super::subscriber::Subscriber
     /// [`exit`]: super::subscriber::Subscriber::exit
-    pub fn exit(&self, span: &span::Id) {
+    pub fn exit(&self, span: span::Id) {
         self.subscriber().exit(span);
     }
 
@@ -637,7 +675,8 @@ impl Dispatch {
     /// [`clone_span`]: super::subscriber::Subscriber::clone_span
     /// [`new_span`]: super::subscriber::Subscriber::new_span
     #[inline]
-    pub fn clone_span(&self, id: &span::Id) -> span::Id {
+    #[must_use]
+    pub fn clone_span(&self, id: span::Id) -> span::Id {
         self.subscriber().clone_span(id)
     }
 
@@ -666,7 +705,6 @@ impl Dispatch {
     #[inline]
     #[deprecated(since = "0.1.2", note = "use `Dispatch::try_close` instead")]
     pub fn drop_span(&self, id: span::Id) {
-        #[allow(deprecated)]
         self.subscriber().drop_span(id);
     }
 
@@ -685,6 +723,7 @@ impl Dispatch {
     /// [`Subscriber`]: super::subscriber::Subscriber
     /// [`try_close`]: super::subscriber::Subscriber::try_close
     /// [`new_span`]: super::subscriber::Subscriber::new_span
+    #[must_use]
     pub fn try_close(&self, id: span::Id) -> bool {
         self.subscriber().try_close(id)
     }
@@ -696,6 +735,7 @@ impl Dispatch {
     ///
     /// [`current`]: super::subscriber::Subscriber::current_span
     #[inline]
+    #[must_use]
     pub fn current_span(&self) -> span::Current {
         self.subscriber().current_span()
     }
@@ -703,6 +743,7 @@ impl Dispatch {
     /// Returns `true` if this `Dispatch` forwards to a `Subscriber` of type
     /// `T`.
     #[inline]
+    #[must_use]
     pub fn is<T: Any>(&self) -> bool {
         <dyn Subscriber + Send + Sync>::is::<T>(self.subscriber())
     }
@@ -710,6 +751,7 @@ impl Dispatch {
     /// Returns some reference to the `Subscriber` this `Dispatch` forwards to
     /// if it is of type `T`, or `None` if it isn't.
     #[inline]
+    #[must_use]
     pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
         <dyn Subscriber + Send + Sync>::downcast_ref(self.subscriber())
     }
@@ -718,20 +760,20 @@ impl Dispatch {
 impl Default for Dispatch {
     /// Returns the current default dispatcher
     fn default() -> Self {
-        get_default(|default| default.clone())
+        get_default(Clone::clone)
     }
 }
 
 impl fmt::Debug for Dispatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.subscriber {
-            Kind::Scoped(ref s) => f
+            Kind::Scoped(ref subscriber) => f
                 .debug_tuple("Dispatch::Scoped")
-                .field(&format_args!("{:p}", s))
+                .field(&format_args!("{subscriber:p}"))
                 .finish(),
-            Kind::Global(s) => f
+            Kind::Global(subscriber) => f
                 .debug_tuple("Dispatch::Global")
-                .field(&format_args!("{:p}", s))
+                .field(&format_args!("{subscriber:p}"))
                 .finish(),
         }
     }
@@ -743,7 +785,7 @@ where
 {
     #[inline]
     fn from(subscriber: S) -> Self {
-        Dispatch::new(subscriber)
+        Self::new(subscriber)
     }
 }
 
@@ -768,6 +810,7 @@ impl WeakDispatch {
     /// drop(strong); // But not any more.
     /// assert!(weak.upgrade().is_none());
     /// ```
+    #[must_use]
     pub fn upgrade(&self) -> Option<Dispatch> {
         self.subscriber
             .upgrade()
@@ -778,13 +821,13 @@ impl WeakDispatch {
 impl fmt::Debug for WeakDispatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.subscriber {
-            Kind::Scoped(ref s) => f
+            Kind::Scoped(ref subscriber) => f
                 .debug_tuple("WeakDispatch::Scoped")
-                .field(&format_args!("{:p}", s))
+                .field(&format_args!("{subscriber:p}"))
                 .finish(),
-            Kind::Global(s) => f
+            Kind::Global(subscriber) => f
                 .debug_tuple("WeakDispatch::Global")
-                .field(&format_args!("{:p}", s))
+                .field(&format_args!("{subscriber:p}"))
                 .finish(),
         }
     }
@@ -792,6 +835,7 @@ impl fmt::Debug for WeakDispatch {
 
 #[cfg(feature = "std")]
 impl Registrar {
+    /// Upgrades this registrar into a live dispatcher.
     pub(crate) fn upgrade(&self) -> Option<Dispatch> {
         self.0.upgrade().map(|subscriber| Dispatch { subscriber })
     }
@@ -800,19 +844,21 @@ impl Registrar {
 // ===== impl State =====
 
 impl Kind<Arc<dyn Subscriber + Send + Sync>> {
+    /// Downgrades the reference-counted subscriber without affecting globals.
     fn downgrade(&self) -> Kind<Weak<dyn Subscriber + Send + Sync>> {
-        match self {
-            Kind::Global(s) => Kind::Global(*s),
-            Kind::Scoped(s) => Kind::Scoped(Arc::downgrade(s)),
+        match *self {
+            Kind::Global(subscriber) => Kind::Global(subscriber),
+            Kind::Scoped(ref subscriber) => Kind::Scoped(Arc::downgrade(subscriber)),
         }
     }
 }
 
 impl Kind<Weak<dyn Subscriber + Send + Sync>> {
+    /// Upgrades a weak subscriber handle without affecting globals.
     fn upgrade(&self) -> Option<Kind<Arc<dyn Subscriber + Send + Sync>>> {
-        match self {
-            Kind::Global(s) => Some(Kind::Global(*s)),
-            Kind::Scoped(s) => Some(Kind::Scoped(s.upgrade()?)),
+        match *self {
+            Kind::Global(subscriber) => Some(Kind::Global(subscriber)),
+            Kind::Scoped(ref subscriber) => Some(Kind::Scoped(subscriber.upgrade()?)),
         }
     }
 }
@@ -841,7 +887,8 @@ impl State {
     }
 
     #[inline]
-    fn enter(&self) -> Option<Entered<'_>> {
+    /// Enters dispatch if the thread is not already dispatching.
+    const fn enter(&self) -> Option<Entered<'_>> {
         if self.can_enter.replace(false) {
             Some(Entered(self))
         } else {
@@ -855,12 +902,10 @@ impl State {
 #[cfg(feature = "std")]
 impl<'a> Entered<'a> {
     #[inline]
-    fn current(&self) -> Ref<'a, Dispatch> {
-        let default = self.0.default.borrow();
-        Ref::map(default, |default| match default {
-            Some(default) => default,
-            None => get_global(),
-        })
+    /// Borrows the scoped dispatcher guarded by this entered state.
+    fn current(&self) -> Option<Ref<'a, Dispatch>> {
+        let default = self.0.default.try_borrow().ok()?;
+        Ref::filter_map(default, Option::as_ref).ok()
     }
 }
 
@@ -885,7 +930,7 @@ impl Drop for DefaultGuard {
         // state -- causing a clash.
         let prev = CURRENT_STATE.try_with(|state| state.default.replace(self.0.take()));
         let _previous_scoped_count = SCOPED_COUNT.fetch_sub(1, Ordering::Release);
-        drop(prev)
+        drop(prev);
     }
 }
 
@@ -894,6 +939,8 @@ mod test {
     #[cfg(feature = "std")]
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    use core::num::NonZeroU64;
+
     use super::*;
     #[cfg(feature = "std")]
     use crate::{
@@ -901,17 +948,24 @@ mod test {
         metadata::{Kind, Level, Metadata},
         subscriber::Interest,
     };
+    use strict_test_support::{TestFailure, ensure, ensure_eq};
 
     #[test]
-    fn dispatch_is() {
+    fn dispatch_is() -> Result<(), TestFailure> {
         let dispatcher = Dispatch::new(NoSubscriber::default());
-        assert!(dispatcher.is::<NoSubscriber>());
+        ensure(
+            dispatcher.is::<NoSubscriber>(),
+            "dispatcher type is NoSubscriber",
+        )
     }
 
     #[test]
-    fn dispatch_downcasts() {
+    fn dispatch_downcasts() -> Result<(), TestFailure> {
         let dispatcher = Dispatch::new(NoSubscriber::default());
-        assert!(dispatcher.downcast_ref::<NoSubscriber>().is_some());
+        ensure(
+            dispatcher.downcast_ref::<NoSubscriber>().is_some(),
+            "dispatcher downcasts to NoSubscriber",
+        )
     }
 
     #[cfg(feature = "std")]
@@ -938,7 +992,9 @@ mod test {
 
     #[test]
     #[cfg(feature = "std")]
-    fn events_dont_infinite_loop() {
+    fn events_dont_infinite_loop() -> Result<(), TestFailure> {
+        static EVENTS: AtomicUsize = AtomicUsize::new(0);
+
         // This test ensures that an event triggered within a subscriber
         // won't cause an infinite loop of events.
         struct TestSubscriber;
@@ -948,36 +1004,38 @@ mod test {
             }
 
             fn new_span(&self, _: &span::Attributes<'_>) -> span::Id {
-                span::Id::from_u64(0xAAAA)
+                span::Id::from_non_zero_u64(NonZeroU64::MIN)
             }
 
-            fn record(&self, _: &span::Id, _: &span::Record<'_>) {}
+            fn record(&self, _: span::Id, _: &span::Record<'_>) {}
 
-            fn record_follows_from(&self, _: &span::Id, _: &span::Id) {}
+            fn record_follows_from(&self, _: span::Id, _: span::Id) {}
 
             fn event(&self, _: &Event<'_>) {
-                static EVENTS: AtomicUsize = AtomicUsize::new(0);
-                assert_eq!(
-                    EVENTS.fetch_add(1, Ordering::Relaxed),
-                    0,
-                    "event method called twice!"
-                );
-                Event::dispatch(&TEST_META, &TEST_META.fields().value_set(&[]))
+                let _previous_events = EVENTS.fetch_add(1, Ordering::Relaxed);
+                Event::dispatch(&TEST_META, &TEST_META.fields().value_set(&[]));
             }
 
-            fn enter(&self, _: &span::Id) {}
+            fn enter(&self, _: span::Id) {}
 
-            fn exit(&self, _: &span::Id) {}
+            fn exit(&self, _: span::Id) {}
         }
 
         with_default(&Dispatch::new(TestSubscriber), || {
-            Event::dispatch(&TEST_META, &TEST_META.fields().value_set(&[]))
-        })
+            Event::dispatch(&TEST_META, &TEST_META.fields().value_set(&[]));
+        });
+        ensure_eq(
+            &EVENTS.load(Ordering::Relaxed),
+            &1_usize,
+            "event method is called once",
+        )
     }
 
     #[test]
     #[cfg(feature = "std")]
-    fn spans_dont_infinite_loop() {
+    fn spans_dont_infinite_loop() -> Result<(), TestFailure> {
+        static NEW_SPANS: AtomicUsize = AtomicUsize::new(0);
+
         // This test ensures that a span created within a subscriber
         // won't cause an infinite loop of new spans.
 
@@ -997,39 +1055,42 @@ mod test {
             }
 
             fn new_span(&self, _: &span::Attributes<'_>) -> span::Id {
-                static NEW_SPANS: AtomicUsize = AtomicUsize::new(0);
-                assert_eq!(
-                    NEW_SPANS.fetch_add(1, Ordering::Relaxed),
-                    0,
-                    "new_span method called twice!"
-                );
+                let _previous_new_spans = NEW_SPANS.fetch_add(1, Ordering::Relaxed);
                 mk_span();
-                span::Id::from_u64(0xAAAA)
+                span::Id::from_non_zero_u64(NonZeroU64::MIN)
             }
 
-            fn record(&self, _: &span::Id, _: &span::Record<'_>) {}
+            fn record(&self, _: span::Id, _: &span::Record<'_>) {}
 
-            fn record_follows_from(&self, _: &span::Id, _: &span::Id) {}
+            fn record_follows_from(&self, _: span::Id, _: span::Id) {}
 
             fn event(&self, _: &Event<'_>) {}
 
-            fn enter(&self, _: &span::Id) {}
+            fn enter(&self, _: span::Id) {}
 
-            fn exit(&self, _: &span::Id) {}
+            fn exit(&self, _: span::Id) {}
         }
 
-        with_default(&Dispatch::new(TestSubscriber), mk_span)
+        with_default(&Dispatch::new(TestSubscriber), mk_span);
+        ensure_eq(
+            &NEW_SPANS.load(Ordering::Relaxed),
+            &1_usize,
+            "new_span method is called once",
+        )
     }
 
     #[test]
-    fn default_no_subscriber() {
+    fn default_no_subscriber() -> Result<(), TestFailure> {
         let default_dispatcher = Dispatch::default();
-        assert!(default_dispatcher.is::<NoSubscriber>());
+        ensure(
+            default_dispatcher.is::<NoSubscriber>(),
+            "default dispatcher is NoSubscriber",
+        )
     }
 
     #[cfg(feature = "std")]
     #[test]
-    fn default_dispatch() {
+    fn default_dispatch() -> Result<(), TestFailure> {
         struct TestSubscriber;
         impl Subscriber for TestSubscriber {
             fn enabled(&self, _: &Metadata<'_>) -> bool {
@@ -1037,25 +1098,31 @@ mod test {
             }
 
             fn new_span(&self, _: &span::Attributes<'_>) -> span::Id {
-                span::Id::from_u64(0xAAAA)
+                span::Id::from_non_zero_u64(NonZeroU64::MIN)
             }
 
-            fn record(&self, _: &span::Id, _: &span::Record<'_>) {}
+            fn record(&self, _: span::Id, _: &span::Record<'_>) {}
 
-            fn record_follows_from(&self, _: &span::Id, _: &span::Id) {}
+            fn record_follows_from(&self, _: span::Id, _: span::Id) {}
 
             fn event(&self, _: &Event<'_>) {}
 
-            fn enter(&self, _: &span::Id) {}
+            fn enter(&self, _: span::Id) {}
 
-            fn exit(&self, _: &span::Id) {}
+            fn exit(&self, _: span::Id) {}
         }
         let guard = set_default(&Dispatch::new(TestSubscriber));
-        let default_dispatcher = Dispatch::default();
-        assert!(default_dispatcher.is::<TestSubscriber>());
+        let scoped_dispatcher = Dispatch::default();
+        ensure(
+            scoped_dispatcher.is::<TestSubscriber>(),
+            "default dispatcher follows scoped subscriber",
+        )?;
 
         drop(guard);
-        let default_dispatcher = Dispatch::default();
-        assert!(default_dispatcher.is::<NoSubscriber>());
+        let reset_dispatcher = Dispatch::default();
+        ensure(
+            reset_dispatcher.is::<NoSubscriber>(),
+            "default dispatcher resets to NoSubscriber",
+        )
     }
 }

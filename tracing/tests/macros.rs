@@ -6,7 +6,7 @@ extern crate tracing as tracing_crate;
 #[cfg(target_arch = "wasm32")]
 extern crate wasm_bindgen_test;
 
-use ::std::convert::From;
+use ::std::convert::From as _;
 use tracing_crate::{
     Level, callsite, debug, debug_span, enabled, error, error_span, event, event_enabled, field,
     info, info_span, record_all, span, span_enabled, trace, trace_span, warn, warn_span,
@@ -65,7 +65,8 @@ fn temporary_field_expressions_live_for_macro_dispatch() {
 
     let retained = ::std::string::String::from("retained");
     event!(Level::INFO, retained = retained, ?retained);
-    let _still_available = &retained;
+    let still_available = &retained;
+    ::std::assert_eq!(still_available, "retained");
 }
 
 // Tests that macros work across various invocation syntax.
@@ -1475,7 +1476,6 @@ fn callsite_macro_api() {
 #[test]
 fn format_args_already_defined() {
     // Reproduces: https://github.com/tokio-rs/tracing/issues/2721
-    #[allow(unused)]
     macro_rules! format_args {
         ($i:expr) => {};
     }

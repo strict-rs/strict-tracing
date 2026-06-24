@@ -137,10 +137,11 @@
 //!
 //! [`Subscriber`]: trait@tracing::Subscriber
 //! [`MockSubscriber`]: struct@crate::subscriber::MockSubscriber
+use parking_lot::Mutex;
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
-        Arc, Mutex,
+        Arc,
         atomic::{AtomicUsize, Ordering},
     },
     thread,
@@ -655,7 +656,6 @@ where
     /// implemented yet, but will be done as part of #539).
     ///
     /// [`Subscriber::drop_span`]: fn@tracing::Subscriber::drop_span
-    #[allow(deprecated)]
     pub fn drop_span<S>(mut self, span: S) -> Self
     where
         S: Into<ExpectedSpan>,
@@ -1090,8 +1090,8 @@ where
 {
     fn on_register_dispatch(&self, _subscriber: &tracing::Dispatch) {
         println!("[{}] on_register_dispatch", self.name);
-        let mut expected = self.expected.lock().unwrap();
-        if let Some(Expect::OnRegisterDispatch) = expected.front() {
+        let mut expected = self.expected.lock();
+        if matches!(expected.front(), Some(Expect::OnRegisterDispatch)) {
             let _matched = expected.pop_front();
         }
     }
@@ -1116,8 +1116,8 @@ where
     }
 
     fn record(&self, id: &Id, values: &span::Record<'_>) {
-        let spans = self.spans.lock().unwrap();
-        let mut expected = self.expected.lock().unwrap();
+        let spans = self.spans.lock();
+        let mut expected = self.expected.lock();
         let span = spans
             .get(id)
             .unwrap_or_else(|| panic!("[{}] no span for ID {:?}", self.name, id));
@@ -1142,7 +1142,7 @@ where
     fn event(&self, event: &Event<'_>) {
         let name = event.metadata().name();
         println!("[{}] event: {};", self.name, name);
-        match self.expected.lock().unwrap().pop_front() {
+        match self.expected.lock().pop_front() {
             None => {}
             Some(Expect::Event(mut expected)) => {
                 #[cfg(feature = "tracing-subscriber")]
@@ -1157,13 +1157,7 @@ where
                     get_ancestry(
                         event,
                         || self.lookup_current(),
-                        |span_id| {
-                            self.spans
-                                .lock()
-                                .unwrap()
-                                .get(span_id)
-                                .map(|span| span.into())
-                        },
+                        |span_id| self.spans.lock().get(span_id).map(|span| span.into()),
                     )
                 };
                 expected.check(event, event_get_ancestry, &self.name);
@@ -1173,7 +1167,7 @@ where
     }
 
     fn record_follows_from(&self, consequence_id: &Id, cause_id: &Id) {
-        let spans = self.spans.lock().unwrap();
+        let spans = self.spans.lock();
         if let Some(consequence_span) = spans.get(consequence_id)
             && let Some(cause_span) = spans.get(cause_id)
         {
@@ -1181,7 +1175,7 @@ where
                 "[{}] record_follows_from: {} (id={:?}) follows {} (id={:?})",
                 self.name, consequence_span.name, consequence_id, cause_span.name, cause_id,
             );
-            match self.expected.lock().unwrap().pop_front() {
+            match self.expected.lock().pop_front() {
                 None => {}
                 Some(Expect::FollowsFrom {
                     consequence: ref expected_consequence,
@@ -1218,9 +1212,9 @@ where
             meta.target(),
             id
         );
-        let mut expected = self.expected.lock().unwrap();
+        let mut expected = self.expected.lock();
         let was_expected = matches!(expected.front(), Some(Expect::NewSpan(_)));
-        let mut spans = self.spans.lock().unwrap();
+        let mut spans = self.spans.lock();
         if was_expected && let Expect::NewSpan(mut expected) = expected.pop_front().unwrap() {
             if let Some(expected_id) = &expected.span.id {
                 expected_id.set(id.into_u64()).unwrap();
@@ -1251,10 +1245,10 @@ where
     }
 
     fn enter(&self, id: &Id) {
-        let spans = self.spans.lock().unwrap();
+        let spans = self.spans.lock();
         if let Some(span) = spans.get(id) {
             println!("[{}] enter: {}; id={:?};", self.name, span.name, id);
-            match self.expected.lock().unwrap().pop_front() {
+            match self.expected.lock().pop_front() {
                 None => {}
                 Some(Expect::Enter(ref expected_span)) => {
                     expected_span.check(&span.into(), "to enter a span", &self.name);
@@ -1262,7 +1256,7 @@ where
                 Some(ex) => ex.bad(&self.name, format_args!("entered span {:?}", span.name)),
             }
         };
-        self.current.lock().unwrap().push(id.clone());
+        self.current.lock().push(id.clone());
     }
 
     fn exit(&self, id: &Id) {
@@ -1272,16 +1266,16 @@ where
             println!("[{}] exit {:?} while panicking", self.name, id);
             return;
         }
-        let spans = self.spans.lock().unwrap();
+        let spans = self.spans.lock();
         let span = spans
             .get(id)
             .unwrap_or_else(|| panic!("[{}] no span for ID {:?}", self.name, id));
         println!("[{}] exit: {}; id={:?};", self.name, span.name, id);
-        match self.expected.lock().unwrap().pop_front() {
+        match self.expected.lock().pop_front() {
             None => {}
             Some(Expect::Exit(ref expected_span)) => {
                 expected_span.check(&span.into(), "to exit a span", &self.name);
-                let curr = self.current.lock().unwrap().pop();
+                let curr = self.current.lock().pop();
                 assert_eq!(
                     Some(id),
                     curr.as_ref(),
@@ -1296,7 +1290,7 @@ where
     }
 
     fn clone_span(&self, id: &Id) -> Id {
-        let mut spans = self.spans.lock().unwrap();
+        let mut spans = self.spans.lock();
         let mut span = spans.get_mut(id);
         match span.as_deref_mut() {
             Some(span) => {
@@ -1314,7 +1308,7 @@ where
             }
         }
 
-        let mut expected = self.expected.lock().unwrap();
+        let mut expected = self.expected.lock();
         let was_expected = if let Some(Expect::CloneSpan(expected_span)) = expected.front() {
             match span {
                 Some(actual_span) => {
@@ -1336,7 +1330,7 @@ where
 
     fn drop_span(&self, id: Id) {
         let mut is_event = false;
-        let name = if let Ok(mut spans) = self.spans.try_lock() {
+        let name = if let Some(mut spans) = self.spans.try_lock() {
             spans.get_mut(&id).map(|span| {
                 let name = span.name;
                 if name.contains("event") {
@@ -1355,7 +1349,7 @@ where
         if name.is_none() {
             println!("[{}] drop_span: id={:?}", self.name, id);
         }
-        if let Ok(mut expected) = self.expected.try_lock() {
+        if let Some(mut expected) = self.expected.try_lock() {
             let was_expected = match expected.front() {
                 Some(Expect::DropSpan(span)) => {
                     // Don't assert if this function was called while panicking,
@@ -1380,10 +1374,10 @@ where
     }
 
     fn current_span(&self) -> tracing_core::span::Current {
-        let stack = self.current.lock().unwrap();
+        let stack = self.current.lock();
         match stack.last() {
             Some(id) => {
-                let spans = self.spans.lock().unwrap();
+                let spans = self.spans.lock();
                 let state = spans.get(id).expect("state for current span");
                 tracing_core::span::Current::new(id.clone(), state.meta)
             }
@@ -1397,7 +1391,7 @@ where
     F: Fn(&Metadata<'_>) -> bool,
 {
     fn lookup_current(&self) -> Option<Id> {
-        let stack = self.current.lock().unwrap();
+        let stack = self.current.lock();
         stack.last().cloned()
     }
 }
@@ -1435,13 +1429,12 @@ impl MockHandle {
     /// handle.assert_finished();
     /// ```
     pub fn assert_finished(&self) {
-        if let Ok(ref expected) = self.0.lock() {
-            assert!(
-                !expected.iter().any(|thing| thing != &Expect::Nothing),
-                "\n[{}] more notifications expected: {:#?}",
-                self.1,
-                **expected
-            );
-        }
+        let expected = self.0.lock();
+        assert!(
+            !expected.iter().any(|thing| thing != &Expect::Nothing),
+            "\n[{}] more notifications expected: {:#?}",
+            self.1,
+            *expected
+        );
     }
 }

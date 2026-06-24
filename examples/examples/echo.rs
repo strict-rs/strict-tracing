@@ -20,9 +20,6 @@
 //! to the same address you should be able to see them all make progress simultaneously.
 //!
 //! [echo-example]: https://github.com/tokio-rs/tokio/blob/master/tokio/examples/echo.rs
-
-#![warn(rust_2018_idioms)]
-
 use futures::future::{FutureExt, TryFutureExt};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -99,7 +96,7 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
                 socket
                     .write_all(&buf[0..n])
                     .map(|bytes| {
-                        if let Ok(()) = bytes {
+                        if matches!(bytes, Ok(())) {
                             debug!(bytes_written = n);
                         }
 

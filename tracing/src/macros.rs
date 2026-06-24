@@ -1119,8 +1119,8 @@ macro_rules! span_enabled {
 /// ```
 ///
 /// If the current subscriber is interested in recording spans and events
-/// in the current file and module path, with the target "my_crate", and at the
-/// level  `DEBUG`, this will evaluate to true:
+/// in the current file and module path, with the target `"my_crate"`, and at the
+/// level `DEBUG`, this will evaluate to true:
 /// ```rust
 /// # use tracing::{enabled, Level};
 /// if enabled!(target: "my_crate", Level::DEBUG) {
@@ -1129,8 +1129,8 @@ macro_rules! span_enabled {
 /// ```
 ///
 /// If the current subscriber is interested in recording spans and events
-/// in the current file and module path, with the target "my_crate", at
-/// the level `DEBUG`, and with a field named "hello", this will evaluate
+/// in the current file and module path, with the target `"my_crate"`, at
+/// the level `DEBUG`, and with a field named `"hello"`, this will evaluate
 /// to true:
 ///
 /// ```rust
@@ -2756,7 +2756,6 @@ macro_rules! level_enabled {
 #[macro_export]
 macro_rules! valueset_all {
     (@with $fields:expr, |$value_set:ident| $body:block, $($kvs:tt)+) => {{
-        #[allow(unused_imports)]
         use $crate::field::{debug, display, Value};
         $crate::valueset_all!(@with_out $fields, |$value_set| $body, { }, $($kvs)+)
     }};
@@ -3164,7 +3163,6 @@ macro_rules! valueset_all {
     // === entry ===
     ($fields:expr, $($kvs:tt)+) => {
         {
-            #[allow(unused_imports)]
             // This import statement CANNOT be removed as it will break existing use cases.
             // See #831, #2332, #3424 for the last times we tried.
             use $crate::field::{debug, display, Value};
@@ -3185,7 +3183,6 @@ macro_rules! valueset_all {
 #[macro_export]
 macro_rules! valueset {
     (@with $fields:expr, |$value_set:ident| $body:block, $($kvs:tt)+) => {{
-        #[allow(unused_imports)]
         use $crate::field::{debug, display, Value};
         $crate::valueset!(@with_out $fields, |$value_set| $body, { }, $($kvs)+)
     }};
@@ -3675,7 +3672,6 @@ macro_rules! valueset {
     // === entry ===
     ($fields:expr, $($kvs:tt)+) => {
         {
-            #[allow(unused_imports)]
             // This import statement CANNOT be removed as it will break existing use cases.
             // See #831, #2332, #3424 for the last times we tried.
             use $crate::field::{debug, display, Value};
@@ -3865,7 +3861,6 @@ macro_rules! if_log_enabled {
     };
     ($lvl:expr, $if_log:block else $else_block:block) => {
         if $crate::level_to_log!($lvl) <= $crate::log::STATIC_MAX_LEVEL {
-            #[allow(unused_braces)]
             $if_log
         } else {
             $else_block

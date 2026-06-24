@@ -18,7 +18,7 @@ fn multiple_layer_filter_interests_are_cached() {
             .lock()
             .unwrap()
             .entry(*meta.level())
-            .or_insert(0usize) += 1;
+            .or_insert(0_usize) += 1;
         meta.level() <= &Level::INFO
     });
     let seen_info = seen_info2;
@@ -42,7 +42,7 @@ fn multiple_layer_filter_interests_are_cached() {
             .lock()
             .unwrap()
             .entry(*meta.level())
-            .or_insert(0usize) += 1;
+            .or_insert(0_usize) += 1;
         meta.level() <= &Level::WARN
     });
     let seen_warn = seen_warn2;

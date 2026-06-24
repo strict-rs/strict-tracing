@@ -263,7 +263,6 @@ feature! {
         ///
         /// **Note**: this will allocate if there are many spans remaining, or if the
         /// "smallvec" feature flag is not enabled.
-        #[allow(clippy::wrong_self_convention)]
         pub fn from_root(self) -> ScopeFromRoot<'a, R> {
             #[cfg(feature = "smallvec")]
             type Buf<T> = smallvec::SmallVec<T>;
@@ -514,6 +513,7 @@ where
 
 #[cfg(all(test, feature = "registry", feature = "std"))]
 mod tests {
+
     use crate::{
         layer::{Context, Layer},
         prelude::*,

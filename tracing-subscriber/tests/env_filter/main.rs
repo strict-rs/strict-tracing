@@ -230,7 +230,6 @@ fn span_name_filter_is_dynamic() {
 
 #[test]
 fn method_name_resolution() {
-    #[allow(unused_imports)]
     use tracing_subscriber::layer::{Filter, Layer};
 
     let filter = EnvFilter::new("hello_world=info");

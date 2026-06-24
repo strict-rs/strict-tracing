@@ -18,7 +18,6 @@ mod no_std {
     // We pre-emptively export everything from libcore/liballoc, (even modules
     // we aren't using currently) to make adding new code easier. Therefore,
     // some of these imports will be unused.
-    #![allow(unused_imports)]
 
     pub(crate) use core::{
         any, array, ascii, cell, char, clone, cmp, convert, default, f32, f64, ffi, future, hash,

@@ -58,36 +58,16 @@
     issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
 #![cfg_attr(docsrs, deny(rustdoc::broken_intra_doc_links))]
-#![warn(
-    missing_debug_implementations,
-    missing_docs,
-    rust_2018_idioms,
-    unreachable_pub,
-    bad_style,
-    dead_code,
-    improper_ctypes,
-    non_shorthand_field_patterns,
-    no_mangle_generic_items,
-    overflowing_literals,
-    path_statements,
-    patterns_in_fns_without_body,
-    private_interfaces,
-    private_bounds,
-    unconditional_recursion,
-    unused_allocation,
-    unused_comparisons,
-    unused_parens,
-    while_true
-)]
-
 use proc_macro2::TokenStream;
-use quote::TokenStreamExt;
+use quote::TokenStreamExt as _;
 use quote::{ToTokens, quote};
-use syn::parse::{Parse, ParseStream};
+use syn::parse::{Parse, ParseBuffer, ParseStream};
 use syn::token::Brace;
 use syn::{Attribute, ItemFn, Signature, Visibility};
 
+/// Parser for `#[instrument]` attribute arguments.
 mod attr;
+/// Code generation for instrumented functions and async-trait rewrites.
 mod expand;
 /// Instruments a function to create and enter a `tracing` [span] every time
 /// the function is called.
@@ -218,7 +198,7 @@ mod expand;
 ///
 /// Note that defining a field with the same name as a (non-skipped)
 /// argument will implicitly skip the argument, unless the field is provided
-/// via a constant expression (e.g. {EXPR} or {const_fn()}) as deduplicating
+/// via a constant expression (e.g. `{EXPR}` or `{const_fn()}`) as deduplicating
 /// would incur a runtime cost. In this case, the
 /// field must be explicitly skipped.
 ///
@@ -577,10 +557,10 @@ pub fn instrument(
     args: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    let args = syn::parse_macro_input!(args as attr::InstrumentArgs);
+    let parsed_args = syn::parse_macro_input!(args as attr::InstrumentArgs);
     // Cloning a `TokenStream` is cheap since it's reference counted internally.
-    instrument_precise(args.clone(), item.clone())
-        .unwrap_or_else(|_err| instrument_speculative(args, item))
+    instrument_precise(parsed_args.clone(), item.clone())
+        .unwrap_or_else(|_err| instrument_speculative(parsed_args, item))
 }
 
 /// Instrument the function, without parsing the function body (instead using the raw tokens).
@@ -588,10 +568,10 @@ fn instrument_speculative(
     args: attr::InstrumentArgs,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    let input = syn::parse_macro_input!(item as MaybeItemFn);
-    let instrumented_function_name = input.sig.ident.to_string();
+    let parsed_input = syn::parse_macro_input!(item as MaybeItemFn);
+    let instrumented_function_name = parsed_input.sig.ident.to_string();
     expand::gen_function(
-        input.as_ref(),
+        parsed_input.as_ref(),
         args,
         instrumented_function_name.as_str(),
         None,
@@ -605,10 +585,10 @@ fn instrument_precise(
     args: attr::InstrumentArgs,
     item: proc_macro::TokenStream,
 ) -> Result<proc_macro::TokenStream, syn::Error> {
-    let input = syn::parse::<ItemFn>(item)?;
-    let instrumented_function_name = input.sig.ident.to_string();
+    let parsed_input = syn::parse::<ItemFn>(item)?;
+    let instrumented_function_name = parsed_input.sig.ident.to_string();
 
-    if input.sig.constness.is_some() {
+    if parsed_input.sig.constness.is_some() {
         return Ok(quote! {
             compile_error!("the `#[instrument]` attribute may not be used with `const fn`s")
         }
@@ -617,14 +597,14 @@ fn instrument_precise(
 
     // check for async_trait-like patterns in the block, and instrument
     // the future instead of the wrapper
-    if let Some(async_like) = expand::AsyncInfo::from_fn(&input) {
-        return async_like.gen_async(args, instrumented_function_name.as_str());
+    if let Some(async_like) = expand::AsyncInfo::from_fn(&parsed_input) {
+        return Ok(async_like.gen_async(args, instrumented_function_name.as_str()));
     }
 
-    let input = MaybeItemFn::from(input);
+    let maybe_input = MaybeItemFn::from(parsed_input);
 
     Ok(expand::gen_function(
-        input.as_ref(),
+        maybe_input.as_ref(),
         args,
         instrumented_function_name.as_str(),
         None,
@@ -636,16 +616,23 @@ fn instrument_precise(
 /// which's block is just a `TokenStream` (it may contain invalid code).
 #[derive(Debug, Clone)]
 struct MaybeItemFn {
+    /// Outer attributes attached before the function item.
     outer_attrs: Vec<Attribute>,
+    /// Inner attributes parsed from the function body opening.
     inner_attrs: Vec<Attribute>,
+    /// Function visibility.
     vis: Visibility,
+    /// Function signature.
     sig: Signature,
+    /// Brace token delimiting the raw function body.
     brace_token: Brace,
+    /// Raw function body tokens.
     block: TokenStream,
 }
 
 impl MaybeItemFn {
-    fn as_ref(&self) -> MaybeItemFnRef<'_, TokenStream> {
+    /// Borrows this raw-body function representation.
+    const fn as_ref(&self) -> MaybeItemFnRef<'_, TokenStream> {
         MaybeItemFnRef {
             outer_attrs: &self.outer_attrs,
             inner_attrs: &self.inner_attrs,
@@ -665,9 +652,9 @@ impl Parse for MaybeItemFn {
         let vis: Visibility = input.parse()?;
         let sig: Signature = input.parse()?;
         let inner_attrs = input.call(Attribute::parse_inner)?;
-        let block;
-        let brace_token = syn::braced!(block in input);
-        let block: TokenStream = block.call(|buffer| buffer.parse())?;
+        let body;
+        let brace_token = syn::braced!(body in input);
+        let block: TokenStream = body.call(ParseBuffer::parse)?;
         Ok(Self {
             outer_attrs,
             inner_attrs,
@@ -705,13 +692,20 @@ impl From<ItemFn> for MaybeItemFn {
 }
 
 /// A generic reference type for `MaybeItemFn`,
-/// that takes a generic block type `B` that implements `ToTokens` (eg. `TokenStream`, `Block`).
+/// that takes a generic block type `B` that implements `ToTokens` (for example,
+/// `TokenStream` or `Block`).
 #[derive(Debug, Clone)]
 struct MaybeItemFnRef<'a, B: ToTokens> {
+    /// Borrowed outer attributes.
     outer_attrs: &'a Vec<Attribute>,
+    /// Borrowed inner attributes.
     inner_attrs: &'a Vec<Attribute>,
+    /// Borrowed function visibility.
     vis: &'a Visibility,
+    /// Borrowed function signature.
     sig: &'a Signature,
+    /// Borrowed brace token delimiting the function body.
     brace_token: &'a Brace,
+    /// Borrowed function body representation.
     block: &'a B,
 }

@@ -1,5 +1,4 @@
 //! Example binary for tracing workspace checks.
-
 #![deny(rust_2018_idioms)]
 /// This is a example showing how information is scoped with tokio's
 /// `task::spawn`.

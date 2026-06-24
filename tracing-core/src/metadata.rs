@@ -1,10 +1,13 @@
 //! Metadata describing trace data.
 use super::{callsite, field};
 use core::{
-    cmp, fmt,
+    cmp, fmt, ptr,
     str::FromStr,
     sync::atomic::{AtomicUsize, Ordering},
 };
+
+#[cfg(feature = "std")]
+use std::error::Error;
 
 /// Metadata describing a [span] or [event].
 ///
@@ -189,7 +192,7 @@ pub struct Kind(u8);
 ///     // Implement the rest of the subscriber...
 ///     fn new_span(&self, span: &span::Attributes<'_>) -> span::Id {
 ///         // ...
-///         # drop(span); Id::from_u64(1)
+///         # drop(span); Id::from_non_zero_u64(core::num::NonZeroU64::MIN)
 ///     }
 ///
 ///     fn event(&self, event: &Event<'_>) {
@@ -198,10 +201,10 @@ pub struct Kind(u8);
 ///     }
 ///
 ///     // ...
-///     # fn enter(&self, _: &Id) {}
-///     # fn exit(&self, _: &Id) {}
-///     # fn record(&self, _: &Id, _: &Record<'_>) {}
-///     # fn record_follows_from(&self, _: &Id, _: &Id) {}
+///     # fn enter(&self, _: Id) {}
+///     # fn exit(&self, _: Id) {}
+///     # fn record(&self, _: Id, _: &Record<'_>) {}
+///     # fn record_follows_from(&self, _: Id, _: Id) {}
 /// }
 /// ```
 ///
@@ -242,6 +245,7 @@ pub struct LevelFilter(Option<Level>);
 #[derive(Copy, Clone, Debug)]
 pub struct ParseLevelFilterError(());
 
+/// Most verbose level currently enabled by registered dispatchers.
 static MAX_LEVEL: AtomicUsize = AtomicUsize::new(LevelFilter::OFF_USIZE);
 
 // ===== impl Metadata =====
@@ -249,6 +253,7 @@ static MAX_LEVEL: AtomicUsize = AtomicUsize::new(LevelFilter::OFF_USIZE);
 impl<'a> Metadata<'a> {
     /// Construct new metadata for a span or event, with a name, target, level, field
     /// names, and optional source code location.
+    #[must_use]
     pub const fn new(
         name: &'static str,
         target: &'a str,
@@ -256,7 +261,7 @@ impl<'a> Metadata<'a> {
         file: Option<&'a str>,
         line: Option<u32>,
         module_path: Option<&'a str>,
-        fields: field::FieldSet,
+        fields: &field::FieldSet,
         kind: Kind,
     ) -> Self {
         Metadata {
@@ -266,24 +271,27 @@ impl<'a> Metadata<'a> {
             module_path,
             file,
             line,
-            fields,
+            fields: *fields,
             kind,
         }
     }
 
     /// Returns the names of the fields on the described span or event.
     #[inline]
-    pub fn fields(&self) -> &field::FieldSet {
+    #[must_use]
+    pub const fn fields(&self) -> &field::FieldSet {
         &self.fields
     }
 
     /// Returns the level of verbosity of the described span or event.
-    pub fn level(&self) -> &Level {
+    #[must_use]
+    pub const fn level(&self) -> &Level {
         &self.level
     }
 
     /// Returns the name of the span.
-    pub fn name(&self) -> &'static str {
+    #[must_use]
+    pub const fn name(&self) -> &'static str {
         self.name
     }
 
@@ -292,42 +300,49 @@ impl<'a> Metadata<'a> {
     ///
     /// Typically, this is the module path, but alternate targets may be set
     /// when spans or events are constructed.
-    pub fn target(&self) -> &'a str {
+    #[must_use]
+    pub const fn target(&self) -> &'a str {
         self.target
     }
 
     /// Returns the path to the Rust module where the span occurred, or
     /// `None` if the module path is unknown.
-    pub fn module_path(&self) -> Option<&'a str> {
+    #[must_use]
+    pub const fn module_path(&self) -> Option<&'a str> {
         self.module_path
     }
 
     /// Returns the name of the source code file where the span
     /// occurred, or `None` if the file is unknown
-    pub fn file(&self) -> Option<&'a str> {
+    #[must_use]
+    pub const fn file(&self) -> Option<&'a str> {
         self.file
     }
 
     /// Returns the line number in the source code file where the span
     /// occurred, or `None` if the line number is unknown.
-    pub fn line(&self) -> Option<u32> {
+    #[must_use]
+    pub const fn line(&self) -> Option<u32> {
         self.line
     }
 
     /// Returns an opaque `Identifier` that uniquely identifies the callsite
     /// this `Metadata` originated from.
     #[inline]
-    pub fn callsite(&self) -> callsite::Identifier {
+    #[must_use]
+    pub const fn callsite(&self) -> callsite::Identifier {
         self.fields.callsite()
     }
 
     /// Returns true if the callsite kind is `Event`.
-    pub fn is_event(&self) -> bool {
+    #[must_use]
+    pub const fn is_event(&self) -> bool {
         self.kind.is_event()
     }
 
     /// Return true if the callsite kind is `Span`.
-    pub fn is_span(&self) -> bool {
+    #[must_use]
+    pub const fn is_span(&self) -> bool {
         self.kind.is_span()
     }
 
@@ -335,6 +350,7 @@ impl<'a> Metadata<'a> {
     ///
     /// Used via valueset to fill in for unknown fields.
     #[doc(hidden)]
+    #[must_use]
     pub const fn private_fake_field(&self) -> field::Field {
         self.fields.fake_field()
     }
@@ -343,29 +359,32 @@ impl<'a> Metadata<'a> {
 impl fmt::Debug for Metadata<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut meta = f.debug_struct("Metadata");
-        let _builder = meta
+        let _core_builder: &mut fmt::DebugStruct<'_, '_> = meta
             .field("name", &self.name)
             .field("target", &self.target)
             .field("level", &self.level);
 
         if let Some(path) = self.module_path() {
-            let _builder = meta.field("module_path", &path);
+            let _module_path_builder: &mut fmt::DebugStruct<'_, '_> =
+                meta.field("module_path", &path);
         }
 
         match (self.file(), self.line()) {
             (Some(file), Some(line)) => {
-                let _builder = meta.field("location", &format_args!("{}:{}", file, line));
+                let _location_builder: &mut fmt::DebugStruct<'_, '_> =
+                    meta.field("location", &format_args!("{file}:{line}"));
             }
             (Some(file), None) => {
-                let _builder = meta.field("file", &format_args!("{}", file));
+                let _file_builder: &mut fmt::DebugStruct<'_, '_> =
+                    meta.field("file", &format_args!("{file}"));
             }
 
             // Note: a line num with no file is a kind of weird case that _probably_ never occurs...
             (None, Some(line)) => {
-                let _builder = meta.field("line", &line);
+                let _line_builder: &mut fmt::DebugStruct<'_, '_> = meta.field("line", &line);
             }
             (None, None) => {}
-        };
+        }
 
         meta.field("fields", &format_args!("{}", self.fields))
             .field("callsite", &self.callsite())
@@ -375,33 +394,39 @@ impl fmt::Debug for Metadata<'_> {
 }
 
 impl Kind {
+    /// Bit flag indicating that this callsite describes an event.
     const EVENT_BIT: u8 = 1 << 0;
+    /// Bit flag indicating that this callsite describes a span.
     const SPAN_BIT: u8 = 1 << 1;
+    /// Bit flag indicating that this callsite is an enablement hint.
     const HINT_BIT: u8 = 1 << 2;
 
     /// `Event` callsite
-    pub const EVENT: Kind = Kind(Self::EVENT_BIT);
+    pub const EVENT: Self = Self(Self::EVENT_BIT);
 
     /// `Span` callsite
-    pub const SPAN: Kind = Kind(Self::SPAN_BIT);
+    pub const SPAN: Self = Self(Self::SPAN_BIT);
 
     /// `enabled!` callsite. [`Subscriber`][`crate::subscriber::Subscriber`]s can assume
     /// this `Kind` means they will never receive a
     /// full event with this [`Metadata`].
-    pub const HINT: Kind = Kind(Self::HINT_BIT);
+    pub const HINT: Self = Self(Self::HINT_BIT);
 
     /// Return true if the callsite kind is `Span`
-    pub fn is_span(&self) -> bool {
+    #[must_use]
+    pub const fn is_span(self) -> bool {
         self.0 & Self::SPAN_BIT == Self::SPAN_BIT
     }
 
     /// Return true if the callsite kind is `Event`
-    pub fn is_event(&self) -> bool {
+    #[must_use]
+    pub const fn is_event(self) -> bool {
         self.0 & Self::EVENT_BIT == Self::EVENT_BIT
     }
 
     /// Return true if the callsite kind is `Hint`
-    pub fn is_hint(&self) -> bool {
+    #[must_use]
+    pub const fn is_hint(self) -> bool {
         self.0 & Self::HINT_BIT == Self::HINT_BIT
     }
 
@@ -409,6 +434,7 @@ impl Kind {
     ///
     /// This can be called on [`SPAN`](Self::SPAN) and [`EVENT`](Self::EVENT)
     /// kinds to construct a hint callsite that also counts as a span or event.
+    #[must_use]
     pub const fn hint(self) -> Self {
         Self(self.0 | Self::HINT_BIT)
     }
@@ -454,7 +480,7 @@ impl Eq for Metadata<'_> {}
 impl PartialEq for Metadata<'_> {
     #[inline]
     fn eq(&self, other: &Self) -> bool {
-        if core::ptr::eq(self, other) {
+        if ptr::eq(self, other) {
             true
         } else if cfg!(not(debug_assertions)) {
             // In a well-behaving application, two `Metadata` can be assumed to
@@ -467,7 +493,7 @@ impl PartialEq for Metadata<'_> {
 
             // `Metadata` is destructured here to ensure a compile-error if the
             // fields of `Metadata` change.
-            let Metadata {
+            let &Metadata {
                 name: lhs_name,
                 target: lhs_target,
                 level: lhs_level,
@@ -478,7 +504,7 @@ impl PartialEq for Metadata<'_> {
                 kind: lhs_kind,
             } = self;
 
-            let Metadata {
+            let &Metadata {
                 name: rhs_name,
                 target: rhs_target,
                 level: rhs_level,
@@ -487,7 +513,7 @@ impl PartialEq for Metadata<'_> {
                 line: rhs_line,
                 fields: rhs_fields,
                 kind: rhs_kind,
-            } = &other;
+            } = other;
 
             // The initial comparison of callsites is purely an optimization;
             // it can be removed without affecting the overall semantics of the
@@ -511,78 +537,86 @@ impl Level {
     /// The "error" level.
     ///
     /// Designates very serious errors.
-    pub const ERROR: Level = Level(LevelInner::Error);
+    pub const ERROR: Self = Self(LevelInner::Error);
     /// The "warn" level.
     ///
     /// Designates hazardous situations.
-    pub const WARN: Level = Level(LevelInner::Warn);
+    pub const WARN: Self = Self(LevelInner::Warn);
     /// The "info" level.
     ///
     /// Designates useful information.
-    pub const INFO: Level = Level(LevelInner::Info);
+    pub const INFO: Self = Self(LevelInner::Info);
     /// The "debug" level.
     ///
     /// Designates lower priority information.
-    pub const DEBUG: Level = Level(LevelInner::Debug);
+    pub const DEBUG: Self = Self(LevelInner::Debug);
     /// The "trace" level.
     ///
     /// Designates very low priority, often extremely verbose, information.
-    pub const TRACE: Level = Level(LevelInner::Trace);
+    pub const TRACE: Self = Self(LevelInner::Trace);
 
     /// Returns the string representation of the `Level`.
     ///
     /// This returns the same string as the `fmt::Display` implementation.
-    pub fn as_str(&self) -> &'static str {
-        match *self {
-            Level::TRACE => "TRACE",
-            Level::DEBUG => "DEBUG",
-            Level::INFO => "INFO",
-            Level::WARN => "WARN",
-            Level::ERROR => "ERROR",
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TRACE => "TRACE",
+            Self::DEBUG => "DEBUG",
+            Self::INFO => "INFO",
+            Self::WARN => "WARN",
+            Self::ERROR => "ERROR",
         }
+    }
+
+    /// Returns the comparison encoding used by level ordering.
+    const fn as_usize(self) -> usize {
+        level_inner_as_usize(self.0)
     }
 }
 
 impl fmt::Display for Level {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            Level::TRACE => f.pad("TRACE"),
-            Level::DEBUG => f.pad("DEBUG"),
-            Level::INFO => f.pad("INFO"),
-            Level::WARN => f.pad("WARN"),
-            Level::ERROR => f.pad("ERROR"),
+            Self::TRACE => f.pad("TRACE"),
+            Self::DEBUG => f.pad("DEBUG"),
+            Self::INFO => f.pad("INFO"),
+            Self::WARN => f.pad("WARN"),
+            Self::ERROR => f.pad("ERROR"),
         }
     }
 }
 
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-impl std::error::Error for ParseLevelError {}
+impl Error for ParseLevelError {}
 
 impl FromStr for Level {
     type Err = ParseLevelError;
-    fn from_str(s: &str) -> Result<Self, ParseLevelError> {
-        s.parse::<usize>()
-            .map_err(|_| ParseLevelError { _p: () })
+    fn from_str(input: &str) -> Result<Self, ParseLevelError> {
+        input
+            .parse::<usize>()
+            .map_err(|_error| ParseLevelError { _p: () })
             .and_then(|num| match num {
-                1 => Ok(Level::ERROR),
-                2 => Ok(Level::WARN),
-                3 => Ok(Level::INFO),
-                4 => Ok(Level::DEBUG),
-                5 => Ok(Level::TRACE),
+                1 => Ok(Self::ERROR),
+                2 => Ok(Self::WARN),
+                3 => Ok(Self::INFO),
+                4 => Ok(Self::DEBUG),
+                5 => Ok(Self::TRACE),
                 _ => Err(ParseLevelError { _p: () }),
             })
-            .or_else(|_| match s {
-                s if s.eq_ignore_ascii_case("error") => Ok(Level::ERROR),
-                s if s.eq_ignore_ascii_case("warn") => Ok(Level::WARN),
-                s if s.eq_ignore_ascii_case("info") => Ok(Level::INFO),
-                s if s.eq_ignore_ascii_case("debug") => Ok(Level::DEBUG),
-                s if s.eq_ignore_ascii_case("trace") => Ok(Level::TRACE),
+            .or_else(|_error| match input {
+                level if level.eq_ignore_ascii_case("error") => Ok(Self::ERROR),
+                level if level.eq_ignore_ascii_case("warn") => Ok(Self::WARN),
+                level if level.eq_ignore_ascii_case("info") => Ok(Self::INFO),
+                level if level.eq_ignore_ascii_case("debug") => Ok(Self::DEBUG),
+                level if level.eq_ignore_ascii_case("trace") => Ok(Self::TRACE),
                 _ => Err(ParseLevelError { _p: () }),
             })
     }
 }
 
+/// Internal representation used to order verbosity levels.
 #[repr(usize)]
 #[derive(Copy, Clone, Debug, Hash, Eq, PartialEq)]
 enum LevelInner {
@@ -635,30 +669,31 @@ impl LevelFilter {
     /// The "off" level.
     ///
     /// Designates that trace instrumentation should be completely disabled.
-    pub const OFF: LevelFilter = LevelFilter(None);
+    pub const OFF: Self = Self(None);
     /// The "error" level.
     ///
     /// Designates very serious errors.
-    pub const ERROR: LevelFilter = LevelFilter::from_level(Level::ERROR);
+    pub const ERROR: Self = Self::from_level(Level::ERROR);
     /// The "warn" level.
     ///
     /// Designates hazardous situations.
-    pub const WARN: LevelFilter = LevelFilter::from_level(Level::WARN);
+    pub const WARN: Self = Self::from_level(Level::WARN);
     /// The "info" level.
     ///
     /// Designates useful information.
-    pub const INFO: LevelFilter = LevelFilter::from_level(Level::INFO);
+    pub const INFO: Self = Self::from_level(Level::INFO);
     /// The "debug" level.
     ///
     /// Designates lower priority information.
-    pub const DEBUG: LevelFilter = LevelFilter::from_level(Level::DEBUG);
+    pub const DEBUG: Self = Self::from_level(Level::DEBUG);
     /// The "trace" level.
     ///
     /// Designates very low priority, often extremely verbose, information.
-    pub const TRACE: LevelFilter = LevelFilter(Some(Level::TRACE));
+    pub const TRACE: Self = Self(Some(Level::TRACE));
 
     /// Returns a `LevelFilter` that enables spans and events with verbosity up
     /// to and including `level`.
+    #[must_use]
     pub const fn from_level(level: Level) -> Self {
         Self(Some(level))
     }
@@ -667,19 +702,27 @@ impl LevelFilter {
     /// if it is [`OFF`].
     ///
     /// [`OFF`]: LevelFilter::OFF
+    #[must_use]
     pub const fn into_level(self) -> Option<Level> {
         self.0
     }
 
     // These consts are necessary because `as` casts are not allowed as
     // match patterns.
+    /// Encoded `TRACE` filter value.
     const TRACE_USIZE: usize = 0;
+    /// Encoded `DEBUG` filter value.
     const DEBUG_USIZE: usize = 1;
+    /// Encoded `INFO` filter value.
     const INFO_USIZE: usize = 2;
+    /// Encoded `WARN` filter value.
     const WARN_USIZE: usize = 3;
+    /// Encoded `ERROR` filter value.
     const ERROR_USIZE: usize = 4;
+    /// Encoded `OFF` filter value.
     const OFF_USIZE: usize = 5;
 
+    /// Encodes this filter for atomic storage.
     const fn encode(self) -> usize {
         match self.0 {
             None => Self::OFF_USIZE,
@@ -691,6 +734,12 @@ impl LevelFilter {
         }
     }
 
+    /// Returns the comparison encoding used by level-filter ordering.
+    const fn as_usize(self) -> usize {
+        self.encode()
+    }
+
+    /// Decodes a filter from atomic storage.
     const fn decode(value: usize) -> Self {
         match value {
             Self::ERROR_USIZE => Self::ERROR,
@@ -698,7 +747,6 @@ impl LevelFilter {
             Self::INFO_USIZE => Self::INFO,
             Self::DEBUG_USIZE => Self::DEBUG,
             Self::TRACE_USIZE => Self::TRACE,
-            Self::OFF_USIZE => Self::OFF,
             _ => Self::OFF,
         }
     }
@@ -719,12 +767,13 @@ impl LevelFilter {
     ///
     /// [`Level`]: super::Level
     /// [`Subscriber`]: super::Subscriber
-    #[inline(always)]
+    #[inline]
     pub fn current() -> Self {
         Self::decode(MAX_LEVEL.load(Ordering::Relaxed))
     }
 
-    pub(crate) fn set_max(filter: LevelFilter) {
+    /// Updates the process-wide maximum level hint.
+    pub(crate) fn set_max(filter: Self) {
         let val = filter.encode();
 
         // using an AcqRel swap ensures an ordered relationship of writes to the
@@ -736,12 +785,12 @@ impl LevelFilter {
 impl fmt::Display for LevelFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            LevelFilter::OFF => f.pad("off"),
-            LevelFilter::ERROR => f.pad("error"),
-            LevelFilter::WARN => f.pad("warn"),
-            LevelFilter::INFO => f.pad("info"),
-            LevelFilter::DEBUG => f.pad("debug"),
-            LevelFilter::TRACE => f.pad("trace"),
+            Self::OFF => f.pad("off"),
+            Self::ERROR => f.pad("error"),
+            Self::WARN => f.pad("warn"),
+            Self::INFO => f.pad("info"),
+            Self::DEBUG => f.pad("debug"),
+            Self::TRACE => f.pad("trace"),
         }
     }
 }
@@ -749,12 +798,12 @@ impl fmt::Display for LevelFilter {
 impl fmt::Debug for LevelFilter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            LevelFilter::OFF => f.pad("LevelFilter::OFF"),
-            LevelFilter::ERROR => f.pad("LevelFilter::ERROR"),
-            LevelFilter::WARN => f.pad("LevelFilter::WARN"),
-            LevelFilter::INFO => f.pad("LevelFilter::INFO"),
-            LevelFilter::DEBUG => f.pad("LevelFilter::DEBUG"),
-            LevelFilter::TRACE => f.pad("LevelFilter::TRACE"),
+            Self::OFF => f.pad("LevelFilter::OFF"),
+            Self::ERROR => f.pad("LevelFilter::ERROR"),
+            Self::WARN => f.pad("LevelFilter::WARN"),
+            Self::INFO => f.pad("LevelFilter::INFO"),
+            Self::DEBUG => f.pad("LevelFilter::DEBUG"),
+            Self::TRACE => f.pad("LevelFilter::TRACE"),
         }
     }
 }
@@ -765,22 +814,22 @@ impl FromStr for LevelFilter {
         from.parse::<usize>()
             .ok()
             .and_then(|num| match num {
-                0 => Some(LevelFilter::OFF),
-                1 => Some(LevelFilter::ERROR),
-                2 => Some(LevelFilter::WARN),
-                3 => Some(LevelFilter::INFO),
-                4 => Some(LevelFilter::DEBUG),
-                5 => Some(LevelFilter::TRACE),
+                0 => Some(Self::OFF),
+                1 => Some(Self::ERROR),
+                2 => Some(Self::WARN),
+                3 => Some(Self::INFO),
+                4 => Some(Self::DEBUG),
+                5 => Some(Self::TRACE),
                 _ => None,
             })
             .or_else(|| match from {
-                "" => Some(LevelFilter::ERROR),
-                s if s.eq_ignore_ascii_case("error") => Some(LevelFilter::ERROR),
-                s if s.eq_ignore_ascii_case("warn") => Some(LevelFilter::WARN),
-                s if s.eq_ignore_ascii_case("info") => Some(LevelFilter::INFO),
-                s if s.eq_ignore_ascii_case("debug") => Some(LevelFilter::DEBUG),
-                s if s.eq_ignore_ascii_case("trace") => Some(LevelFilter::TRACE),
-                s if s.eq_ignore_ascii_case("off") => Some(LevelFilter::OFF),
+                "" => Some(Self::ERROR),
+                level if level.eq_ignore_ascii_case("error") => Some(Self::ERROR),
+                level if level.eq_ignore_ascii_case("warn") => Some(Self::WARN),
+                level if level.eq_ignore_ascii_case("info") => Some(Self::INFO),
+                level if level.eq_ignore_ascii_case("debug") => Some(Self::DEBUG),
+                level if level.eq_ignore_ascii_case("trace") => Some(Self::TRACE),
+                level if level.eq_ignore_ascii_case("off") => Some(Self::OFF),
                 _ => None,
             })
             .ok_or(ParseLevelFilterError(()))
@@ -790,6 +839,7 @@ impl FromStr for LevelFilter {
 /// Returned if parsing a `Level` fails.
 #[derive(Copy, Clone, Debug)]
 pub struct ParseLevelError {
+    /// Prevents downstream crates from constructing this error directly.
     _p: (),
 }
 
@@ -812,7 +862,7 @@ impl fmt::Display for ParseLevelFilterError {
 }
 
 #[cfg(feature = "std")]
-impl std::error::Error for ParseLevelFilterError {}
+impl Error for ParseLevelFilterError {}
 
 // ==== Level and LevelFilter comparisons ====
 
@@ -849,7 +899,7 @@ impl std::error::Error for ParseLevelFilterError {}
 //    consisting of one `cmp` instruction!
 //
 //    Therefore, we need to ensure that all the comparison methods have
-//    `#[inline]` or `#[inline(always)]` attributes. It's not sufficient to just
+//    `#[inline]` or `#[inline]` attributes. It's not sufficient to just
 //    add the attribute to `partial_cmp` in a manual implementation of the
 //    trait, since it's the comparison operators (`lt`, `le`, `gt`, and `ge`)
 //    that will actually be *used*, and the default implementation of *those*
@@ -888,162 +938,169 @@ impl std::error::Error for ParseLevelFilterError {}
 // change it unless you know what you're doing.
 
 impl PartialEq<LevelFilter> for Level {
-    #[inline(always)]
+    #[inline]
     fn eq(&self, other: &LevelFilter) -> bool {
-        self.0 as usize == filter_as_usize(&other.0)
+        self.as_usize() == other.as_usize()
     }
 }
 
 impl PartialOrd for Level {
-    #[inline(always)]
-    fn partial_cmp(&self, other: &Level) -> Option<cmp::Ordering> {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
 
-    #[inline(always)]
-    fn lt(&self, other: &Level) -> bool {
-        (other.0 as usize) < (self.0 as usize)
+    #[inline]
+    fn lt(&self, other: &Self) -> bool {
+        other.as_usize() < self.as_usize()
     }
 
-    #[inline(always)]
-    fn le(&self, other: &Level) -> bool {
-        (other.0 as usize) <= (self.0 as usize)
+    #[inline]
+    fn le(&self, other: &Self) -> bool {
+        other.as_usize() <= self.as_usize()
     }
 
-    #[inline(always)]
-    fn gt(&self, other: &Level) -> bool {
-        (other.0 as usize) > (self.0 as usize)
+    #[inline]
+    fn gt(&self, other: &Self) -> bool {
+        other.as_usize() > self.as_usize()
     }
 
-    #[inline(always)]
-    fn ge(&self, other: &Level) -> bool {
-        (other.0 as usize) >= (self.0 as usize)
+    #[inline]
+    fn ge(&self, other: &Self) -> bool {
+        other.as_usize() >= self.as_usize()
     }
 }
 
 impl Ord for Level {
-    #[inline(always)]
+    #[inline]
     fn cmp(&self, other: &Self) -> cmp::Ordering {
-        (other.0 as usize).cmp(&(self.0 as usize))
+        other.as_usize().cmp(&self.as_usize())
     }
 }
 
 impl PartialOrd<LevelFilter> for Level {
-    #[inline(always)]
+    #[inline]
     fn partial_cmp(&self, other: &LevelFilter) -> Option<cmp::Ordering> {
-        Some(filter_as_usize(&other.0).cmp(&(self.0 as usize)))
+        Some(other.as_usize().cmp(&self.as_usize()))
     }
 
-    #[inline(always)]
+    #[inline]
     fn lt(&self, other: &LevelFilter) -> bool {
-        filter_as_usize(&other.0) < (self.0 as usize)
+        other.as_usize() < self.as_usize()
     }
 
-    #[inline(always)]
+    #[inline]
     fn le(&self, other: &LevelFilter) -> bool {
-        filter_as_usize(&other.0) <= (self.0 as usize)
+        other.as_usize() <= self.as_usize()
     }
 
-    #[inline(always)]
+    #[inline]
     fn gt(&self, other: &LevelFilter) -> bool {
-        filter_as_usize(&other.0) > (self.0 as usize)
+        other.as_usize() > self.as_usize()
     }
 
-    #[inline(always)]
+    #[inline]
     fn ge(&self, other: &LevelFilter) -> bool {
-        filter_as_usize(&other.0) >= (self.0 as usize)
+        other.as_usize() >= self.as_usize()
     }
 }
 
-#[inline(always)]
-fn filter_as_usize(x: &Option<Level>) -> usize {
-    match x {
-        Some(Level(f)) => *f as usize,
-        None => LevelFilter::OFF_USIZE,
+/// Returns the integer encoding guaranteed by `LevelInner`'s representation.
+const fn level_inner_as_usize(level: LevelInner) -> usize {
+    match level {
+        LevelInner::Trace => LevelFilter::TRACE_USIZE,
+        LevelInner::Debug => LevelFilter::DEBUG_USIZE,
+        LevelInner::Info => LevelFilter::INFO_USIZE,
+        LevelInner::Warn => LevelFilter::WARN_USIZE,
+        LevelInner::Error => LevelFilter::ERROR_USIZE,
     }
 }
 
 impl PartialEq<Level> for LevelFilter {
-    #[inline(always)]
+    #[inline]
     fn eq(&self, other: &Level) -> bool {
-        filter_as_usize(&self.0) == other.0 as usize
+        self.as_usize() == other.as_usize()
     }
 }
 
 impl PartialOrd for LevelFilter {
-    #[inline(always)]
-    fn partial_cmp(&self, other: &LevelFilter) -> Option<cmp::Ordering> {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<cmp::Ordering> {
         Some(self.cmp(other))
     }
 
-    #[inline(always)]
-    fn lt(&self, other: &LevelFilter) -> bool {
-        filter_as_usize(&other.0) < filter_as_usize(&self.0)
+    #[inline]
+    fn lt(&self, other: &Self) -> bool {
+        other.as_usize() < self.as_usize()
     }
 
-    #[inline(always)]
-    fn le(&self, other: &LevelFilter) -> bool {
-        filter_as_usize(&other.0) <= filter_as_usize(&self.0)
+    #[inline]
+    fn le(&self, other: &Self) -> bool {
+        other.as_usize() <= self.as_usize()
     }
 
-    #[inline(always)]
-    fn gt(&self, other: &LevelFilter) -> bool {
-        filter_as_usize(&other.0) > filter_as_usize(&self.0)
+    #[inline]
+    fn gt(&self, other: &Self) -> bool {
+        other.as_usize() > self.as_usize()
     }
 
-    #[inline(always)]
-    fn ge(&self, other: &LevelFilter) -> bool {
-        filter_as_usize(&other.0) >= filter_as_usize(&self.0)
+    #[inline]
+    fn ge(&self, other: &Self) -> bool {
+        other.as_usize() >= self.as_usize()
     }
 }
 
 impl Ord for LevelFilter {
-    #[inline(always)]
+    #[inline]
     fn cmp(&self, other: &Self) -> cmp::Ordering {
-        filter_as_usize(&other.0).cmp(&filter_as_usize(&self.0))
+        other.as_usize().cmp(&self.as_usize())
     }
 }
 
 impl PartialOrd<Level> for LevelFilter {
-    #[inline(always)]
+    #[inline]
     fn partial_cmp(&self, other: &Level) -> Option<cmp::Ordering> {
-        Some((other.0 as usize).cmp(&filter_as_usize(&self.0)))
+        Some(other.as_usize().cmp(&self.as_usize()))
     }
 
-    #[inline(always)]
+    #[inline]
     fn lt(&self, other: &Level) -> bool {
-        (other.0 as usize) < filter_as_usize(&self.0)
+        other.as_usize() < self.as_usize()
     }
 
-    #[inline(always)]
+    #[inline]
     fn le(&self, other: &Level) -> bool {
-        (other.0 as usize) <= filter_as_usize(&self.0)
+        other.as_usize() <= self.as_usize()
     }
 
-    #[inline(always)]
+    #[inline]
     fn gt(&self, other: &Level) -> bool {
-        (other.0 as usize) > filter_as_usize(&self.0)
+        other.as_usize() > self.as_usize()
     }
 
-    #[inline(always)]
+    #[inline]
     fn ge(&self, other: &Level) -> bool {
-        (other.0 as usize) >= filter_as_usize(&self.0)
+        other.as_usize() >= self.as_usize()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_ok};
 
     #[test]
-    fn level_from_str() {
-        assert_eq!("error".parse::<Level>().unwrap(), Level::ERROR);
-        assert_eq!("4".parse::<Level>().unwrap(), Level::DEBUG);
-        assert!("0".parse::<Level>().is_err())
+    fn level_from_str() -> Result<(), TestFailure> {
+        let error_level = ensure_ok("error".parse::<Level>(), "error level parses")?;
+        let debug_level = ensure_ok("4".parse::<Level>(), "debug numeric level parses")?;
+
+        ensure_eq(&error_level, &Level::ERROR, "error string maps to ERROR")?;
+        ensure_eq(&debug_level, &Level::DEBUG, "4 maps to DEBUG")?;
+        ensure("0".parse::<Level>().is_err(), "0 is not a valid Level")
     }
 
     #[test]
-    fn filter_level_conversion() {
+    fn filter_level_conversion() -> Result<(), TestFailure> {
         let mapping = [
             (LevelFilter::OFF, None),
             (LevelFilter::ERROR, Some(Level::ERROR)),
@@ -1052,23 +1109,24 @@ mod tests {
             (LevelFilter::DEBUG, Some(Level::DEBUG)),
             (LevelFilter::TRACE, Some(Level::TRACE)),
         ];
-        for (filter, level) in mapping.iter() {
-            assert_eq!(filter.into_level(), *level);
-            match level {
-                Some(level) => {
-                    let actual: LevelFilter = (*level).into();
-                    assert_eq!(actual, *filter);
-                }
-                None => {
-                    let actual: LevelFilter = None.into();
-                    assert_eq!(actual, *filter);
-                }
+        for &(filter, level) in &mapping {
+            ensure(
+                filter.into_level() == level,
+                "filter converts into expected level",
+            )?;
+            if let Some(mapped_level) = level {
+                let actual: LevelFilter = mapped_level.into();
+                ensure_eq(&actual, &filter, "level converts back into filter")?;
+            } else {
+                let actual: LevelFilter = None.into();
+                ensure_eq(&actual, &filter, "None converts into OFF filter")?;
             }
         }
+        Ok(())
     }
 
     #[test]
-    fn level_filter_encoding_round_trips() {
+    fn level_filter_encoding_round_trips() -> Result<(), TestFailure> {
         let mapping = [
             (LevelFilter::OFF, LevelFilter::OFF_USIZE),
             (LevelFilter::ERROR, LevelFilter::ERROR_USIZE),
@@ -1078,8 +1136,13 @@ mod tests {
             (LevelFilter::TRACE, LevelFilter::TRACE_USIZE),
         ];
         for &(filter, expected) in &mapping {
-            assert_eq!(expected, filter.encode());
-            assert_eq!(filter, LevelFilter::decode(expected));
+            ensure_eq(&expected, &filter.encode(), "level filter encodes")?;
+            ensure_eq(
+                &filter,
+                &LevelFilter::decode(expected),
+                "level filter decodes",
+            )?;
         }
+        Ok(())
     }
 }

@@ -63,7 +63,6 @@ fn span_entered_on_different_thread_from_subscriber() {
 
         fn drop_span(&self, id: Id) {
             self.counts.lock().unwrap().sub_close_count += 1;
-            #[allow(deprecated)]
             self.inner.drop_span(id);
         }
 

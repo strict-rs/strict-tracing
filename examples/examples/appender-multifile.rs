@@ -25,7 +25,7 @@ fn main() {
     let _shaved = yak_shave::shave_all(6);
     tracing::info!("sleeping for a minute...");
 
-    std::thread::sleep(std::time::Duration::from_secs(60));
+    std::thread::sleep(std::time::Duration::from_mins(1));
 
     tracing::info!("okay, time to shave some more yaks!");
     let _shaved = yak_shave::shave_all(10);

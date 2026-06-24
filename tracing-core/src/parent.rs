@@ -1,7 +1,8 @@
 use crate::span::Id;
 
+/// Parent relationship requested for a new span or event.
 #[derive(Debug)]
-pub(crate) enum Parent {
+pub enum Parent {
     /// The new span will be a root span.
     Root,
     /// The new span will be rooted in the current span.

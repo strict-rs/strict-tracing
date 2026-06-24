@@ -525,7 +525,6 @@ impl fmt::Display for Targets {
 /// [level]: tracing_core::Level
 #[derive(Debug)]
 pub struct IntoIter(
-    #[allow(clippy::type_complexity)] // alias indirection would probably make this more confusing
     FilterMap<
         <DirectiveSet<StaticDirective> as IntoIterator>::IntoIter,
         fn(StaticDirective) -> Option<(String, LevelFilter)>,
@@ -596,20 +595,8 @@ impl<'a> Iterator for Iter<'a> {
 mod tests {
     use super::*;
     use alloc::{string::ToString, vec, vec::Vec};
-    #[cfg(feature = "std")]
-    use std::dbg;
-
-    // `dbg!` is only available with `libstd`; just nop it out when testing
-    // with alloc only.
-    #[cfg(not(feature = "std"))]
-    macro_rules! dbg {
-        ($x:expr) => {
-            $x
-        };
-    }
-
     fn expect_parse(s: &str) -> Targets {
-        match dbg!(s).parse::<Targets>() {
+        match s.parse::<Targets>() {
             Err(e) => panic!("string {:?} did not parse successfully: {}", s, e),
             Ok(e) => e,
         }
@@ -810,7 +797,7 @@ mod tests {
             // textually equivalent, though, they should still *parse* to the
             // same filter.
             let formatted = filter.to_string();
-            let filter2 = match dbg!(&formatted).parse::<Targets>() {
+            let filter2 = match formatted.parse::<Targets>() {
                 Ok(filter) => filter,
                 Err(e) => panic!(
                     "failed to parse formatted filter string {:?}: {}",

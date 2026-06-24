@@ -636,7 +636,7 @@ impl Inner {
 
     /// Returns the full filename for the provided date, using [`Rotation`] to round accordingly.
     pub(crate) fn join_date(&self, date: &OffsetDateTime) -> String {
-        let date = if let Rotation::NEVER = self.rotation {
+        let date = if self.rotation == Rotation::NEVER {
             date.format(&self.date_format)
                 .expect("Unable to format OffsetDateTime; this is a bug in tracing-appender")
         } else {
@@ -1335,7 +1335,7 @@ mod test {
         let created = parse_date_from_filename(filename, &date_format, Some("app"), Some("log"));
         assert_eq!(
             created,
-            Some(SystemTime::UNIX_EPOCH + Duration::seconds(1580515200))
+            Some(SystemTime::UNIX_EPOCH + Duration::seconds(1_580_515_200))
         );
     }
 
@@ -1346,7 +1346,7 @@ mod test {
         let created = parse_date_from_filename(filename, &date_format, Some("app"), Some("log"));
         assert_eq!(
             created,
-            Some(SystemTime::UNIX_EPOCH + Duration::seconds(1580551200))
+            Some(SystemTime::UNIX_EPOCH + Duration::seconds(1_580_551_200))
         );
     }
 
@@ -1357,7 +1357,7 @@ mod test {
         let created = parse_date_from_filename(filename, &date_format, Some("app"), Some("log"));
         assert_eq!(
             created,
-            Some(SystemTime::UNIX_EPOCH + Duration::seconds(1580551260))
+            Some(SystemTime::UNIX_EPOCH + Duration::seconds(1_580_551_260))
         );
     }
 

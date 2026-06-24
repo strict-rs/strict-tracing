@@ -21,14 +21,18 @@ pub struct Id(NonZeroU64);
 /// created.
 #[derive(Debug)]
 pub struct Attributes<'a> {
+    /// Metadata describing the callsite that created the span.
     metadata: &'static Metadata<'static>,
+    /// Values recorded with the span at creation time.
     values: &'a field::ValueSet<'a>,
+    /// Parent relationship requested for the new span.
     parent: Parent,
 }
 
 /// A set of fields recorded by a span.
 #[derive(Debug)]
 pub struct Record<'a> {
+    /// Values recorded against an existing span.
     values: &'a field::ValueSet<'a>,
 }
 
@@ -44,61 +48,64 @@ pub struct Record<'a> {
 /// [`Metadata`]: super::metadata::Metadata
 #[derive(Debug)]
 pub struct Current {
+    /// Internal representation of the current-span state.
     inner: CurrentInner,
 }
 
+/// Internal states for the current span reported by a subscriber.
 #[derive(Debug)]
 enum CurrentInner {
+    /// The subscriber knows a current span.
     Current {
+        /// Identifier for the current span.
         id: Id,
+        /// Metadata for the current span.
         metadata: &'static Metadata<'static>,
     },
+    /// The subscriber knows there is no current span.
     None,
+    /// The subscriber does not track the current span.
     Unknown,
 }
 
 // ===== impl Span =====
 
 impl Id {
-    /// Constructs a new span ID from the given `u64`.
+    /// Attempts to construct a new span ID from the given `u64`.
     ///
-    /// <pre class="ignore" style="white-space:normal;font:inherit;">
-    ///     <strong>Note</strong>: Span IDs must be greater than zero.
-    /// </pre>
-    ///
-    /// # Panics
-    /// - If the provided `u64` is 0.
-    pub fn from_u64(u: u64) -> Self {
-        Id(NonZeroU64::new(u).expect("span IDs must be > 0"))
+    /// Returns `None` if the provided `u64` is 0.
+    #[must_use]
+    pub const fn try_from_u64(value: u64) -> Option<Self> {
+        let Some(id) = NonZeroU64::new(value) else {
+            return None;
+        };
+        Some(Self(id))
     }
 
     /// Constructs a new span ID from the given `NonZeroU64`.
-    ///
-    /// Unlike [`Id::from_u64`](Id::from_u64()), this will never panic.
     #[inline]
+    #[must_use]
     pub const fn from_non_zero_u64(id: NonZeroU64) -> Self {
-        Id(id)
+        Self(id)
     }
 
-    // Allow `into` by-ref since we don't want to impl Copy for Id
-    #[allow(clippy::wrong_self_convention)]
     /// Returns the span's ID as a `u64`.
-    pub fn into_u64(&self) -> u64 {
+    #[must_use]
+    pub const fn into_u64(self) -> u64 {
         self.0.get()
     }
 
-    // Allow `into` by-ref since we don't want to impl Copy for Id
-    #[allow(clippy::wrong_self_convention)]
     /// Returns the span's ID as a `NonZeroU64`.
     #[inline]
-    pub const fn into_non_zero_u64(&self) -> NonZeroU64 {
+    #[must_use]
+    pub const fn into_non_zero_u64(self) -> NonZeroU64 {
         self.0
     }
 }
 
 impl<'a> From<&'a Id> for Option<Id> {
     fn from(id: &'a Id) -> Self {
-        Some(id.clone())
+        Some(*id)
     }
 }
 
@@ -107,8 +114,12 @@ impl<'a> From<&'a Id> for Option<Id> {
 impl<'a> Attributes<'a> {
     /// Returns `Attributes` describing a new child span of the current span,
     /// with the provided metadata and values.
-    pub fn new(metadata: &'static Metadata<'static>, values: &'a field::ValueSet<'a>) -> Self {
-        Attributes {
+    #[must_use]
+    pub const fn new(
+        metadata: &'static Metadata<'static>,
+        values: &'a field::ValueSet<'a>,
+    ) -> Self {
+        Self {
             metadata,
             values,
             parent: Parent::Current,
@@ -117,8 +128,12 @@ impl<'a> Attributes<'a> {
 
     /// Returns `Attributes` describing a new span at the root of its own trace
     /// tree, with the provided metadata and values.
-    pub fn new_root(metadata: &'static Metadata<'static>, values: &'a field::ValueSet<'a>) -> Self {
-        Attributes {
+    #[must_use]
+    pub const fn new_root(
+        metadata: &'static Metadata<'static>,
+        values: &'a field::ValueSet<'a>,
+    ) -> Self {
+        Self {
             metadata,
             values,
             parent: Parent::Root,
@@ -127,7 +142,8 @@ impl<'a> Attributes<'a> {
 
     /// Returns `Attributes` describing a new child span of the specified
     /// parent span, with the provided metadata and values.
-    pub fn child_of(
+    #[must_use]
+    pub const fn child_of(
         parent: Id,
         metadata: &'static Metadata<'static>,
         values: &'a field::ValueSet<'a>,
@@ -140,18 +156,21 @@ impl<'a> Attributes<'a> {
     }
 
     /// Returns a reference to the new span's metadata.
-    pub fn metadata(&self) -> &'static Metadata<'static> {
+    #[must_use]
+    pub const fn metadata(&self) -> &'static Metadata<'static> {
         self.metadata
     }
 
     /// Returns a reference to a `ValueSet` containing any values the new span
     /// was created with.
-    pub fn values(&self) -> &field::ValueSet<'a> {
+    #[must_use]
+    pub const fn values(&self) -> &field::ValueSet<'a> {
         self.values
     }
 
     /// Returns true if the new span should be a root.
-    pub fn is_root(&self) -> bool {
+    #[must_use]
+    pub const fn is_root(&self) -> bool {
         matches!(self.parent, Parent::Root)
     }
 
@@ -162,7 +181,8 @@ impl<'a> Attributes<'a> {
     /// that span should be the new span's parent. Otherwise, if the current
     /// thread is _not_ inside a span, then the new span will be the root of its
     /// own trace tree.
-    pub fn is_contextual(&self) -> bool {
+    #[must_use]
+    pub const fn is_contextual(&self) -> bool {
         matches!(self.parent, Parent::Current)
     }
 
@@ -170,10 +190,11 @@ impl<'a> Attributes<'a> {
     ///
     /// Otherwise (if the new span is a root or is a child of the current span),
     /// returns `None`.
-    pub fn parent(&self) -> Option<&Id> {
+    #[must_use]
+    pub const fn parent(&self) -> Option<&Id> {
         match self.parent {
-            Parent::Explicit(ref p) => Some(p),
-            _ => None,
+            Parent::Explicit(ref parent) => Some(parent),
+            Parent::Root | Parent::Current => None,
         }
     }
 
@@ -182,16 +203,18 @@ impl<'a> Attributes<'a> {
     ///
     /// [visitor]: super::field::Visit
     pub fn record(&self, visitor: &mut dyn field::Visit) {
-        self.values.record(visitor)
+        self.values.record(visitor);
     }
 
     /// Returns `true` if this set of `Attributes` contains a value for the
     /// given `Field`.
+    #[must_use]
     pub fn contains(&self, field: &field::Field) -> bool {
         self.values.contains(field)
     }
 
     /// Returns true if this set of `Attributes` contains _no_ values.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
@@ -207,7 +230,8 @@ impl<'a> Attributes<'a> {
     /// [record]: Attributes::record()
     /// [`Metadata`]: crate::metadata::Metadata
     /// [`FieldSet`]: crate::field::FieldSet
-    pub fn fields(&self) -> &FieldSet {
+    #[must_use]
+    pub const fn fields(&self) -> &FieldSet {
         self.values.field_set()
     }
 }
@@ -216,7 +240,8 @@ impl<'a> Attributes<'a> {
 
 impl<'a> Record<'a> {
     /// Constructs a new `Record` from a `ValueSet`.
-    pub fn new(values: &'a field::ValueSet<'a>) -> Self {
+    #[must_use]
+    pub const fn new(values: &'a field::ValueSet<'a>) -> Self {
         Self { values }
     }
 
@@ -224,23 +249,26 @@ impl<'a> Record<'a> {
     ///
     /// [visitor]: super::field::Visit
     pub fn record(&self, visitor: &mut dyn field::Visit) {
-        self.values.record(visitor)
+        self.values.record(visitor);
     }
 
     /// Returns the number of fields that would be visited from this `Record`
     /// when [`Record::record()`] is called
     ///
     /// [`Record::record()`]: Record::record()
+    #[must_use]
     pub fn len(&self) -> usize {
         self.values.len()
     }
 
     /// Returns `true` if this `Record` contains a value for the given `Field`.
+    #[must_use]
     pub fn contains(&self, field: &field::Field) -> bool {
         self.values.contains(field)
     }
 
     /// Returns true if this `Record` contains _no_ values.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.values.is_empty()
     }
@@ -251,7 +279,8 @@ impl<'a> Record<'a> {
 impl Current {
     /// Constructs a new `Current` that indicates the current context is a span
     /// with the given `metadata` and `metadata`.
-    pub fn new(id: Id, metadata: &'static Metadata<'static>) -> Self {
+    #[must_use]
+    pub const fn new(id: Id, metadata: &'static Metadata<'static>) -> Self {
         Self {
             inner: CurrentInner::Current { id, metadata },
         }
@@ -259,7 +288,8 @@ impl Current {
 
     /// Constructs a new `Current` that indicates the current context is *not*
     /// in a span.
-    pub fn none() -> Self {
+    #[must_use]
+    pub const fn none() -> Self {
         Self {
             inner: CurrentInner::None,
         }
@@ -267,7 +297,7 @@ impl Current {
 
     /// Constructs a new `Current` that indicates the `Subscriber` does not
     /// track a current span.
-    pub(crate) fn unknown() -> Self {
+    pub(crate) const fn unknown() -> Self {
         Self {
             inner: CurrentInner::Unknown,
         }
@@ -285,32 +315,36 @@ impl Current {
     /// [`id`]: Current::id()
     /// [`metadata`]: Current::metadata()
     /// [`into_inner`]: Current::into_inner()
-    pub fn is_known(&self) -> bool {
+    #[must_use]
+    pub const fn is_known(&self) -> bool {
         !matches!(self.inner, CurrentInner::Unknown)
     }
 
     /// Consumes `self` and returns the span `Id` and `Metadata` of the current
     /// span, if one exists and is known.
-    pub fn into_inner(self) -> Option<(Id, &'static Metadata<'static>)> {
+    #[must_use]
+    pub const fn into_inner(self) -> Option<(Id, &'static Metadata<'static>)> {
         match self.inner {
             CurrentInner::Current { id, metadata } => Some((id, metadata)),
-            _ => None,
+            CurrentInner::None | CurrentInner::Unknown => None,
         }
     }
 
     /// Borrows the `Id` of the current span, if one exists and is known.
-    pub fn id(&self) -> Option<&Id> {
+    #[must_use]
+    pub const fn id(&self) -> Option<&Id> {
         match self.inner {
             CurrentInner::Current { ref id, .. } => Some(id),
-            _ => None,
+            CurrentInner::None | CurrentInner::Unknown => None,
         }
     }
 
     /// Borrows the `Metadata` of the current span, if one exists and is known.
-    pub fn metadata(&self) -> Option<&'static Metadata<'static>> {
+    #[must_use]
+    pub const fn metadata(&self) -> Option<&'static Metadata<'static>> {
         match self.inner {
             CurrentInner::Current { metadata, .. } => Some(metadata),
-            _ => None,
+            CurrentInner::None | CurrentInner::Unknown => None,
         }
     }
 }
@@ -323,7 +357,7 @@ impl<'a> From<&'a Current> for Option<&'a Id> {
 
 impl<'a> From<&'a Current> for Option<Id> {
     fn from(cur: &'a Current) -> Self {
-        cur.id().cloned()
+        cur.id().copied()
     }
 }
 
@@ -331,7 +365,7 @@ impl From<Current> for Option<Id> {
     fn from(cur: Current) -> Self {
         match cur.inner {
             CurrentInner::Current { id, .. } => Some(id),
-            _ => None,
+            CurrentInner::None | CurrentInner::Unknown => None,
         }
     }
 }

@@ -47,7 +47,7 @@ tokio-test = { workspace = true }
 tracing-subscriber = { workspace = true, default-features = true, features = ["env-filter"] }
 tracing-test = { workspace = true }
 async-trait = { workspace = true }
-trybuild = { workspace = true }
+strict-test-support = { workspace = true, features = ["trybuild"] }
 rustversion = { workspace = true }
 
 [badges]

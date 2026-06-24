@@ -1,5 +1,4 @@
 //! Example binary for tracing workspace checks.
-
 #![deny(rust_2018_idioms)]
 /// This is a example showing how thread info can be displayed when
 /// formatting events with `tracing_subscriber::fmt`. This is useful

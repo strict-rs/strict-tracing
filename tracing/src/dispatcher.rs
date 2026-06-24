@@ -29,7 +29,7 @@
 //! #   span::{Attributes, Id, Record}
 //! # };
 //! # impl tracing_core::Subscriber for FooSubscriber {
-//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(0) }
+//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(1) }
 //! #   fn record(&self, _: &Id, _: &Record) {}
 //! #   fn event(&self, _: &Event) {}
 //! #   fn record_follows_from(&self, _: &Id, _: &Id) {}
@@ -52,7 +52,7 @@
 //! #   span::{Attributes, Id, Record}
 //! # };
 //! # impl tracing_core::Subscriber for FooSubscriber {
-//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(0) }
+//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(1) }
 //! #   fn record(&self, _: &Id, _: &Record) {}
 //! #   fn event(&self, _: &Event) {}
 //! #   fn record_follows_from(&self, _: &Id, _: &Id) {}
@@ -87,7 +87,7 @@
 //! #   span::{Attributes, Id, Record}
 //! # };
 //! # impl tracing_core::Subscriber for FooSubscriber {
-//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(0) }
+//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(1) }
 //! #   fn record(&self, _: &Id, _: &Record) {}
 //! #   fn event(&self, _: &Event) {}
 //! #   fn record_follows_from(&self, _: &Id, _: &Id) {}

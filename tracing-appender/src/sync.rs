@@ -7,7 +7,6 @@
 //! API than `std::sync::RwLock` (it does not support poisoning on panics), we
 //! wrap the `std::sync` version to ignore poisoning.
 
-#[allow(unused_imports)] // may be used later;
 #[cfg(feature = "parking_lot")]
 pub(crate) use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -42,7 +41,6 @@ mod std_impl {
         }
 
         #[inline]
-        #[allow(dead_code)] // may be used later;
         pub(crate) fn try_read(&self) -> Option<RwLockReadGuard<'_, T>> {
             match self.inner.try_read() {
                 Ok(guard) => Some(guard),
@@ -57,7 +55,6 @@ mod std_impl {
         }
 
         #[inline]
-        #[allow(dead_code)] // may be used later;
         pub(crate) fn try_write(&self) -> Option<RwLockWriteGuard<'_, T>> {
             match self.inner.try_write() {
                 Ok(guard) => Some(guard),

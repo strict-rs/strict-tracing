@@ -43,7 +43,6 @@ where
 }
 
 #[cfg(feature = "tokio-executor")]
-#[allow(unreachable_pub, unused_imports)] // https://github.com/rust-lang/rust/issues/57411
 pub use self::tokio_executor::*;
 
 /// `tokio_executor::Executor`/`TypedExecutor` integration for the instrumented
@@ -120,7 +119,6 @@ mod tokio_executor {
 }
 
 #[cfg(feature = "tokio")]
-#[allow(unreachable_pub, unused_imports)] // https://github.com/rust-lang/rust/issues/57411
 pub use self::tokio_runtime::*;
 
 /// tokio 0.1 runtime conveniences (`Runtime`/`current_thread::Runtime`).

@@ -26,7 +26,7 @@ rust-version.workspace = true
 
 default = ["smallvec", "fmt", "ansi", "tracing-log", "std"]
 alloc = []
-std = ["alloc", "tracing-core/std"]
+std = ["alloc", "tracing-core/std", "parking_lot"]
 env-filter = ["matchers", "once_cell", "tracing", "std", "thread_local", "dep:regex-automata"]
 fmt = ["registry", "std"]
 ansi = ["fmt", "nu-ansi-term"]

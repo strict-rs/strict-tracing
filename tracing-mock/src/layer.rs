@@ -115,11 +115,9 @@
 //! ```
 //!
 //! [`Layer`]: trait@tracing_subscriber::layer::Layer
-use std::{
-    collections::VecDeque,
-    fmt,
-    sync::{Arc, Mutex},
-};
+use std::{collections::VecDeque, fmt, sync::Arc};
+
+use parking_lot::Mutex;
 
 use tracing_core::{
     Event, Subscriber,
@@ -189,7 +187,7 @@ use crate::{
 #[must_use]
 pub fn mock() -> MockLayerBuilder {
     MockLayerBuilder {
-        expected: Default::default(),
+        expected: VecDeque::default(),
         name: std::thread::current()
             .name()
             .map(String::from)
@@ -916,8 +914,8 @@ where
 {
     fn on_register_dispatch(&self, _subscriber: &tracing::Dispatch) {
         println!("[{}] on_register_dispatch", self.name);
-        let mut expected = self.expected.lock().unwrap();
-        if let Some(Expect::OnRegisterDispatch) = expected.front() {
+        let mut expected = self.expected.lock();
+        if matches!(expected.front(), Some(Expect::OnRegisterDispatch)) {
             let _matched = expected.pop_front();
         }
     }
@@ -947,7 +945,7 @@ where
             event.metadata().level(),
             event.metadata().target(),
         );
-        match self.expected.lock().unwrap().pop_front() {
+        match self.expected.lock().pop_front() {
             None => {}
             Some(Expect::Event(mut expected)) => {
                 expected.check(event, || context_get_ancestry(event, &cx), &self.name);
@@ -977,7 +975,7 @@ where
             meta.target(),
             id
         );
-        let mut expected = self.expected.lock().unwrap();
+        let mut expected = self.expected.lock();
         let was_expected = matches!(expected.front(), Some(Expect::NewSpan(_)));
         if was_expected && let Expect::NewSpan(mut expected) = expected.pop_front().unwrap() {
             expected.check(span, || context_get_ancestry(span, &cx), &self.name);
@@ -989,14 +987,14 @@ where
             .span(id)
             .unwrap_or_else(|| panic!("[{}] no span for ID {:?}", self.name, id));
         println!("[{}] enter: {}; id={:?};", self.name, span.name(), id);
-        match self.expected.lock().unwrap().pop_front() {
+        match self.expected.lock().pop_front() {
             None => {}
             Some(Expect::Enter(ref expected_span)) => {
                 expected_span.check(&(&span).into(), "to enter", &self.name);
             }
             Some(ex) => ex.bad(&self.name, format_args!("entered span {:?}", span.name())),
         }
-        self.current.lock().unwrap().push(id.clone());
+        self.current.lock().push(id.clone());
     }
 
     fn on_exit(&self, id: &Id, cx: Context<'_, C>) {
@@ -1010,11 +1008,11 @@ where
             .span(id)
             .unwrap_or_else(|| panic!("[{}] no span for ID {:?}", self.name, id));
         println!("[{}] exit: {}; id={:?};", self.name, span.name(), id);
-        match self.expected.lock().unwrap().pop_front() {
+        match self.expected.lock().pop_front() {
             None => {}
             Some(Expect::Exit(ref expected_span)) => {
                 expected_span.check(&(&span).into(), "to exit", &self.name);
-                let curr = self.current.lock().unwrap().pop();
+                let curr = self.current.lock().pop();
                 assert_eq!(
                     Some(id),
                     curr.as_ref(),
@@ -1043,7 +1041,7 @@ where
         if name.is_none() {
             println!("[{}] drop_span: id={:?}", self.name, id);
         }
-        if let Ok(mut expected) = self.expected.try_lock() {
+        if let Some(mut expected) = self.expected.try_lock() {
             let was_expected = match expected.front() {
                 Some(Expect::DropSpan(expected_span)) => {
                     // Don't assert if this function was called while panicking,
@@ -1095,13 +1093,13 @@ impl fmt::Debug for MockLayer {
         let mut s = f.debug_struct("ExpectSubscriber");
         let _builder = s.field("name", &self.name);
 
-        if let Ok(expected) = self.expected.try_lock() {
+        if let Some(expected) = self.expected.try_lock() {
             let _builder = s.field("expected", &expected);
         } else {
             let _builder = s.field("expected", &format_args!("<locked>"));
         }
 
-        if let Ok(current) = self.current.try_lock() {
+        if let Some(current) = self.current.try_lock() {
             let _builder = s.field("current", &format_args!("{:?}", &current));
         } else {
             let _builder = s.field("current", &format_args!("<locked>"));

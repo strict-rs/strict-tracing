@@ -169,7 +169,6 @@ impl Match {
             })?
             // TODO: validate field name
             .to_string();
-        #[allow(clippy::result_large_err)]
         let value = parts
             .next()
             .map(|part| match regex {
@@ -238,7 +237,6 @@ impl ValueMatch {
     /// This returns an error if the string didn't contain a valid `bool`,
     /// `u64`, `i64`, or `f64` literal, and couldn't be parsed as a regular
     /// expression.
-    #[allow(clippy::result_large_err)]
     fn parse_regex(s: &str) -> Result<Self, matchers::BuildError> {
         s.parse::<bool>()
             .map(ValueMatch::Bool)
@@ -581,7 +579,6 @@ mod tests {
     use alloc::format;
 
     #[derive(Debug)]
-    #[allow(dead_code)]
     struct MyStruct {
         answer: usize,
         question: &'static str,

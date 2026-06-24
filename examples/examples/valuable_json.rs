@@ -1,6 +1,4 @@
 //! Example binary for tracing workspace checks.
-
-#![allow(dead_code)]
 //! This example shows how a field value may be recorded using the `valuable`
 //! crate (https://crates.io/crates/valuable).
 //!

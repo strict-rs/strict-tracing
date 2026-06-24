@@ -113,14 +113,24 @@
 use alloc::{boxed::Box, string::String};
 use core::{
     borrow::Borrow,
-    fmt::{self, Write},
+    convert::identity,
+    fmt::{self, Write as _},
     hash::{Hash, Hasher},
-    num,
+    num::Wrapping,
     ops::Range,
+    ptr,
 };
 
 use self::private::ValidLen;
-use crate::callsite;
+use crate::{
+    callsite,
+    metadata::{Kind, Level, Metadata},
+    sealed::Sealed,
+    subscriber::Interest,
+};
+
+#[cfg(feature = "std")]
+use std::error::Error;
 
 /// An opaque key allowing _O_(1) access to a field in a `Span`'s key-value
 /// data.
@@ -130,9 +140,11 @@ use crate::callsite;
 /// across all instances of a given span with the same metadata. Thus, when a
 /// subscriber observes a new span, it need only access a field by name _once_,
 /// and use the key for that name for all other accesses.
-#[derive(Copy, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct Field {
+    /// Index of this field within its field set.
     i: usize,
+    /// Field set that owns this field.
     fields: FieldSet,
 }
 
@@ -166,10 +178,13 @@ pub struct FieldSet {
 
 /// A set of fields and values for a span.
 pub struct ValueSet<'a> {
+    /// Stored values supplied for this field set.
     values: Values<'a>,
+    /// Field definitions used to validate stored values.
     fields: &'a FieldSet,
 }
 
+/// Storage strategy for values associated with a field set.
 enum Values<'a> {
     /// A set of field-value pairs. Fields may be for the wrong field set, some
     /// fields may be missing, and fields may be in any order.
@@ -181,7 +196,9 @@ enum Values<'a> {
 /// An iterator over a set of fields.
 #[derive(Debug)]
 pub struct Iter {
+    /// Remaining field indexes to yield.
     idxs: Range<usize>,
+    /// Field set used to construct yielded fields.
     fields: FieldSet,
 }
 
@@ -285,42 +302,42 @@ pub trait Visit {
 
     /// Visit a double-precision floating point value.
     fn record_f64(&mut self, field: &Field, value: f64) {
-        self.record_debug(field, &value)
+        self.record_debug(field, &value);
     }
 
     /// Visit a signed 64-bit integer value.
     fn record_i64(&mut self, field: &Field, value: i64) {
-        self.record_debug(field, &value)
+        self.record_debug(field, &value);
     }
 
     /// Visit an unsigned 64-bit integer value.
     fn record_u64(&mut self, field: &Field, value: u64) {
-        self.record_debug(field, &value)
+        self.record_debug(field, &value);
     }
 
     /// Visit a signed 128-bit integer value.
     fn record_i128(&mut self, field: &Field, value: i128) {
-        self.record_debug(field, &value)
+        self.record_debug(field, &value);
     }
 
     /// Visit an unsigned 128-bit integer value.
     fn record_u128(&mut self, field: &Field, value: u128) {
-        self.record_debug(field, &value)
+        self.record_debug(field, &value);
     }
 
     /// Visit a boolean value.
     fn record_bool(&mut self, field: &Field, value: bool) {
-        self.record_debug(field, &value)
+        self.record_debug(field, &value);
     }
 
     /// Visit a string value.
     fn record_str(&mut self, field: &Field, value: &str) {
-        self.record_debug(field, &value)
+        self.record_debug(field, &value);
     }
 
     /// Visit a byte slice.
     fn record_bytes(&mut self, field: &Field, value: &[u8]) {
-        self.record_debug(field, &HexBytes(value))
+        self.record_debug(field, &HexBytes(value));
     }
 
     /// Records a type implementing `Error`.
@@ -333,8 +350,8 @@ pub trait Visit {
     /// </div>
     #[cfg(feature = "std")]
     #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-    fn record_error(&mut self, field: &Field, value: &(dyn std::error::Error + 'static)) {
-        self.record_debug(field, &DisplayValue(value))
+    fn record_error(&mut self, field: &Field, value: &(dyn Error + 'static)) {
+        self.record_debug(field, &DisplayValue(value));
     }
 
     /// Visit a value implementing `fmt::Debug`.
@@ -348,7 +365,7 @@ pub trait Visit {
 /// their data should be recorded.
 ///
 /// [visitor]: Visit
-pub trait Value: crate::sealed::Sealed {
+pub trait Value: Sealed {
     /// Visits this value with the given `Visitor`.
     fn record(&self, key: &Field, visitor: &mut dyn Visit);
 }
@@ -366,20 +383,20 @@ pub struct DebugValue<T: fmt::Debug>(T);
 
 /// Wraps a type implementing `fmt::Display` as a `Value` that can be
 /// recorded using its `Display` implementation.
-pub fn display<T>(t: T) -> DisplayValue<T>
+pub const fn display<T>(value: T) -> DisplayValue<T>
 where
     T: fmt::Display,
 {
-    DisplayValue(t)
+    DisplayValue(value)
 }
 
 /// Wraps a type implementing `fmt::Debug` as a `Value` that can be
 /// recorded using its `Debug` implementation.
-pub fn debug<T>(t: T) -> DebugValue<T>
+pub const fn debug<T>(value: T) -> DebugValue<T>
 where
     T: fmt::Debug,
 {
-    DebugValue(t)
+    DebugValue(value)
 }
 
 /// Wraps a type implementing [`Valuable`] as a `Value` that
@@ -395,6 +412,7 @@ where
     t.as_value()
 }
 
+/// Formats bytes as a space-separated lowercase hexadecimal list.
 struct HexBytes<'a>(&'a [u8]);
 
 impl fmt::Debug for HexBytes<'_> {
@@ -425,7 +443,7 @@ impl Visit for fmt::DebugStruct<'_, '_> {
 
 impl Visit for fmt::DebugMap<'_, '_> {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        let _builder = self.entry(&format_args!("{}", field), value);
+        let _builder = self.entry(&format_args!("{field}"), value);
     }
 }
 
@@ -434,12 +452,13 @@ where
     F: FnMut(&Field, &dyn fmt::Debug),
 {
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        (self)(field, value)
+        (self)(field, value);
     }
 }
 
 // ===== impl Value =====
 
+/// Implements `Value` for a list of primitive value-recording methods.
 macro_rules! impl_values {
     ( $( $record:ident( $( $whatever:tt)+ ) ),+ ) => {
         $(
@@ -448,45 +467,47 @@ macro_rules! impl_values {
     }
 }
 
+/// Maps primitive integer token names to their `NonZero*` companion types.
 macro_rules! ty_to_nonzero {
     (u8) => {
-        NonZeroU8
+        core::num::NonZeroU8
     };
     (u16) => {
-        NonZeroU16
+        core::num::NonZeroU16
     };
     (u32) => {
-        NonZeroU32
+        core::num::NonZeroU32
     };
     (u64) => {
-        NonZeroU64
+        core::num::NonZeroU64
     };
     (u128) => {
-        NonZeroU128
+        core::num::NonZeroU128
     };
     (usize) => {
-        NonZeroUsize
+        core::num::NonZeroUsize
     };
     (i8) => {
-        NonZeroI8
+        core::num::NonZeroI8
     };
     (i16) => {
-        NonZeroI16
+        core::num::NonZeroI16
     };
     (i32) => {
-        NonZeroI32
+        core::num::NonZeroI32
     };
     (i64) => {
-        NonZeroI64
+        core::num::NonZeroI64
     };
     (i128) => {
-        NonZeroI128
+        core::num::NonZeroI128
     };
     (isize) => {
-        NonZeroIsize
+        core::num::NonZeroIsize
     };
 }
 
+/// Implements `Value` for one primitive type and its `NonZero*` variant.
 macro_rules! impl_one_value {
     (f32, $op:expr, $record:ident) => {
         impl_one_value!(normal, f32, $op, $record);
@@ -502,183 +523,195 @@ macro_rules! impl_one_value {
         impl_one_value!(nonzero, $value_ty, $op, $record);
     };
     (normal, $value_ty:tt, $op:expr, $record:ident) => {
-        impl $crate::sealed::Sealed for $value_ty {}
-        impl $crate::field::Value for $value_ty {
-            fn record(&self, key: &$crate::field::Field, visitor: &mut dyn $crate::field::Visit) {
+        impl Sealed for $value_ty {}
+        impl Value for $value_ty {
+            fn record(&self, key: &Field, visitor: &mut dyn Visit) {
                 // `op` is always a function; the closure is used because
                 // sometimes there isn't a real function corresponding to that
                 // operation. the clippy warning is not that useful here.
-                #[allow(clippy::redundant_closure_call)]
                 visitor.$record(key, $op(*self))
             }
         }
     };
     (nonzero, $value_ty:tt, $op:expr, $record:ident) => {
-        // This `use num::*;` is reported as unused because it gets emitted
-        // for every single invocation of this macro, so there are multiple `use`s.
-        // All but the first are useless indeed.
-        // We need this import because we can't write a path where one part is
-        // the `ty_to_nonzero!($value_ty)` invocation.
-        #[allow(clippy::useless_attribute, unused)]
-        use num::*;
-        impl $crate::sealed::Sealed for ty_to_nonzero!($value_ty) {}
-        impl $crate::field::Value for ty_to_nonzero!($value_ty) {
-            fn record(&self, key: &$crate::field::Field, visitor: &mut dyn $crate::field::Visit) {
+        impl Sealed for ty_to_nonzero!($value_ty) {}
+        impl Value for ty_to_nonzero!($value_ty) {
+            fn record(&self, key: &Field, visitor: &mut dyn Visit) {
                 // `op` is always a function; the closure is used because
                 // sometimes there isn't a real function corresponding to that
                 // operation. the clippy warning is not that useful here.
-                #[allow(clippy::redundant_closure_call)]
                 visitor.$record(key, $op(self.get()))
             }
         }
     };
 }
 
+/// Implements `Value` for one primitive method group.
 macro_rules! impl_value {
     ( $record:ident( $( $value_ty:tt ),+ ) ) => {
         $(
-            impl_one_value!($value_ty, |this: $value_ty| this, $record);
+            impl_one_value!($value_ty, identity::<$value_ty>, $record);
         )+
     };
-    ( $record:ident( $( $value_ty:tt ),+ as $as_ty:ty) ) => {
+    ( $record:ident( $( $value_ty:tt ),+ => $op:expr) ) => {
         $(
-            impl_one_value!($value_ty, |this: $value_ty| this as $as_ty, $record);
+            impl_one_value!($value_ty, $op, $record);
         )+
     };
 }
 
 // ===== impl Value =====
 
+#[inline]
+/// Converts `usize` values into the `u64` visitor representation.
+fn usize_to_u64(value: usize) -> u64 {
+    u64::try_from(value).unwrap_or(u64::MAX)
+}
+
+#[inline]
+/// Converts `isize` values into the `i64` visitor representation.
+fn isize_to_i64(value: isize) -> i64 {
+    i64::try_from(value).unwrap_or_else(|_error| {
+        if value.is_negative() {
+            i64::MIN
+        } else {
+            i64::MAX
+        }
+    })
+}
+
 impl_values! {
     record_u64(u64),
-    record_u64(usize, u32, u16, u8 as u64),
+    record_u64(usize => usize_to_u64),
+    record_u64(u32, u16, u8 => u64::from),
     record_i64(i64),
-    record_i64(isize, i32, i16, i8 as i64),
+    record_i64(isize => isize_to_i64),
+    record_i64(i32, i16, i8 => i64::from),
     record_u128(u128),
     record_i128(i128),
     record_bool(bool),
     record_f64(f64),
-    record_f64(f32 as f64)
+    record_f64(f32 => f64::from)
 }
 
-impl<T: crate::sealed::Sealed> crate::sealed::Sealed for Wrapping<T> {}
+impl<T: Sealed> Sealed for Wrapping<T> {}
 impl<T: Value> Value for Wrapping<T> {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        self.0.record(key, visitor)
+        self.0.record(key, visitor);
     }
 }
 
-impl crate::sealed::Sealed for str {}
+impl Sealed for str {}
 
 impl Value for str {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        visitor.record_str(key, self)
+        visitor.record_str(key, self);
     }
 }
 
-impl crate::sealed::Sealed for [u8] {}
+impl Sealed for [u8] {}
 
 impl Value for [u8] {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        visitor.record_bytes(key, self)
+        visitor.record_bytes(key, self);
     }
 }
 
 #[cfg(feature = "std")]
-impl crate::sealed::Sealed for dyn std::error::Error + 'static {}
+impl Sealed for dyn Error + 'static {}
 
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-impl Value for dyn std::error::Error + 'static {
+impl Value for dyn Error + 'static {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        visitor.record_error(key, self)
+        visitor.record_error(key, self);
     }
 }
 
 #[cfg(feature = "std")]
-impl crate::sealed::Sealed for dyn std::error::Error + Send + 'static {}
+impl Sealed for dyn Error + Send + 'static {}
 
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-impl Value for dyn std::error::Error + Send + 'static {
+impl Value for dyn Error + Send + 'static {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        let error: &(dyn std::error::Error + 'static) = self;
-        error.record(key, visitor)
+        let error: &(dyn Error + 'static) = self;
+        error.record(key, visitor);
     }
 }
 
 #[cfg(feature = "std")]
-impl crate::sealed::Sealed for dyn std::error::Error + Sync + 'static {}
+impl Sealed for dyn Error + Sync + 'static {}
 
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-impl Value for dyn std::error::Error + Sync + 'static {
+impl Value for dyn Error + Sync + 'static {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        let error: &(dyn std::error::Error + 'static) = self;
-        error.record(key, visitor)
+        let error: &(dyn Error + 'static) = self;
+        error.record(key, visitor);
     }
 }
 
 #[cfg(feature = "std")]
-impl crate::sealed::Sealed for dyn std::error::Error + Send + Sync + 'static {}
+impl Sealed for dyn Error + Send + Sync + 'static {}
 
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-impl Value for dyn std::error::Error + Send + Sync + 'static {
+impl Value for dyn Error + Send + Sync + 'static {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        let error: &(dyn std::error::Error + 'static) = self;
-        error.record(key, visitor)
+        let error: &(dyn Error + 'static) = self;
+        error.record(key, visitor);
     }
 }
 
-impl<'a, T: ?Sized> crate::sealed::Sealed for &'a T where T: Value + crate::sealed::Sealed + 'a {}
+impl<'a, T> Sealed for &'a T where T: ?Sized + Value + 'a {}
 
-impl<'a, T: ?Sized> Value for &'a T
+impl<'a, T> Value for &'a T
 where
-    T: Value + 'a,
+    T: ?Sized + Value + 'a,
 {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        (*self).record(key, visitor)
+        (*self).record(key, visitor);
     }
 }
 
-impl<'a, T: ?Sized> crate::sealed::Sealed for &'a mut T where T: Value + crate::sealed::Sealed + 'a {}
+impl<'a, T> Sealed for &'a mut T where T: ?Sized + Value + 'a {}
 
-impl<'a, T: ?Sized> Value for &'a mut T
+impl<'a, T> Value for &'a mut T
 where
-    T: Value + 'a,
+    T: ?Sized + Value + 'a,
 {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
         // Don't use `(*self).record(key, visitor)`, otherwise would
         // cause stack overflow due to `unconditional_recursion`.
-        T::record(self, key, visitor)
+        T::record(self, key, visitor);
     }
 }
 
-impl crate::sealed::Sealed for fmt::Arguments<'_> {}
+impl Sealed for fmt::Arguments<'_> {}
 
 impl Value for fmt::Arguments<'_> {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        visitor.record_debug(key, self)
+        visitor.record_debug(key, self);
     }
 }
 
-impl<T: ?Sized> crate::sealed::Sealed for Box<T> where T: Value {}
+impl<T> Sealed for Box<T> where T: ?Sized + Value {}
 
-impl<T: ?Sized> Value for Box<T>
+impl<T> Value for Box<T>
 where
-    T: Value,
+    T: ?Sized + Value,
 {
     #[inline]
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        self.as_ref().record(key, visitor)
+        self.as_ref().record(key, visitor);
     }
 }
 
-impl crate::sealed::Sealed for String {}
+impl Sealed for String {}
 impl Value for String {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        visitor.record_str(key, self.as_str())
+        visitor.record_str(key, self.as_str());
     }
 }
 
@@ -688,20 +721,20 @@ impl fmt::Debug for dyn Value {
         // actually care about the field name here.
         struct NullCallsite;
         static NULL_CALLSITE: NullCallsite = NullCallsite;
-        static NULL_METADATA: crate::metadata::Metadata<'static> = crate::metadata::Metadata::new(
+        static NULL_METADATA: Metadata<'static> = Metadata::new(
             "field::Value",
             "tracing_core::field",
-            crate::metadata::Level::TRACE,
+            Level::TRACE,
             None,
             None,
             None,
-            FieldSet::new(&[], crate::identify_callsite!(&NULL_CALLSITE)),
-            crate::metadata::Kind::EVENT,
+            &FieldSet::new(&[], crate::identify_callsite!(&NULL_CALLSITE)),
+            Kind::EVENT,
         );
         impl callsite::Callsite for NullCallsite {
-            fn set_interest(&self, _: crate::subscriber::Interest) {}
+            fn set_interest(&self, _: Interest) {}
 
-            fn metadata(&self) -> &crate::Metadata<'_> {
+            fn metadata(&self) -> &Metadata<'_> {
                 &NULL_METADATA
             }
         }
@@ -713,7 +746,7 @@ impl fmt::Debug for dyn Value {
 
         let mut res = Ok(());
         self.record(&FIELD, &mut |_: &Field, val: &dyn fmt::Debug| {
-            res = write!(f, "{:?}", val);
+            res = write!(f, "{val:?}");
         });
         res
     }
@@ -727,14 +760,14 @@ impl fmt::Display for dyn Value {
 
 // ===== impl DisplayValue =====
 
-impl<T: fmt::Display> crate::sealed::Sealed for DisplayValue<T> {}
+impl<T: fmt::Display> Sealed for DisplayValue<T> {}
 
 impl<T> Value for DisplayValue<T>
 where
     T: fmt::Display,
 {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        visitor.record_debug(key, self)
+        visitor.record_debug(key, self);
     }
 }
 
@@ -752,14 +785,14 @@ impl<T: fmt::Display> fmt::Display for DisplayValue<T> {
 
 // ===== impl DebugValue =====
 
-impl<T: fmt::Debug> crate::sealed::Sealed for DebugValue<T> {}
+impl<T: fmt::Debug> Sealed for DebugValue<T> {}
 
 impl<T> Value for DebugValue<T>
 where
     T: fmt::Debug,
 {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        visitor.record_debug(key, &self.0)
+        visitor.record_debug(key, &self.0);
     }
 }
 
@@ -772,7 +805,7 @@ impl<T: fmt::Debug> fmt::Debug for DebugValue<T> {
 // ===== impl ValuableValue =====
 
 #[cfg(all(tracing_unstable, feature = "valuable"))]
-impl crate::sealed::Sealed for valuable::Value<'_> {}
+impl Sealed for valuable::Value<'_> {}
 
 #[cfg(all(tracing_unstable, feature = "valuable"))]
 #[cfg_attr(docsrs, doc(cfg(all(tracing_unstable, feature = "valuable"))))]
@@ -783,7 +816,7 @@ impl Value for valuable::Value<'_> {
 }
 
 #[cfg(all(tracing_unstable, feature = "valuable"))]
-impl crate::sealed::Sealed for &'_ dyn valuable::Valuable {}
+impl Sealed for &'_ dyn valuable::Valuable {}
 
 #[cfg(all(tracing_unstable, feature = "valuable"))]
 #[cfg_attr(docsrs, doc(cfg(all(tracing_unstable, feature = "valuable"))))]
@@ -793,18 +826,18 @@ impl Value for &'_ dyn valuable::Valuable {
     }
 }
 
-impl crate::sealed::Sealed for Empty {}
+impl Sealed for Empty {}
 impl Value for Empty {
     #[inline]
     fn record(&self, _: &Field, _: &mut dyn Visit) {}
 }
 
-impl<T: Value> crate::sealed::Sealed for Option<T> {}
+impl<T: Value> Sealed for Option<T> {}
 
 impl<T: Value> Value for Option<T> {
     fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-        if let Some(v) = &self {
-            v.record(key, visitor)
+        if let Some(value) = self.as_ref() {
+            value.record(key, visitor);
         }
     }
 }
@@ -818,17 +851,24 @@ impl Field {
     /// [`Identifier`]: super::callsite::Identifier
     /// [`Callsite`]: super::callsite::Callsite
     #[inline]
-    pub fn callsite(&self) -> callsite::Identifier {
+    #[must_use]
+    pub const fn callsite(&self) -> callsite::Identifier {
         self.fields.callsite()
     }
 
     /// Returns a string representing the name of the field.
+    #[must_use]
     pub fn name(&self) -> &'static str {
-        self.fields.names[self.i]
+        self.fields
+            .names
+            .get(self.i)
+            .copied()
+            .unwrap_or("<unknown>")
     }
 
     /// Returns the index of this field in its [`FieldSet`].
-    pub fn index(&self) -> usize {
+    #[must_use]
+    pub const fn index(&self) -> usize {
         self.i
     }
 }
@@ -863,22 +903,11 @@ impl Hash for Field {
     }
 }
 
-impl Clone for Field {
-    fn clone(&self) -> Self {
-        Field {
-            i: self.i,
-            fields: FieldSet {
-                names: self.fields.names,
-                callsite: self.fields.callsite(),
-            },
-        }
-    }
-}
-
 // ===== impl FieldSet =====
 
 impl FieldSet {
     /// Constructs a new `FieldSet` with the given array of field names and callsite.
+    #[must_use]
     pub const fn new(names: &'static [&'static str], callsite: callsite::Identifier) -> Self {
         Self { names, callsite }
     }
@@ -897,14 +926,17 @@ impl FieldSet {
     ///
     /// [`Field`]: super::Field
     pub fn field<Q: Borrow<str> + ?Sized>(&self, name: &Q) -> Option<Field> {
-        let name = &name.borrow();
-        self.names.iter().position(|f| f == name).map(|i| Field {
-            i,
-            fields: FieldSet {
-                names: self.names,
-                callsite: self.callsite(),
-            },
-        })
+        let requested_name = name.borrow();
+        self.names
+            .iter()
+            .position(|field_name| *field_name == requested_name)
+            .map(|i| Field {
+                i,
+                fields: Self {
+                    names: self.names,
+                    callsite: self.callsite(),
+                },
+            })
     }
 
     /// Returns `true` if `self` contains the given `field`.
@@ -918,17 +950,19 @@ impl FieldSet {
     /// named "foo", the <code>Field</code> corresponding to "foo" for each
     /// of those callsites are not equivalent.
     /// </pre></div>
+    #[must_use]
     pub fn contains(&self, field: &Field) -> bool {
-        field.callsite() == self.callsite() && field.i <= self.len()
+        field.callsite() == self.callsite() && field.i < self.len()
     }
 
     /// Returns an iterator over the `Field`s in this `FieldSet`.
     #[inline]
-    pub fn iter(&self) -> Iter {
+    #[must_use]
+    pub const fn iter(&self) -> Iter {
         let idxs = 0..self.len();
         Iter {
             idxs,
-            fields: FieldSet {
+            fields: Self {
                 names: self.names,
                 callsite: self.callsite(),
             },
@@ -950,22 +984,22 @@ impl FieldSet {
     /// Returns a new `ValueSet` for `values`. These values must exactly
     /// correspond to the fields in this `FieldSet`.
     ///
-    /// If `values` does not meet this requirement, the behavior of the
-    /// constructed `ValueSet` is unspecified (but not undefined). You will
-    /// probably observe panics or mismatched field/values.
+    /// If `values` does not meet this requirement, missing values are treated
+    /// as absent and extra values are ignored.
     #[doc(hidden)]
+    #[must_use]
     pub fn value_set_all<'v>(&'v self, values: &'v [Option<&'v (dyn Value + 'v)>]) -> ValueSet<'v> {
-        debug_assert_eq!(values.len(), self.len());
         ValueSet {
             fields: self,
             values: Values::All(values),
         }
     }
 
+    /// Returns a sentinel field used when a callsite needs a field-shaped token.
     pub(crate) const fn fake_field(&self) -> Field {
         Field {
             i: usize::MAX,
-            fields: FieldSet {
+            fields: Self {
                 names: self.names,
                 callsite: self.callsite(),
             },
@@ -974,13 +1008,15 @@ impl FieldSet {
 
     /// Returns the number of fields in this `FieldSet`.
     #[inline]
-    pub fn len(&self) -> usize {
+    #[must_use]
+    pub const fn len(&self) -> usize {
         self.names.len()
     }
 
     /// Returns whether or not this `FieldSet` has fields.
     #[inline]
-    pub fn is_empty(&self) -> bool {
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
         self.names.is_empty()
     }
 }
@@ -1015,7 +1051,7 @@ impl Eq for FieldSet {}
 
 impl PartialEq for FieldSet {
     fn eq(&self, other: &Self) -> bool {
-        if core::ptr::eq(&self, &other) {
+        if ptr::eq(self, other) {
             true
         } else if cfg!(not(debug_assertions)) {
             // In a well-behaving application, two `FieldSet`s can be assumed to
@@ -1031,12 +1067,12 @@ impl PartialEq for FieldSet {
             let Self {
                 names: lhs_names,
                 callsite: lhs_callsite,
-            } = self;
+            } = *self;
 
             let Self {
                 names: rhs_names,
                 callsite: rhs_callsite,
-            } = &other;
+            } = *other;
 
             // Check callsite equality first, as it is probably cheaper to do
             // than str equality.
@@ -1071,7 +1107,8 @@ impl ValueSet<'_> {
     /// [`Identifier`]: super::callsite::Identifier
     /// [`Callsite`]: super::callsite::Callsite
     #[inline]
-    pub fn callsite(&self) -> callsite::Identifier {
+    #[must_use]
+    pub const fn callsite(&self) -> callsite::Identifier {
         self.fields.callsite()
     }
 
@@ -1082,19 +1119,19 @@ impl ValueSet<'_> {
         match self.values {
             Values::Explicit(values) => {
                 let my_callsite = self.callsite();
-                for (field, value) in values {
+                for &(field, field_value) in values {
                     if field.callsite() != my_callsite {
                         continue;
                     }
-                    if let Some(value) = *value {
-                        value.record(field, visitor);
+                    if let Some(recorded_value) = field_value {
+                        recorded_value.record(field, visitor);
                     }
                 }
             }
             Values::All(values) => {
-                for (field, value) in self.fields.iter().zip(values.iter()) {
-                    if let Some(value) = *value {
-                        value.record(&field, visitor);
+                for (field, field_value) in self.fields.iter().zip(values.iter()) {
+                    if let Some(recorded_value) = *field_value {
+                        recorded_value.record(&field, visitor);
                     }
                 }
             }
@@ -1106,16 +1143,22 @@ impl ValueSet<'_> {
     ///
     /// [visitor]: Visit
     /// [`ValueSet::record()`]: ValueSet::record()
+    #[must_use]
     pub fn len(&self) -> usize {
         match self.values {
             Values::Explicit(values) => {
                 let my_callsite = self.callsite();
                 values
                     .iter()
-                    .filter(|(field, _)| field.callsite() == my_callsite)
+                    .filter(|entry| entry.0.callsite() == my_callsite)
                     .count()
             }
-            Values::All(values) => values.len(),
+            Values::All(values) => self
+                .fields
+                .iter()
+                .zip(values.iter())
+                .filter(|entry| entry.1.is_some())
+                .count(),
         }
     }
 
@@ -1127,49 +1170,52 @@ impl ValueSet<'_> {
         match self.values {
             Values::Explicit(values) => values
                 .iter()
-                .any(|(key, val)| *key == field && val.is_some()),
-            Values::All(values) => values[field.i].is_some(),
+                .any(|entry| entry.0 == field && entry.1.is_some()),
+            Values::All(values) => values.get(field.i).is_some_and(Option::is_some),
         }
     }
 
     /// Returns true if this `ValueSet` contains _no_ values.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         match self.values {
-            Values::All(values) => values.iter().all(|v| v.is_none()),
+            Values::All(values) => values.iter().all(Option::is_none),
             Values::Explicit(values) => {
                 let my_callsite = self.callsite();
                 values
                     .iter()
-                    .all(|(key, val)| val.is_none() || key.callsite() != my_callsite)
+                    .all(|entry| entry.1.is_none() || entry.0.callsite() != my_callsite)
             }
         }
     }
 
-    pub(crate) fn field_set(&self) -> &FieldSet {
+    /// Returns the field definitions backing this `ValueSet`.
+    pub(crate) const fn field_set(&self) -> &FieldSet {
         self.fields
     }
 }
 
 impl fmt::Debug for ValueSet<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut s = f.debug_struct("ValueSet");
-        self.record(&mut s);
-        s.field("callsite", &self.callsite()).finish()
+        let mut builder = f.debug_struct("ValueSet");
+        self.record(&mut builder);
+        builder.field("callsite", &self.callsite()).finish()
     }
 }
 
 impl fmt::Display for ValueSet<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut s = f.debug_map();
-        self.record(&mut s);
-        s.finish()
+        let mut builder = f.debug_map();
+        self.record(&mut builder);
+        builder.finish()
     }
 }
 
 // ===== impl ValidLen =====
 
+/// Private compatibility traits for historical `ValueSet` construction bounds.
 mod private {
-    use super::*;
+    use super::{Borrow, Field, Value};
 
     /// Restrictions on `ValueSet` lengths were removed in #2508 but this type remains for backwards compatibility.
     pub trait ValidLen<'a>: Borrow<[(&'a Field, Option<&'a (dyn Value + 'a)>)]> {}
@@ -1179,10 +1225,17 @@ mod private {
 
 #[cfg(test)]
 mod test {
-    use alloc::{borrow::ToOwned, format, string::String};
-
     use super::*;
-    use crate::metadata::{Kind, Level, Metadata};
+    use crate::{
+        metadata::{Kind, Level, Metadata},
+        subscriber::Interest,
+    };
+    use alloc::{
+        boxed::Box,
+        format,
+        string::{String, ToString as _},
+    };
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
 
     // Make sure TEST_CALLSITE_* have non-zero size, so they can't be located at the same address.
     struct TestCallsite1 {
@@ -1199,7 +1252,7 @@ mod test {
     };
 
     impl callsite::Callsite for TestCallsite1 {
-        fn set_interest(&self, _: crate::subscriber::Interest) {}
+        fn set_interest(&self, _: Interest) {}
 
         fn metadata(&self) -> &Metadata<'_> {
             &TEST_META_1
@@ -1220,173 +1273,271 @@ mod test {
     };
 
     impl callsite::Callsite for TestCallsite2 {
-        fn set_interest(&self, _: crate::subscriber::Interest) {}
+        fn set_interest(&self, _: Interest) {}
 
         fn metadata(&self) -> &Metadata<'_> {
             &TEST_META_2
         }
     }
 
+    fn test_fields(fields: &FieldSet) -> Result<(Field, Field, Field), TestFailure> {
+        let foo = ensure_some(fields.field("foo"), "foo field exists")?;
+        let bar = ensure_some(fields.field("bar"), "bar field exists")?;
+        let baz = ensure_some(fields.field("baz"), "baz field exists")?;
+
+        Ok((foo, bar, baz))
+    }
+
     #[test]
-    fn value_set_with_no_values_is_empty() {
+    fn value_set_with_no_values_is_empty() -> Result<(), TestFailure> {
         let fields = TEST_META_1.fields();
-        let values = &[
-            (&fields.field("foo").unwrap(), None),
-            (&fields.field("bar").unwrap(), None),
-            (&fields.field("baz").unwrap(), None),
-        ];
+        let (foo, bar, baz) = test_fields(fields)?;
+        let values = &[(&foo, None), (&bar, None), (&baz, None)];
         let valueset = fields.value_set(values);
-        assert!(valueset.is_empty());
+        ensure(valueset.is_empty(), "value set with no values is empty")
     }
 
     #[test]
-    fn index_of_field_in_fieldset_is_correct() {
+    fn index_of_field_in_fieldset_is_correct() -> Result<(), TestFailure> {
         let fields = TEST_META_1.fields();
-        let foo = fields.field("foo").unwrap();
-        assert_eq!(foo.index(), 0);
-        let bar = fields.field("bar").unwrap();
-        assert_eq!(bar.index(), 1);
-        let baz = fields.field("baz").unwrap();
-        assert_eq!(baz.index(), 2);
+        let (foo, bar, baz) = test_fields(fields)?;
+        ensure_eq(&foo.index(), &0_usize, "foo field index")?;
+        ensure_eq(&bar.index(), &1_usize, "bar field index")?;
+        ensure_eq(&baz.index(), &2_usize, "baz field index")
     }
 
     #[test]
-    fn empty_value_set_is_empty() {
+    fn empty_value_set_is_empty() -> Result<(), TestFailure> {
         let fields = TEST_META_1.fields();
         let valueset = fields.value_set(&[]);
-        assert!(valueset.is_empty());
+        ensure(valueset.is_empty(), "empty value set is empty")
     }
 
     #[test]
-    fn value_sets_with_fields_from_other_callsites_are_empty() {
+    fn value_sets_with_fields_from_other_callsites_are_empty() -> Result<(), TestFailure> {
         let fields = TEST_META_1.fields();
+        let (foo, bar, baz) = test_fields(fields)?;
         let one: &dyn Value = &1;
         let two: &dyn Value = &2;
         let three: &dyn Value = &3;
-        let values = &[
-            (&fields.field("foo").unwrap(), Some(one)),
-            (&fields.field("bar").unwrap(), Some(two)),
-            (&fields.field("baz").unwrap(), Some(three)),
-        ];
+        let values = &[(&foo, Some(one)), (&bar, Some(two)), (&baz, Some(three))];
         let valueset = TEST_META_2.fields().value_set(values);
-        assert!(valueset.is_empty())
+        ensure(
+            valueset.is_empty(),
+            "values from another callsite are ignored",
+        )
     }
 
     #[test]
-    fn sparse_value_sets_are_not_empty() {
+    fn sparse_value_sets_are_not_empty() -> Result<(), TestFailure> {
         let fields = TEST_META_1.fields();
+        let (foo, bar, baz) = test_fields(fields)?;
         let value: &dyn Value = &57;
-        let values = &[
-            (&fields.field("foo").unwrap(), None),
-            (&fields.field("bar").unwrap(), Some(value)),
-            (&fields.field("baz").unwrap(), None),
-        ];
+        let values = &[(&foo, None), (&bar, Some(value)), (&baz, None)];
         let valueset = fields.value_set(values);
-        assert!(!valueset.is_empty());
+        ensure(!valueset.is_empty(), "sparse value set is not empty")
     }
 
     #[test]
-    fn fields_from_other_callsets_are_skipped() {
-        let fields = TEST_META_1.fields();
-        let value: &dyn Value = &57;
-        let values = &[
-            (&fields.field("foo").unwrap(), None),
-            (&TEST_META_2.fields().field("bar").unwrap(), Some(value)),
-            (&fields.field("baz").unwrap(), None),
-        ];
-
-        struct MyVisitor;
+    fn fields_from_other_callsets_are_skipped() -> Result<(), TestFailure> {
+        struct MyVisitor {
+            saw_foreign_callsite: bool,
+        }
         impl Visit for MyVisitor {
             fn record_debug(&mut self, field: &Field, _: &dyn fmt::Debug) {
-                assert_eq!(field.callsite(), TEST_META_1.callsite())
+                if field.callsite() != TEST_META_1.callsite() {
+                    self.saw_foreign_callsite = true;
+                }
             }
         }
+
+        let fields = TEST_META_1.fields();
+        let (foo, _bar, baz) = test_fields(fields)?;
+        let foreign_bar = ensure_some(
+            TEST_META_2.fields().field("bar"),
+            "foreign bar field exists",
+        )?;
+        let value: &dyn Value = &57;
+        let values = &[(&foo, None), (&foreign_bar, Some(value)), (&baz, None)];
+        let mut visitor = MyVisitor {
+            saw_foreign_callsite: false,
+        };
         let valueset = fields.value_set(values);
-        valueset.record(&mut MyVisitor);
+        valueset.record(&mut visitor);
+        ensure(
+            !visitor.saw_foreign_callsite,
+            "fields from other callsites are skipped",
+        )
     }
 
     #[test]
-    fn empty_fields_are_skipped() {
+    fn empty_fields_are_skipped() -> Result<(), TestFailure> {
+        struct MyVisitor {
+            saw_bar: bool,
+            saw_other: bool,
+        }
+        impl Visit for MyVisitor {
+            fn record_debug(&mut self, field: &Field, _: &dyn fmt::Debug) {
+                if field.name() == "bar" {
+                    self.saw_bar = true;
+                } else {
+                    self.saw_other = true;
+                }
+            }
+        }
+
         let fields = TEST_META_1.fields();
+        let (foo, bar, baz) = test_fields(fields)?;
         let empty: &dyn Value = &Empty;
         let value: &dyn Value = &57;
         let values = &[
-            (&fields.field("foo").unwrap(), Some(empty)),
-            (&fields.field("bar").unwrap(), Some(value)),
-            (&fields.field("baz").unwrap(), Some(empty)),
+            (&foo, Some(empty)),
+            (&bar, Some(value)),
+            (&baz, Some(empty)),
         ];
-
-        struct MyVisitor;
-        impl Visit for MyVisitor {
-            fn record_debug(&mut self, field: &Field, _: &dyn fmt::Debug) {
-                assert_eq!(field.name(), "bar")
-            }
-        }
+        let mut visitor = MyVisitor {
+            saw_bar: false,
+            saw_other: false,
+        };
         let valueset = fields.value_set(values);
-        valueset.record(&mut MyVisitor);
+        valueset.record(&mut visitor);
+        ensure(visitor.saw_bar, "non-empty bar field is recorded")?;
+        ensure(!visitor.saw_other, "empty fields are skipped")
     }
 
     #[test]
-    fn record_debug_fn() {
+    fn record_debug_fn() -> Result<(), TestFailure> {
+        struct NumericVisitor {
+            total: i64,
+            records: usize,
+        }
+
+        impl Visit for NumericVisitor {
+            fn record_i64(&mut self, _field: &Field, value: i64) {
+                self.total = self.total.saturating_add(value);
+                self.records = self.records.saturating_add(1);
+            }
+
+            fn record_debug(&mut self, _field: &Field, _value: &dyn fmt::Debug) {}
+        }
+
         let fields = TEST_META_1.fields();
+        let (foo, bar, baz) = test_fields(fields)?;
         let one: &dyn Value = &1;
         let two: &dyn Value = &2;
         let three: &dyn Value = &3;
-        let values = &[
-            (&fields.field("foo").unwrap(), Some(one)),
-            (&fields.field("bar").unwrap(), Some(two)),
-            (&fields.field("baz").unwrap(), Some(three)),
-        ];
+        let values = &[(&foo, Some(one)), (&bar, Some(two)), (&baz, Some(three))];
         let valueset = fields.value_set(values);
-        let mut result = String::new();
-        valueset.record(&mut |_: &Field, value: &dyn fmt::Debug| {
-            use core::fmt::Write;
-            write!(&mut result, "{:?}", value).unwrap();
-        });
-        assert_eq!(result, "123".to_owned());
+        let mut visitor = NumericVisitor {
+            total: 0,
+            records: 0,
+        };
+        valueset.record(&mut visitor);
+        ensure_eq(&visitor.total, &6_i64, "numeric values are recorded")?;
+        ensure_eq(&visitor.records, &3_usize, "all numeric values are visited")
     }
 
     #[test]
     #[cfg(feature = "std")]
-    fn record_error() {
+    fn record_error() -> Result<(), TestFailure> {
+        #[derive(Debug)]
+        struct TestError;
+        impl fmt::Display for TestError {
+            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("test error")
+            }
+        }
+        impl Error for TestError {}
+
+        struct ErrorVisitor {
+            rendered: String,
+            saw_foo: bool,
+            saw_other: bool,
+        }
+
+        impl Visit for ErrorVisitor {
+            fn record_error(&mut self, field: &Field, value: &(dyn Error + 'static)) {
+                self.saw_foo = field.name() == "foo";
+                self.rendered = value.to_string();
+            }
+
+            fn record_debug(&mut self, field: &Field, _value: &dyn fmt::Debug) {
+                if field.name() != "foo" {
+                    self.saw_other = true;
+                }
+            }
+        }
+
         let fields = TEST_META_1.fields();
-        let err: Box<dyn std::error::Error + Send + Sync + 'static> =
-            std::io::Error::other("lol").into();
+        let (foo, bar, baz) = test_fields(fields)?;
+        let err: Box<dyn Error + Send + Sync + 'static> = Box::new(TestError);
         let err_value: &dyn Value = &err;
         let empty: &dyn Value = &Empty;
         let values = &[
-            (&fields.field("foo").unwrap(), Some(err_value)),
-            (&fields.field("bar").unwrap(), Some(empty)),
-            (&fields.field("baz").unwrap(), Some(empty)),
+            (&foo, Some(err_value)),
+            (&bar, Some(empty)),
+            (&baz, Some(empty)),
         ];
         let valueset = fields.value_set(values);
-        let mut result = String::new();
-        valueset.record(&mut |_: &Field, value: &dyn fmt::Debug| {
-            use core::fmt::Write;
-            write!(&mut result, "{:?}", value).unwrap();
-        });
-        assert_eq!(result, format!("{}", err));
+        let mut visitor = ErrorVisitor {
+            rendered: String::new(),
+            saw_foo: false,
+            saw_other: false,
+        };
+        valueset.record(&mut visitor);
+        ensure(visitor.saw_foo, "error field is visited")?;
+        ensure(!visitor.saw_other, "empty fields are skipped")?;
+        ensure_eq(
+            &visitor.rendered,
+            &format!("{err}"),
+            "error records through Display",
+        )
     }
 
     #[test]
-    fn record_bytes() {
+    fn record_bytes() -> Result<(), TestFailure> {
+        struct BytesVisitor {
+            first_matches: Option<bool>,
+            second_matches: Option<bool>,
+            saw_other: bool,
+        }
+
+        impl Visit for BytesVisitor {
+            fn record_bytes(&mut self, field: &Field, value: &[u8]) {
+                match field.name() {
+                    "foo" => self.first_matches = Some(value == b"abc"),
+                    "baz" => self.second_matches = Some(value == [192, 255, 238]),
+                    _other => self.saw_other = true,
+                }
+            }
+
+            fn record_debug(&mut self, _field: &Field, _value: &dyn fmt::Debug) {
+                self.saw_other = true;
+            }
+        }
+
         let fields = TEST_META_1.fields();
+        let (foo, _bar, baz) = test_fields(fields)?;
         let first = &b"abc"[..];
         let second: &[u8] = &[192, 255, 238];
         let first_value: &dyn Value = &first;
-        let space: &dyn Value = &" ";
         let second_value: &dyn Value = &second;
-        let values = &[
-            (&fields.field("foo").unwrap(), Some(first_value)),
-            (&fields.field("bar").unwrap(), Some(space)),
-            (&fields.field("baz").unwrap(), Some(second_value)),
-        ];
+        let values = &[(&foo, Some(first_value)), (&baz, Some(second_value))];
         let valueset = fields.value_set(values);
-        let mut result = String::new();
-        valueset.record(&mut |_: &Field, value: &dyn fmt::Debug| {
-            use core::fmt::Write;
-            write!(&mut result, "{:?}", value).unwrap();
-        });
-        assert_eq!(result, format!("{}", r#"[61 62 63]" "[c0 ff ee]"#));
+        let mut visitor = BytesVisitor {
+            first_matches: None,
+            second_matches: None,
+            saw_other: false,
+        };
+        valueset.record(&mut visitor);
+        ensure(
+            visitor.first_matches == Some(true),
+            "first byte field records bytes",
+        )?;
+        ensure(
+            visitor.second_matches == Some(true),
+            "second byte field records bytes",
+        )?;
+        ensure(!visitor.saw_other, "only byte fields are recorded")
     }
 }

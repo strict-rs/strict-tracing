@@ -43,7 +43,7 @@ fn register_callsite_doesnt_deadlock() {
     didnt_hang
         // Note: 60 seconds is *way* more than enough, but let's be generous in
         // case of e.g. slow CI machines.
-        .recv_timeout(Duration::from_secs(60))
+        .recv_timeout(Duration::from_mins(1))
         .expect("the thread must not have hung!");
     th.join().expect("thread should join successfully");
 }

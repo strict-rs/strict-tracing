@@ -306,9 +306,7 @@ pub(in crate::field) mod test_util {
     };
 
     impl Callsite for TestCallsite1 {
-        fn set_interest(&self, _: tracing_core::subscriber::Interest) {
-            unimplemented!()
-        }
+        fn set_interest(&self, _: tracing_core::subscriber::Interest) {}
 
         fn metadata(&self) -> &Metadata<'_> {
             &TEST_META_1

@@ -70,6 +70,7 @@ pub use tracing_core::{LevelFilter, metadata::ParseLevelFilterError};
 /// [module-level documentation]: self#compile-time-filters
 pub const STATIC_MAX_LEVEL: LevelFilter = get_max_level_inner();
 
+/// Return the statically configured maximum trace level for this build.
 const fn get_max_level_inner() -> LevelFilter {
     if !cfg!(debug_assertions) && release_max_level_configured() {
         select_max_level(
@@ -92,6 +93,7 @@ const fn get_max_level_inner() -> LevelFilter {
     }
 }
 
+/// Return whether release builds have an explicit static max-level override.
 const fn release_max_level_configured() -> bool {
     cfg!(feature = "release_max_level_off")
         || cfg!(feature = "release_max_level_error")
@@ -101,6 +103,7 @@ const fn release_max_level_configured() -> bool {
         || cfg!(feature = "release_max_level_trace")
 }
 
+/// Choose the most permissive enabled static max-level feature.
 const fn select_max_level(
     off: bool,
     error: bool,
@@ -129,52 +132,62 @@ const fn select_max_level(
 #[cfg(test)]
 mod tests {
     use super::{LevelFilter, select_max_level};
+    use strict_test_support::{TestFailure, ensure_eq};
 
     #[test]
-    fn select_max_level_defaults_to_trace() {
-        assert_eq!(
-            select_max_level(false, false, false, false, false, false),
-            LevelFilter::TRACE
-        );
+    fn select_max_level_defaults_to_trace() -> Result<(), TestFailure> {
+        ensure_eq(
+            &select_max_level(false, false, false, false, false, false),
+            &LevelFilter::TRACE,
+            "no max-level feature defaults to TRACE",
+        )
     }
 
     #[test]
-    fn select_max_level_preserves_single_restrictive_features() {
-        assert_eq!(
-            select_max_level(true, false, false, false, false, false),
-            LevelFilter::OFF
-        );
-        assert_eq!(
-            select_max_level(false, true, false, false, false, false),
-            LevelFilter::ERROR
-        );
-        assert_eq!(
-            select_max_level(false, false, true, false, false, false),
-            LevelFilter::WARN
-        );
-        assert_eq!(
-            select_max_level(false, false, false, true, false, false),
-            LevelFilter::INFO
-        );
-        assert_eq!(
-            select_max_level(false, false, false, false, true, false),
-            LevelFilter::DEBUG
-        );
+    fn select_max_level_preserves_single_restrictive_features() -> Result<(), TestFailure> {
+        ensure_eq(
+            &select_max_level(true, false, false, false, false, false),
+            &LevelFilter::OFF,
+            "max_level_off maps to OFF",
+        )?;
+        ensure_eq(
+            &select_max_level(false, true, false, false, false, false),
+            &LevelFilter::ERROR,
+            "max_level_error maps to ERROR",
+        )?;
+        ensure_eq(
+            &select_max_level(false, false, true, false, false, false),
+            &LevelFilter::WARN,
+            "max_level_warn maps to WARN",
+        )?;
+        ensure_eq(
+            &select_max_level(false, false, false, true, false, false),
+            &LevelFilter::INFO,
+            "max_level_info maps to INFO",
+        )?;
+        ensure_eq(
+            &select_max_level(false, false, false, false, true, false),
+            &LevelFilter::DEBUG,
+            "max_level_debug maps to DEBUG",
+        )
     }
 
     #[test]
-    fn select_max_level_uses_most_permissive_enabled_feature() {
-        assert_eq!(
-            select_max_level(true, false, false, true, false, false),
-            LevelFilter::INFO
-        );
-        assert_eq!(
-            select_max_level(true, true, true, true, true, false),
-            LevelFilter::DEBUG
-        );
-        assert_eq!(
-            select_max_level(true, true, true, true, true, true),
-            LevelFilter::TRACE
-        );
+    fn select_max_level_uses_most_permissive_enabled_feature() -> Result<(), TestFailure> {
+        ensure_eq(
+            &select_max_level(true, false, false, true, false, false),
+            &LevelFilter::INFO,
+            "more permissive INFO wins over OFF",
+        )?;
+        ensure_eq(
+            &select_max_level(true, true, true, true, true, false),
+            &LevelFilter::DEBUG,
+            "more permissive DEBUG wins over lower levels",
+        )?;
+        ensure_eq(
+            &select_max_level(true, true, true, true, true, true),
+            &LevelFilter::TRACE,
+            "TRACE is the most permissive static level",
+        )
     }
 }

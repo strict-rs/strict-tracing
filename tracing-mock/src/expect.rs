@@ -85,9 +85,7 @@ pub(crate) enum Expect {
 /// handle.assert_finished();
 /// ```
 pub fn event() -> ExpectedEvent {
-    ExpectedEvent {
-        ..Default::default()
-    }
+    ExpectedEvent::default()
 }
 
 /// Construct a new [`ExpectedSpan`].
@@ -131,9 +129,7 @@ pub fn event() -> ExpectedEvent {
 /// handle.assert_finished();
 /// ```
 pub fn span() -> ExpectedSpan {
-    ExpectedSpan {
-        ..Default::default()
-    }
+    ExpectedSpan::default()
 }
 
 /// Construct a new [`ExpectedField`].

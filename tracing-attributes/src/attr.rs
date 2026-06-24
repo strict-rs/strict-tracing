@@ -1,4 +1,5 @@
-use std::collections::HashSet;
+use core::marker::PhantomData;
+
 use syn::{Expr, Ident, LitInt, LitStr, Path, Token, punctuated::Punctuated};
 
 use proc_macro2::TokenStream;
@@ -10,19 +11,19 @@ use syn::token::Brace;
 /// Arguments to `#[instrument(err(...))]` and `#[instrument(ret(...))]` which describe how the
 /// return value event should be emitted.
 #[derive(Clone, Default, Debug)]
-pub(crate) struct EventArgs {
+pub struct EventArgs {
     level: Option<Level>,
     pub(crate) mode: FormatMode,
 }
 
 #[derive(Clone, Default, Debug)]
-pub(crate) struct InstrumentArgs {
+pub struct InstrumentArgs {
     level: Option<Level>,
     pub(crate) name: Option<LitStrOrIdent>,
     target: Option<LitStrOrIdent>,
     pub(crate) parent: Option<Expr>,
     pub(crate) follows_from: Option<Expr>,
-    pub(crate) skips: HashSet<Ident>,
+    pub(crate) skips: Vec<Ident>,
     pub(crate) skip_all: bool,
     pub(crate) fields: Option<Fields>,
     pub(crate) err_args: Option<EventArgs>,
@@ -52,14 +53,13 @@ impl InstrumentArgs {
     /// the only way to do this on stable Rust right now.
     pub(crate) fn warnings(&self) -> impl ToTokens + use<> {
         let warnings = self.parse_warnings.iter().map(|err| {
-            let msg = format!("found unrecognized input, {}", err);
+            let msg = format!("found unrecognized input, {err}");
             let msg = LitStr::new(&msg, err.span());
             // TODO(eliza): This is a bit of a hack, but it's just about the
             // only way to emit warnings from a proc macro on stable Rust.
             // Eventually, when the `proc_macro::Diagnostic` API stabilizes, we
             // should definitely use that instead.
             quote_spanned! {err.span()=>
-                #[warn(deprecated)]
                 {
                     #[deprecated(since = "not actually deprecated", note = #msg)]
                     const TRACING_INSTRUMENT_WARNING: () = ();
@@ -216,7 +216,7 @@ impl Parse for EventArgs {
 }
 
 #[derive(Debug, Clone)]
-pub(super) enum LitStrOrIdent {
+pub enum LitStrOrIdent {
     LitStr(LitStr),
     Ident(Ident),
 }
@@ -224,8 +224,8 @@ pub(super) enum LitStrOrIdent {
 impl ToTokens for LitStrOrIdent {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match self {
-            LitStrOrIdent::LitStr(target) => target.to_tokens(tokens),
-            LitStrOrIdent::Ident(ident) => ident.to_tokens(tokens),
+            Self::LitStr(target) => target.to_tokens(tokens),
+            Self::Ident(ident) => ident.to_tokens(tokens),
         }
     }
 }
@@ -241,7 +241,7 @@ impl Parse for LitStrOrIdent {
 
 struct StrArg<T> {
     value: LitStrOrIdent,
-    _p: std::marker::PhantomData<T>,
+    _p: PhantomData<T>,
 }
 
 impl<T: Parse> Parse for StrArg<T> {
@@ -251,14 +251,14 @@ impl<T: Parse> Parse for StrArg<T> {
         let value = input.parse()?;
         Ok(Self {
             value,
-            _p: std::marker::PhantomData,
+            _p: PhantomData,
         })
     }
 }
 
 struct ExprArg<T> {
     value: Expr,
-    _p: std::marker::PhantomData<T>,
+    _p: PhantomData<T>,
 }
 
 impl<T: Parse> Parse for ExprArg<T> {
@@ -268,12 +268,12 @@ impl<T: Parse> Parse for ExprArg<T> {
         let value = input.parse()?;
         Ok(Self {
             value,
-            _p: std::marker::PhantomData,
+            _p: PhantomData,
         })
     }
 }
 
-struct Skips(HashSet<Ident>);
+struct Skips(Vec<Ident>);
 
 impl Parse for Skips {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
@@ -281,19 +281,20 @@ impl Parse for Skips {
         let content;
         let _ = syn::parenthesized!(content in input);
         let names = content.parse_terminated(Ident::parse_any, Token![,])?;
-        let mut skips = HashSet::new();
+        let mut skips = Vec::new();
         for name in names {
             let span = name.span();
-            if !skips.insert(name) {
+            if skips.iter().any(|existing| existing == &name) {
                 return Err(syn::Error::new(span, "tried to skip the same field twice"));
             }
+            skips.push(name);
         }
         Ok(Self(skips))
     }
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, Default)]
-pub(crate) enum FormatMode {
+pub enum FormatMode {
     #[default]
     Default,
     Display,
@@ -301,24 +302,24 @@ pub(crate) enum FormatMode {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct Fields(pub(crate) Punctuated<Field, Token![,]>);
+pub struct Fields(pub(crate) Punctuated<Field, Token![,]>);
 
 #[derive(Clone, Debug)]
-pub(crate) struct Field {
+pub struct Field {
     pub(crate) name: FieldName,
     pub(crate) value: Option<Expr>,
     pub(crate) kind: FieldKind,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum FieldKind {
+pub enum FieldKind {
     Debug,
     Display,
     Value,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum FieldName {
+pub enum FieldName {
     Expr(Expr),
     Punctuated(Punctuated<Ident, Token![.]>),
 }
@@ -326,10 +327,10 @@ pub(crate) enum FieldName {
 impl ToTokens for FieldName {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match self {
-            FieldName::Expr(expr) => {
+            Self::Expr(expr) => {
                 Brace::default().surround(tokens, |tokens| expr.to_tokens(tokens));
             }
-            FieldName::Punctuated(punctuated) => punctuated.to_tokens(tokens),
+            Self::Punctuated(punctuated) => punctuated.to_tokens(tokens),
         }
     }
 }
@@ -346,7 +347,7 @@ impl Parse for Fields {
 
 impl ToTokens for Fields {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        self.0.to_tokens(tokens)
+        self.0.to_tokens(tokens);
     }
 }
 
@@ -359,7 +360,7 @@ impl Parse for Field {
         } else if input.peek(Token![?]) {
             let _question: Token![?] = input.parse()?;
             kind = FieldKind::Debug;
-        };
+        }
         // Parse name as either an expr between braces or a dotted identifier.
         let name = if input.peek(Brace) {
             let content;
@@ -380,7 +381,7 @@ impl Parse for Field {
             } else if input.peek(Token![?]) {
                 let _question: Token![?] = input.parse()?;
                 kind = FieldKind::Debug;
-            };
+            }
             Some(input.parse()?)
         } else {
             None
@@ -396,7 +397,7 @@ impl ToTokens for Field {
             let kind = &self.kind;
             tokens.extend(quote! {
                 #name = #kind #value
-            })
+            });
         } else if self.kind == FieldKind::Value {
             // XXX(eliza): I don't like that fields without values produce
             // empty fields rather than local variable shorthand...but,
@@ -404,7 +405,7 @@ impl ToTokens for Field {
             // `instrument` produce empty field values, so changing it now
             // is a breaking change. agh.
             let name = &self.name;
-            tokens.extend(quote!(#name = ::tracing::field::Empty))
+            tokens.extend(quote!(#name = ::tracing::field::Empty));
         } else {
             self.kind.to_tokens(tokens);
             self.name.to_tokens(tokens);
@@ -415,15 +416,15 @@ impl ToTokens for Field {
 impl ToTokens for FieldKind {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match self {
-            FieldKind::Debug => tokens.extend(quote! { ? }),
-            FieldKind::Display => tokens.extend(quote! { % }),
+            Self::Debug => tokens.extend(quote! { ? }),
+            Self::Display => tokens.extend(quote! { % }),
             _ => {}
         }
     }
 }
 
 #[derive(Clone, Debug)]
-pub(crate) enum Level {
+pub enum Level {
     Trace,
     Debug,
     Info,
@@ -440,11 +441,11 @@ impl Parse for Level {
         if lookahead.peek(LitStr) {
             let str: LitStr = input.parse()?;
             match str.value() {
-                s if s.eq_ignore_ascii_case("trace") => Ok(Level::Trace),
-                s if s.eq_ignore_ascii_case("debug") => Ok(Level::Debug),
-                s if s.eq_ignore_ascii_case("info") => Ok(Level::Info),
-                s if s.eq_ignore_ascii_case("warn") => Ok(Level::Warn),
-                s if s.eq_ignore_ascii_case("error") => Ok(Level::Error),
+                s if s.eq_ignore_ascii_case("trace") => Ok(Self::Trace),
+                s if s.eq_ignore_ascii_case("debug") => Ok(Self::Debug),
+                s if s.eq_ignore_ascii_case("info") => Ok(Self::Info),
+                s if s.eq_ignore_ascii_case("warn") => Ok(Self::Warn),
+                s if s.eq_ignore_ascii_case("error") => Ok(Self::Error),
                 _ => Err(input.error(
                     "unknown verbosity level, expected one of \"trace\", \
                      \"debug\", \"info\", \"warn\", or \"error\", or a number 1-5",
@@ -459,11 +460,11 @@ impl Parse for Level {
             }
             let int: LitInt = input.parse()?;
             match &int {
-                i if is_level(i, 1) => Ok(Level::Trace),
-                i if is_level(i, 2) => Ok(Level::Debug),
-                i if is_level(i, 3) => Ok(Level::Info),
-                i if is_level(i, 4) => Ok(Level::Warn),
-                i if is_level(i, 5) => Ok(Level::Error),
+                i if is_level(i, 1) => Ok(Self::Trace),
+                i if is_level(i, 2) => Ok(Self::Debug),
+                i if is_level(i, 3) => Ok(Self::Info),
+                i if is_level(i, 4) => Ok(Self::Warn),
+                i if is_level(i, 5) => Ok(Self::Error),
                 _ => Err(input.error(
                     "unknown verbosity level, expected one of \"trace\", \
                      \"debug\", \"info\", \"warn\", or \"error\", or a number 1-5",
@@ -480,12 +481,12 @@ impl Parse for Level {
 impl ToTokens for Level {
     fn to_tokens(&self, tokens: &mut TokenStream) {
         match self {
-            Level::Trace => tokens.extend(quote!(::tracing::Level::TRACE)),
-            Level::Debug => tokens.extend(quote!(::tracing::Level::DEBUG)),
-            Level::Info => tokens.extend(quote!(::tracing::Level::INFO)),
-            Level::Warn => tokens.extend(quote!(::tracing::Level::WARN)),
-            Level::Error => tokens.extend(quote!(::tracing::Level::ERROR)),
-            Level::Path(pat) => tokens.extend(quote!(#pat)),
+            Self::Trace => tokens.extend(quote!(::tracing::Level::TRACE)),
+            Self::Debug => tokens.extend(quote!(::tracing::Level::DEBUG)),
+            Self::Info => tokens.extend(quote!(::tracing::Level::INFO)),
+            Self::Warn => tokens.extend(quote!(::tracing::Level::WARN)),
+            Self::Error => tokens.extend(quote!(::tracing::Level::ERROR)),
+            Self::Path(pat) => tokens.extend(quote!(#pat)),
         }
     }
 }

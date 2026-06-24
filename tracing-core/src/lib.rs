@@ -124,29 +124,6 @@
     issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg), deny(rustdoc::broken_intra_doc_links))]
-#![warn(
-    missing_debug_implementations,
-    missing_docs,
-    rust_2018_idioms,
-    unreachable_pub,
-    bad_style,
-    dead_code,
-    improper_ctypes,
-    non_shorthand_field_patterns,
-    no_mangle_generic_items,
-    overflowing_literals,
-    path_statements,
-    patterns_in_fns_without_body,
-    private_interfaces,
-    private_bounds,
-    unconditional_recursion,
-    unused,
-    unused_allocation,
-    unused_comparisons,
-    unused_parens,
-    while_true
-)]
-
 extern crate alloc;
 
 #[cfg(feature = "std")]
@@ -260,7 +237,7 @@ macro_rules! metadata {
             $crate::__macro_support::Option::Some($crate::__macro_support::file!()),
             $crate::__macro_support::Option::Some($crate::__macro_support::line!()),
             $crate::__macro_support::Option::Some($crate::__macro_support::module_path!()),
-            $crate::field::FieldSet::new($fields, $crate::identify_callsite!($callsite)),
+            &$crate::field::FieldSet::new($fields, $crate::identify_callsite!($callsite)),
             $kind,
         )
     };
@@ -278,14 +255,12 @@ pub mod dispatcher;
 pub mod event;
 pub mod field;
 pub mod metadata;
-mod parent;
+/// Shared parent relationship state for spans and events.
+pub(crate) mod parent;
 pub mod span;
 pub mod subscriber;
-#[cfg(not(feature = "std"))]
-mod sync;
-
-#[cfg(feature = "std")]
-pub(crate) use std::sync;
+/// Synchronization primitives selected for `std` and `no_std` builds.
+pub(crate) mod sync;
 
 #[doc(inline)]
 pub use self::{
@@ -299,6 +274,8 @@ pub use self::{
 
 pub use self::{metadata::Kind, subscriber::Interest};
 
+/// Sealed extension points that prevent downstream trait implementations.
 mod sealed {
+    /// Seals traits that must not be implemented outside this crate.
     pub trait Sealed {}
 }

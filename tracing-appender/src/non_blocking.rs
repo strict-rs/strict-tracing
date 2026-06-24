@@ -411,7 +411,7 @@ mod test {
     }
 
     #[test]
-    #[ignore] // flaky, see https://github.com/tokio-rs/tracing/issues/751
+    #[ignore = "flaky timing-sensitive channel backpressure test; see tokio-rs/tracing#751"]
     fn logs_dropped_if_lossy() {
         let (mock_writer, rx) = MockWriter::new(1);
 

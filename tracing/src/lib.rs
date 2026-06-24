@@ -562,7 +562,7 @@
 //! # pub struct FooSubscriber;
 //! # use tracing::{span::{Id, Attributes, Record}, Metadata};
 //! # impl tracing::Subscriber for FooSubscriber {
-//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(0) }
+//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(1) }
 //! #   fn record(&self, _: &Id, _: &Record) {}
 //! #   fn event(&self, _: &tracing::Event) {}
 //! #   fn record_follows_from(&self, _: &Id, _: &Id) {}
@@ -600,7 +600,7 @@
 //! # pub struct FooSubscriber;
 //! # use tracing::{span::{Id, Attributes, Record}, Metadata};
 //! # impl tracing::Subscriber for FooSubscriber {
-//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(0) }
+//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(1) }
 //! #   fn record(&self, _: &Id, _: &Record) {}
 //! #   fn event(&self, _: &tracing::Event) {}
 //! #   fn record_follows_from(&self, _: &Id, _: &Id) {}
@@ -624,7 +624,8 @@
 //!
 //! This approach allows trace data to be collected by multiple subscribers
 //! within different contexts in the program. Note that the override only applies to the
-//! currently executing thread; other threads will not see the change from with_default.
+//! currently executing thread; other threads will not see the change from
+//! `with_default`.
 //!
 //! Any trace events generated outside the context of a subscriber will not be collected.
 //!
@@ -644,8 +645,8 @@
 //!
 //! ### Emitting `log` Records
 //!
-//! This crate provides two feature flags, "log" and "log-always", which will
-//! cause [spans] and [events] to emit `log` records. When the "log" feature is
+//! This crate provides two feature flags, `log` and `log-always`, which will
+//! cause [spans] and [events] to emit `log` records. When the `log` feature is
 //! enabled, if no `tracing` `Subscriber` is active, invoking an event macro or
 //! creating a span with fields will emit a `log` record. This is intended
 //! primarily for use in libraries which wish to emit diagnostics that can be
@@ -653,11 +654,11 @@
 //! additional overhead of emitting both forms of diagnostics when `tracing` is
 //! in use.
 //!
-//! Enabling the "log-always" feature will cause `log` records to be emitted
+//! Enabling the `log-always` feature will cause `log` records to be emitted
 //! even if a `tracing` `Subscriber` _is_ set. This is intended to be used in
 //! applications where a `log` `Logger` is being used to record a textual log,
-//! and `tracing` is used only to record other forms of diagnostics (such as
-//! metrics, profiling, or distributed tracing data). Unlike the "log" feature,
+//! and `tracing` is used only to record other forms of diagnostics, such as
+//! metrics, profiling, or distributed tracing data. Unlike the `log` feature,
 //! libraries generally should **not** enable the "log-always" feature, as doing
 //! so will prevent applications from being able to opt out of the `log` records.
 //!
@@ -671,8 +672,8 @@
 //! the potential to be very verbose, and don't include additional fields, they
 //! will always be emitted at the `Trace` level, rather than inheriting the
 //! level of the span that generated them. Furthermore, they are categorized
-//! under a separate `log` target, "tracing::span" (and its sub-target,
-//! "tracing::span::active", for the logs on entering and exiting a span), which
+//! under a separate `log` target, `tracing::span` and its sub-target
+//! `tracing::span::active`, for the logs on entering and exiting a span, which
 //! may be enabled or disabled separately from other `log` records emitted by
 //! `tracing`.
 //!
@@ -754,7 +755,7 @@
 //!  - [`tracing-loki`] provides a layer for shipping logs to [Grafana Loki].
 //!  - [`tracing-logfmt`] provides a layer that formats events and spans into the logfmt format.
 //!  - [`reqwest-tracing`] provides a middleware to trace [`reqwest`] HTTP requests.
-//!  - [`tracing-cloudwatch`] provides a layer that sends events to AWS CloudWatch Logs.
+//!  - [`tracing-cloudwatch`] provides a layer that sends events to `AWS CloudWatch Logs`.
 //!  - [`clippy-tracing`] provides a tool to add, remove and check for `tracing::instrument`.
 //!  - [`json-subscriber`] provides a subscriber for emitting JSON logs. The output can be customized much more than with [`tracing-subscriber`]'s JSON output.
 //!
@@ -920,35 +921,11 @@
     html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
     issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
-#![warn(
-    missing_debug_implementations,
-    missing_docs,
-    rust_2018_idioms,
-    unreachable_pub,
-    bad_style,
-    dead_code,
-    improper_ctypes,
-    non_shorthand_field_patterns,
-    no_mangle_generic_items,
-    overflowing_literals,
-    path_statements,
-    patterns_in_fns_without_body,
-    private_interfaces,
-    private_bounds,
-    unconditional_recursion,
-    unused,
-    unused_allocation,
-    unused_comparisons,
-    unused_parens,
-    while_true
-)]
-
 #[cfg(feature = "std")]
 extern crate std;
 
 // Somehow this `use` statement is necessary for us to re-export the `core`
 // macros on Rust 1.26.0. I'm not sure how this makes it work, but it does.
-#[allow(unused_imports)]
 #[doc(hidden)]
 use tracing_core::*;
 
@@ -973,6 +950,7 @@ pub use self::span::Span;
 #[doc(inline)]
 pub use tracing_attributes::instrument;
 
+/// Exported instrumentation macro definitions.
 #[macro_use]
 mod macros;
 
@@ -984,11 +962,17 @@ pub mod level_filters;
 pub mod span;
 pub mod subscriber;
 
+/// Hidden support APIs used by `tracing`'s macros.
 #[doc(hidden)]
 pub mod __macro_support {
+
     pub use crate::callsite::Callsite;
-    use crate::{Metadata, subscriber::Interest};
+    use crate::{
+        Metadata, Span, dispatcher::get_default, field::Field, metadata::Kind, subscriber::Interest,
+    };
     use core::{fmt, str};
+    #[cfg(feature = "log")]
+    use tracing_core::field::ValueSet;
     // Re-export the `core` functions that are used in macros. This allows
     // a crate to be named `core` and avoid name clashes.
     // See here: https://github.com/tokio-rs/tracing/issues/2761
@@ -1011,7 +995,7 @@ pub mod __macro_support {
     /// Breaking changes to this module may occur in small-numbered versions
     /// without warning.
     pub fn __is_enabled(meta: &Metadata<'static>, interest: Interest) -> bool {
-        interest.is_always() || crate::dispatcher::get_default(|default| default.enabled(meta))
+        interest.is_always() || get_default(|default| default.enabled(meta))
     }
 
     /// /!\ WARNING: This is *not* a stable API! /!\
@@ -1022,8 +1006,8 @@ pub mod __macro_support {
     /// without warning.
     #[inline]
     #[cfg(feature = "log")]
-    pub fn __disabled_span(meta: &'static Metadata<'static>) -> crate::Span {
-        crate::Span::new_disabled(meta)
+    pub fn __disabled_span(meta: &'static Metadata<'static>) -> Span {
+        Span::new_disabled(meta)
     }
 
     /// /!\ WARNING: This is *not* a stable API! /!\
@@ -1034,8 +1018,8 @@ pub mod __macro_support {
     /// without warning.
     #[inline]
     #[cfg(not(feature = "log"))]
-    pub fn __disabled_span(_: &'static Metadata<'static>) -> crate::Span {
-        crate::Span::none()
+    pub fn __disabled_span(_: &'static Metadata<'static>) -> Span {
+        Span::none()
     }
 
     /// /!\ WARNING: This is *not* a stable API! /!\
@@ -1049,7 +1033,7 @@ pub mod __macro_support {
         meta: &Metadata<'static>,
         logger: &'static dyn log::Log,
         log_meta: log::Metadata<'_>,
-        values: &tracing_core::field::ValueSet<'_>,
+        values: &ValueSet<'_>,
     ) {
         logger.log(
             &crate::log::Record::builder()
@@ -1077,7 +1061,7 @@ pub mod __macro_support {
         /// Convert `"prefix.r#keyword.suffix"` to `b"prefix.keyword.suffix"`.
         pub const fn new(input: &str) -> Self {
             let input = input.as_bytes();
-            let mut output = [0u8; N];
+            let mut output = [0_u8; N];
             let mut read = 0;
             let mut write = 0;
             while read < input.len() {
@@ -1088,7 +1072,10 @@ pub mod __macro_support {
                 read += 1;
                 write += 1;
             }
-            assert!(write == N);
+            assert!(
+                write == N,
+                "raw field name length must match the output buffer"
+            );
             Self(output)
         }
 
@@ -1127,22 +1114,22 @@ pub mod __macro_support {
         }
     }
 
-    static CALLSITE: crate::callsite::DefaultCallsite =
-        crate::callsite::DefaultCallsite::new(&META);
+    static CALLSITE: MacroCallsite = MacroCallsite::new(&META);
     static META: Metadata<'static> = crate::metadata! {
         name: "__fake_tracing_callsite",
         target: module_path!(),
         level: crate::Level::TRACE,
         fields: crate::fieldset!(),
         callsite: &CALLSITE,
-        kind: crate::metadata::Kind::SPAN,
+        kind: Kind::SPAN,
     };
-    pub static FAKE_FIELD: crate::field::Field = META.private_fake_field();
+    pub static FAKE_FIELD: Field = META.private_fake_field();
 }
 
 #[cfg(feature = "log")]
 #[doc(hidden)]
 pub mod log {
+
     use core::fmt;
     pub use log::*;
     use tracing_core::field::{Field, ValueSet, Visit};
@@ -1199,6 +1186,8 @@ pub mod log {
     }
 }
 
+/// Sealed trait support for extension traits in this crate.
 mod sealed {
+    /// Marker trait preventing external implementations.
     pub trait Sealed {}
 }

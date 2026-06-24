@@ -1,4 +1,4 @@
-use snafu::{ResultExt, Snafu};
+use snafu::{ResultExt as _, Snafu};
 use std::error::Error;
 use thiserror::Error;
 use tracing::{debug, error, info, span, trace, warn, Level};
@@ -21,9 +21,8 @@ pub(crate) fn shave(yak: usize) -> Result<(), Box<dyn Error + Send + Sync + 'sta
             .map_err(|source| MissingYakError::OutOfSpace { source })
             .context(MissingYakSnafu)
             .map_err(|err| err.into());
-    } else {
-        trace!("yak shaved successfully");
     }
+    trace!("yak shaved successfully");
     Ok(())
 }
 

@@ -1,5 +1,4 @@
 //! Tests filters with equal-length directive strings.
-
 // These tests include field filters with no targets, so they have to go in a
 // separate file.
 #![cfg(feature = "env-filter")]

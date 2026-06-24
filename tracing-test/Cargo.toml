@@ -21,6 +21,9 @@ publish = false
 [dependencies]
 tokio-test = { workspace = true }
 
+[dev-dependencies]
+strict-test-support = { workspace = true }
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

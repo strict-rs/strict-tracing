@@ -47,11 +47,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
+    - uses: dtolnay/rust-toolchain@nightly
       with:
         components: rustfmt
     - name: rustfmt
-      run: cargo fmt --all -- --check
+      run: cargo +nightly fmt --all -- --check
 
   warnings:
     # Check for any warnings. This is informational and thus is allowed to fail.
@@ -121,7 +121,7 @@ jobs:
       shell: bash
 
   check-msrv:
-    # Run `cargo check` on our minimum supported Rust version (1.65.0). This
+    # Run `cargo check` on our minimum supported Rust version (1.96.0). This
     # checks with minimal versions; maximal versions are checked above.
     name: "cargo check (+MSRV -Zminimal-versions)"
     needs: check
@@ -143,7 +143,7 @@ jobs:
         - tracing-tower
         - tracing
         toolchain:
-        - 1.65.0
+        - 1.96.0
         - stable
     steps:
     - uses: actions/checkout@v4

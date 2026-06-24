@@ -1,13 +1,13 @@
 use std::iter;
 
 use proc_macro2::TokenStream;
-use quote::TokenStreamExt;
+use quote::TokenStreamExt as _;
 use quote::{ToTokens, quote, quote_spanned};
 use syn::visit_mut::VisitMut;
 use syn::{
     Expr, ExprAsync, ExprCall, FieldPat, FnArg, Ident, Item, ItemFn, Pat, PatIdent, PatReference,
     PatStruct, PatTuple, PatTupleStruct, PatType, Path, ReturnType, Signature, Stmt, Token, Type,
-    TypePath, punctuated::Punctuated, spanned::Spanned,
+    TypePath, punctuated::Punctuated, spanned::Spanned as _,
 };
 
 use crate::{
@@ -16,7 +16,7 @@ use crate::{
 };
 
 /// Given an existing function, generate an instrumented version of that function
-pub(crate) fn gen_function<'a, B: ToTokens + 'a>(
+pub fn gen_function<'a, B: ToTokens + 'a>(
     input: MaybeItemFnRef<'a, B>,
     args: InstrumentArgs,
     instrumented_function_name: &str,
@@ -65,20 +65,9 @@ pub(crate) fn gen_function<'a, B: ToTokens + 'a>(
     // Install a fake return statement as the first thing in the function
     // body, so that we eagerly infer that the return type is what we
     // declared in the async fn signature.
-    // The `#[allow(..)]` is given because the return statement is
-    // unreachable, but does affect inference, so it needs to be written
-    // exactly that way for it to do its magic.
+    // The return statement is unreachable, but it affects inference, so it
+    // needs to be written exactly this way for it to do its magic.
     let fake_return_edge = quote_spanned! {return_span=>
-        #[allow(
-            unknown_lints,
-            unreachable_code,
-            clippy::diverging_sub_expression,
-            clippy::empty_loop,
-            clippy::let_unit_value,
-            clippy::let_with_type_underscore,
-            clippy::needless_return,
-            clippy::unreachable
-        )]
         if false {
             let __tracing_attr_fake_return: #return_type = loop {};
             return __tracing_attr_fake_return;
@@ -137,8 +126,7 @@ fn gen_block<B: ToTokens>(
         // did the user override the span's name?
         .name
         .as_ref()
-        .map(|name| quote!(#name))
-        .unwrap_or_else(|| quote!(#instrumented_function_name));
+        .map_or_else(|| quote!(#instrumented_function_name), |name| quote!(#name));
 
     let args_level = args.level();
     let level = args_level.clone();
@@ -308,7 +296,6 @@ fn gen_block<B: ToTokens>(
                 async move {
                     let __match_scrutinee = async move #block.await;
                     match  __match_scrutinee {
-                        #[allow(clippy::unit_arg)]
                         Ok(x) => {
                             #ret_event;
                             Ok(x)
@@ -323,7 +310,6 @@ fn gen_block<B: ToTokens>(
             (Some(err_event), None) => quote_spanned!(block.span()=>
                 async move {
                     match async move #block.await {
-                        #[allow(clippy::unit_arg)]
                         Ok(x) => Ok(x),
                         Err(e) => {
                             #err_event;
@@ -347,7 +333,6 @@ fn gen_block<B: ToTokens>(
         return quote!(
             let __tracing_attr_span = #span;
             let __tracing_instrument_future = #mk_fut;
-            #[allow(clippy::implicit_return)]
             if !__tracing_attr_span.is_disabled() {
                 #follows_from
                 ::tracing::Instrument::instrument(
@@ -384,9 +369,7 @@ fn gen_block<B: ToTokens>(
     match (err_event, ret_event) {
         (Some(err_event), Some(ret_event)) => quote_spanned! {block.span()=>
             #span
-            #[allow(clippy::redundant_closure_call)]
             match (move || #block)() {
-                #[allow(clippy::unit_arg)]
                 Ok(x) => {
                     #ret_event;
                     Ok(x)
@@ -399,9 +382,7 @@ fn gen_block<B: ToTokens>(
         },
         (Some(err_event), None) => quote_spanned!(block.span()=>
             #span
-            #[allow(clippy::redundant_closure_call)]
             match (move || #block)() {
-                #[allow(clippy::unit_arg)]
                 Ok(x) => Ok(x),
                 Err(e) => {
                     #err_event;
@@ -411,7 +392,6 @@ fn gen_block<B: ToTokens>(
         ),
         (None, Some(ret_event)) => quote_spanned!(block.span()=>
             #span
-            #[allow(clippy::redundant_closure_call)]
             let x = (move || #block)();
             #ret_event;
             x
@@ -421,11 +401,8 @@ fn gen_block<B: ToTokens>(
             // `if` and the block will appear directly next to each other. This
             // generates a clippy lint about suspicious `if/else` formatting.
             // Therefore, suppress the lint inside the generated code...
-            #[allow(clippy::suspicious_else_formatting)]
             {
                 #span
-                // ...but turn the lint back on inside the function body.
-                #[warn(clippy::suspicious_else_formatting)]
                 #block
             }
         ),
@@ -441,7 +418,7 @@ enum RecordType {
 }
 
 impl RecordType {
-    /// Array of primitive types which should be recorded as [RecordType::Value].
+    /// Array of primitive types which should be recorded as [`RecordType::Value`].
     const TYPES_FOR_VALUE: &'static [&'static str] = &[
         "bool",
         "str",
@@ -476,7 +453,7 @@ impl RecordType {
     ];
 
     /// Parse `RecordType` from [Type] by looking up
-    /// the [RecordType::TYPES_FOR_VALUE] array.
+    /// the [`RecordType::TYPES_FOR_VALUE`] array.
     fn parse_from_ty(ty: &Type) -> Self {
         match ty {
             Type::Path(TypePath { path, .. })
@@ -484,16 +461,15 @@ impl RecordType {
                     .segments
                     .iter()
                     .next_back()
-                    .map(|path_segment| {
+                    .is_some_and(|path_segment| {
                         let ident = path_segment.ident.to_string();
                         Self::TYPES_FOR_VALUE.iter().any(|&t| t == ident)
-                    })
-                    .unwrap_or(false) =>
+                    }) =>
             {
-                RecordType::Value
+                Self::Value
             }
-            Type::Reference(syn::TypeReference { elem, .. }) => RecordType::parse_from_ty(elem),
-            _ => RecordType::Debug,
+            Type::Reference(syn::TypeReference { elem, .. }) => Self::parse_from_ty(elem),
+            _ => Self::Debug,
         }
     }
 }
@@ -544,7 +520,7 @@ enum AsyncKind<'a> {
     },
 }
 
-pub(crate) struct AsyncInfo<'block> {
+pub struct AsyncInfo<'block> {
     // statement that must be patched
     source_stmt: &'block Stmt,
     kind: AsyncKind<'block>,
@@ -573,11 +549,11 @@ impl<'block> AsyncInfo<'block> {
     ///
     /// We the return the statement that must be instrumented, along with some
     /// other information.
-    /// 'gen_body' will then be able to use that information to instrument the
+    /// '`gen_body`' will then be able to use that information to instrument the
     /// proper function/future.
     ///
     /// (this follows the approach suggested in
-    /// https://github.com/dtolnay/async-trait/issues/45#issuecomment-571245673)
+    /// <https://github.com/dtolnay/async-trait/issues/45#issuecomment-571245673>)
     pub(crate) fn from_fn(input: &'block ItemFn) -> Option<Self> {
         // are we in an async context? If yes, this isn't a manual async-like pattern
         if input.sig.asyncness.is_some() {
@@ -707,32 +683,34 @@ impl<'block> AsyncInfo<'block> {
         self,
         args: InstrumentArgs,
         instrumented_function_name: &str,
-    ) -> Result<proc_macro::TokenStream, syn::Error> {
-        // let's rewrite some statements!
-        let mut out_stmts: Vec<TokenStream> = self
-            .input
-            .block
-            .stmts
-            .iter()
-            .map(|stmt| stmt.to_token_stream())
-            .collect();
-
-        if let Some((iter, _stmt)) = self
+    ) -> proc_macro::TokenStream {
+        let replacement_index = self
             .input
             .block
             .stmts
             .iter()
             .enumerate()
             .find(|(_iter, stmt)| *stmt == self.source_stmt)
-        {
-            // instrument the future by rewriting the corresponding statement
-            out_stmts[iter] = match self.kind {
+            .map(|(stmt_index, _stmt)| stmt_index);
+
+        let out_stmts: Vec<TokenStream> = self
+            .input
+            .block
+            .stmts
+            .iter()
+            .enumerate()
+            .map(|(stmt_index, stmt)| {
+                if Some(stmt_index) != replacement_index {
+                    return stmt.to_token_stream();
+                }
+
+                match &self.kind {
                 // `Box::pin(immediately_invoked_async_fn())`
                 AsyncKind::Function(fun) => {
-                    let fun = MaybeItemFn::from(fun.clone());
+                    let fun = MaybeItemFn::from((*fun).clone());
                     gen_function(
                         fun.as_ref(),
-                        args,
+                        args.clone(),
                         instrumented_function_name,
                         self.self_type.as_ref(),
                     )
@@ -746,12 +724,12 @@ impl<'block> AsyncInfo<'block> {
                         &async_expr.block,
                         &self.input.sig.inputs,
                         true,
-                        args,
+                        args.clone(),
                         instrumented_function_name,
                         None,
                     );
                     let async_attrs = &async_expr.attrs;
-                    if pinned_box {
+                    if *pinned_box {
                         quote! {
                             ::std::boxed::Box::pin(#(#async_attrs) * async move { #instrumented_block })
                         }
@@ -761,35 +739,36 @@ impl<'block> AsyncInfo<'block> {
                         }
                     }
                 }
-            };
-        }
+                }
+            })
+            .collect();
 
         let vis = &self.input.vis;
         let sig = &self.input.sig;
         let attrs = &self.input.attrs;
-        Ok(quote!(
+        quote!(
             #(#attrs) *
             #vis #sig {
                 #(#out_stmts) *
             }
         )
-        .into())
+        .into()
     }
 }
 
 // Return a path as a String
 fn path_to_string(path: &Path) -> String {
-    use std::fmt::Write;
-    // some heuristic to prevent too many allocations
-    let mut res = String::with_capacity(path.segments.len() * 5);
-    for i in 0..path.segments.len() {
-        write!(&mut res, "{}", path.segments[i].ident)
-            .expect("writing to a String should never fail");
-        if i < path.segments.len() - 1 {
-            res.push_str("::");
-        }
+    let mut segments = path.segments.iter();
+    let Some(first_segment) = segments.next() else {
+        return String::new();
+    };
+
+    let mut rendered = first_segment.ident.to_string();
+    for segment in segments {
+        rendered.push_str("::");
+        rendered.push_str(&segment.ident.to_string());
     }
-    res
+    rendered
 }
 
 /// A visitor struct to replace idents and types in some piece
@@ -804,10 +783,9 @@ struct IdentAndTypesRenamer<'a> {
 impl VisitMut for IdentAndTypesRenamer<'_> {
     // we deliberately compare strings because we want to ignore the spans
     // If we apply clippy's lint, the behavior changes
-    #[allow(clippy::cmp_owned)]
     fn visit_ident_mut(&mut self, id: &mut Ident) {
         for (old_ident, new_ident) in &self.idents {
-            if id.to_string() == old_ident.to_string() {
+            if *old_ident == id.to_string() {
                 *id = new_ident.clone();
             }
         }

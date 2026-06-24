@@ -177,33 +177,10 @@
     // Fail the docs build if any intra-docs links are broken
     deny(rustdoc::broken_intra_doc_links),
 )]
-#![warn(
-    missing_debug_implementations,
-    missing_docs,
-    rust_2018_idioms,
-    unreachable_pub,
-    bad_style,
-    dead_code,
-    improper_ctypes,
-    non_shorthand_field_patterns,
-    no_mangle_generic_items,
-    overflowing_literals,
-    path_statements,
-    patterns_in_fns_without_body,
-    private_interfaces,
-    private_bounds,
-    unconditional_recursion,
-    unused,
-    unused_allocation,
-    unused_comparisons,
-    unused_parens,
-    while_true
-)]
 // Using struct update syntax when a struct has no additional fields avoids
 // a potential source change if additional fields are added to the struct in the
 // future, reducing diff noise. Allow this even though clippy considers it
 // "needless".
-#![allow(clippy::needless_update)]
 
 #[cfg(feature = "alloc")]
 extern crate alloc;

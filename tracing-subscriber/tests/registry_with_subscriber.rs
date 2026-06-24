@@ -1,6 +1,6 @@
 //! Tests registry composition with subscriber extensions.
 #![cfg(feature = "registry")]
-use tracing_futures::{Instrument, WithSubscriber};
+use tracing_futures::{Instrument as _, WithSubscriber as _};
 use tracing_subscriber::prelude::*;
 
 #[tokio::test]

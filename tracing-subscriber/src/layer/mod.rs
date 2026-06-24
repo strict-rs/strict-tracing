@@ -1805,9 +1805,10 @@ feature! {
             let mut interest = Interest::never();
             for l in self {
                 let new_interest = l.register_callsite(metadata);
-                if (interest.is_sometimes() && new_interest.is_always())
-                    || (interest.is_never() && !new_interest.is_never())
-                {
+                let promotes_sometimes_to_always =
+                    interest.is_sometimes() && new_interest.is_always();
+                let promotes_never_to_enabled = interest.is_never() && !new_interest.is_never();
+                if promotes_sometimes_to_always || promotes_never_to_enabled {
                     interest = new_interest;
                 }
             }

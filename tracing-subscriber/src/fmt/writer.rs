@@ -663,7 +663,6 @@ pub struct MutexGuardWriter<'a, W>(MutexGuard<'a, W>);
 /// This is an implementation detail of the [`MakeWriter`] impl for [`Arc`].
 #[doc(hidden)]
 #[deprecated(since = "0.1.19", note = "unused implementation detail -- do not use")]
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct ArcWriter<W>(Arc<W>);
 
@@ -1153,7 +1152,6 @@ where
 
 // === impl ArcWriter ===
 
-#[allow(deprecated)]
 impl<W> Write for ArcWriter<W>
 where
     for<'a> &'a W: Write,
@@ -1228,7 +1226,7 @@ mod test {
     use alloc::vec::Vec;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::sync::{Arc, Mutex};
-    use std::{dbg, format, println};
+    use std::{format, println};
     use tracing::{debug, error, info, trace, warn, Level};
     use tracing_core::dispatcher::{self, Dispatch};
 
@@ -1261,7 +1259,7 @@ mod test {
         let actual = String::from_utf8(buf.try_lock().unwrap().to_vec()).unwrap();
         let mut expected_lines = msgs.iter();
         for line in actual.lines() {
-            let line = dbg!(line).trim();
+            let line = line.trim();
             let (level, msg) = expected_lines
                 .next()
                 .unwrap_or_else(|| panic!("expected no more lines, but got: {:?}", line));

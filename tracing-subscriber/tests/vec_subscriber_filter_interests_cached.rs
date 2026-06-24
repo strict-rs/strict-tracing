@@ -15,7 +15,7 @@ fn vec_layer_filter_interests_are_cached() {
         let filter = filter::filter_fn({
             let seen = seen.clone();
             move |meta| {
-                *seen.lock().unwrap().entry(*meta.level()).or_insert(0usize) += 1;
+                *seen.lock().unwrap().entry(*meta.level()).or_insert(0_usize) += 1;
                 meta.level() <= &level
             }
         });

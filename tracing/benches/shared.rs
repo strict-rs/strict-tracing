@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 //! Shared helpers for `tracing` benchmarks.
 
 use criterion::{Bencher, measurement::WallTime};

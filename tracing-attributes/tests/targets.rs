@@ -1,5 +1,4 @@
 //! Example binary for tracing workspace checks.
-
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
 use tracing_mock::*;

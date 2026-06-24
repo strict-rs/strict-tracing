@@ -24,22 +24,28 @@
 //! [`init_with_filter`]: LogTracer.html#method.init_with_filter
 //! [builder]: LogTracer::builder()
 //! [ignore]: Builder::ignore_crate()
-use crate::AsTrace;
+use crate::AsTrace as _;
+#[cfg(all(feature = "interest-cache", feature = "std"))]
+use crate::interest_cache::configure as configure_interest_cache;
 pub use log::SetLoggerError;
 use tracing_core::dispatcher;
 
 /// A simple "logger" that converts all log records into `tracing` `Event`s.
 #[derive(Debug)]
 pub struct LogTracer {
+    /// Log targets that should not be forwarded into `tracing`.
     ignore_crates: Box<[String]>,
 }
 
 /// Configures a new `LogTracer`.
 #[derive(Debug)]
 pub struct Builder {
+    /// Log targets that should not be forwarded into `tracing`.
     ignore_crates: Vec<String>,
+    /// Maximum `log` level forwarded by this logger.
     filter: log::LevelFilter,
     #[cfg(all(feature = "interest-cache", feature = "std"))]
+    /// Interest-cache configuration applied during initialization.
     interest_cache_config: Option<crate::InterestCacheConfig>,
 }
 
@@ -66,6 +72,7 @@ impl LogTracer {
     /// # Ok(())
     /// # }
     /// ```
+    #[must_use]
     pub fn builder() -> Builder {
         Builder::default()
     }
@@ -95,6 +102,7 @@ impl LogTracer {
     ///
     /// [`init`]: LogTracer::init()
     /// [`init_with_filter`]: .#method.init_with_filter
+    #[must_use]
     pub fn new() -> Self {
         Self {
             ignore_crates: Vec::new().into_boxed_slice(),
@@ -108,6 +116,11 @@ impl LogTracer {
     ///
     /// The [`builder`] function can be used to customize the `LogTracer` before
     /// initializing it.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`SetLoggerError`] reported by `log` if a global logger has
+    /// already been installed.
     ///
     /// [`builder`]: LogTracer::builder()
     #[cfg(feature = "std")]
@@ -143,6 +156,11 @@ impl LogTracer {
     /// If you know in advance you want to filter some log levels,
     /// use [`builder`] or [`init_with_filter`] instead.
     ///
+    /// # Errors
+    ///
+    /// Returns the [`SetLoggerError`] reported by `log` if a global logger has
+    /// already been installed.
+    ///
     /// [`init_with_filter`]: LogTracer::init_with_filter()
     /// [`builder`]: LogTracer::builder()
     #[cfg(feature = "std")]
@@ -162,6 +180,7 @@ impl Default for LogTracer {
 use crate::interest_cache::try_cache as try_cache_interest;
 
 #[cfg(not(all(feature = "interest-cache", feature = "std")))]
+/// Runs the provided callback directly when the interest-cache feature is absent.
 fn try_cache_interest(_: &log::Metadata<'_>, callback: impl FnOnce() -> bool) -> bool {
     callback()
 }
@@ -208,6 +227,7 @@ impl log::Log for LogTracer {
 impl Builder {
     /// Returns a new `Builder` to construct a [`LogTracer`].
     ///
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -218,9 +238,13 @@ impl Builder {
     /// disabled.
     ///
     /// By default, all `log` records will be enabled.
+    #[must_use]
     pub fn with_max_level(self, filter: impl Into<log::LevelFilter>) -> Self {
-        let filter = filter.into();
-        Self { filter, ..self }
+        let level_filter = filter.into();
+        Self {
+            filter: level_filter,
+            ..self
+        }
     }
 
     /// Configures the `LogTracer` to ignore all log records whose target
@@ -229,6 +253,7 @@ impl Builder {
     /// This should be used when a crate enables the `tracing/log` feature to
     /// emit log records for tracing events. Otherwise, those events will be
     /// recorded twice.
+    #[must_use]
     pub fn ignore_crate(mut self, name: impl Into<String>) -> Self {
         self.ignore_crates.push(name.into());
         self
@@ -240,6 +265,7 @@ impl Builder {
     /// This should be used when a crate enables the `tracing/log` feature to
     /// emit log records for tracing events. Otherwise, those events will be
     /// recorded twice.
+    #[must_use]
     pub fn ignore_all<I>(self, crates: impl IntoIterator<Item = I>) -> Self
     where
         I: Into<String>,
@@ -271,6 +297,7 @@ impl Builder {
     /// [target]: log::Metadata::target
     #[cfg(all(feature = "interest-cache", feature = "std"))]
     #[cfg_attr(docsrs, doc(cfg(all(feature = "interest-cache", feature = "std"))))]
+    #[must_use]
     pub fn with_interest_cache(mut self, config: crate::InterestCacheConfig) -> Self {
         self.interest_cache_config = Some(config);
         self
@@ -280,12 +307,16 @@ impl Builder {
     /// as the default logger.
     ///
     /// Setting a global logger can only be done once.
+    ///
+    /// # Errors
+    ///
+    /// Returns the [`SetLoggerError`] reported by `log` if a global logger has
+    /// already been installed.
     #[cfg(feature = "std")]
     #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-    #[allow(unused_mut)]
     pub fn init(mut self) -> Result<(), SetLoggerError> {
         #[cfg(all(feature = "interest-cache", feature = "std"))]
-        crate::interest_cache::configure(self.interest_cache_config.take());
+        configure_interest_cache(self.interest_cache_config.take());
 
         let ignore_crates = self.ignore_crates.into_boxed_slice();
         let logger = Box::new(LogTracer { ignore_crates });

@@ -8,7 +8,6 @@ use core::{
 };
 use std::collections::HashMap;
 
-#[allow(warnings)]
 type AnyMap = HashMap<TypeId, Box<dyn Any + Send + Sync>, BuildHasherDefault<IdHasher>>;
 
 /// With TypeIds as keys, there's no need to hash them. They are already hashes
@@ -193,13 +192,13 @@ mod tests {
     fn test_extensions() {
         let mut extensions = ExtensionsInner::new();
 
-        let _previous = extensions.insert(5i32);
+        let _previous = extensions.insert(5_i32);
         let _previous = extensions.insert(MyType(10));
 
-        assert_eq!(extensions.get(), Some(&5i32));
-        assert_eq!(extensions.get_mut(), Some(&mut 5i32));
+        assert_eq!(extensions.get(), Some(&5_i32));
+        assert_eq!(extensions.get_mut(), Some(&mut 5_i32));
 
-        assert_eq!(extensions.remove::<i32>(), Some(5i32));
+        assert_eq!(extensions.remove::<i32>(), Some(5_i32));
         assert!(extensions.get::<i32>().is_none());
 
         assert_eq!(extensions.get::<bool>(), None);
@@ -209,7 +208,7 @@ mod tests {
     #[test]
     fn clear_retains_capacity() {
         let mut extensions = ExtensionsInner::new();
-        let _previous = extensions.insert(5i32);
+        let _previous = extensions.insert(5_i32);
         let _previous = extensions.insert(MyType(10));
         let _previous = extensions.insert(true);
 

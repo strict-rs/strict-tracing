@@ -49,12 +49,12 @@ impl Service<Request<Incoming>> for Svc {
         let rsp = Response::builder();
 
         let uri = req.uri();
-        let rsp = if uri.path() != ROOT {
-            let body = Full::new(Bytes::new());
-            rsp.status(404).body(body).unwrap()
-        } else {
+        let rsp = if uri.path() == ROOT {
             let body = Full::new(Bytes::from_static(b"heyo!"));
             rsp.status(200).body(body).unwrap()
+        } else {
+            let body = Full::new(Bytes::new());
+            rsp.status(404).body(body).unwrap()
         };
         let span = tracing::info_span!(
             "response",

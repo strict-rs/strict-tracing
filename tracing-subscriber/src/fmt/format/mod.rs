@@ -1963,10 +1963,7 @@ pub(super) mod test {
             .with_ansi(false)
             .with_timer(MockTime);
         let expected = format!(
-            r#"  fake time  INFO tracing_subscriber::fmt::format::test: hello
-    at {}:NUMERIC
-
-"#,
+            "  fake time  INFO tracing_subscriber::fmt::format::test: hello\n    at {}:NUMERIC\n\n",
             file!()
         );
 
@@ -2194,14 +2191,14 @@ pub(super) mod test {
         assert_eq!(fmt(123), "123ns");
         assert_eq!(fmt(1234), "1.23µs");
         assert_eq!(fmt(12345), "12.3µs");
-        assert_eq!(fmt(123456), "123µs");
-        assert_eq!(fmt(1234567), "1.23ms");
-        assert_eq!(fmt(12345678), "12.3ms");
-        assert_eq!(fmt(123456789), "123ms");
-        assert_eq!(fmt(1234567890), "1.23s");
-        assert_eq!(fmt(12345678901), "12.3s");
-        assert_eq!(fmt(123456789012), "123s");
-        assert_eq!(fmt(1234567890123), "1235s");
+        assert_eq!(fmt(123_456), "123µs");
+        assert_eq!(fmt(1_234_567), "1.23ms");
+        assert_eq!(fmt(12_345_678), "12.3ms");
+        assert_eq!(fmt(123_456_789), "123ms");
+        assert_eq!(fmt(1_234_567_890), "1.23s");
+        assert_eq!(fmt(12_345_678_901), "12.3s");
+        assert_eq!(fmt(123_456_789_012), "123s");
+        assert_eq!(fmt(1_234_567_890_123), "1235s");
     }
 
     #[test]

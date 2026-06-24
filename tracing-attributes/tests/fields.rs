@@ -51,7 +51,7 @@ const fn get_const_fn_field_name() -> &'static str {
 #[instrument(fields({get_const_fn_field_name()} = "baz"))]
 fn fn_const_fn_field_name() {}
 
-struct FieldNames {}
+struct FieldNames;
 impl FieldNames {
     const FOO_BAR: &'static str = "foo.bar";
 }
@@ -157,7 +157,7 @@ fn parameters_with_fields() {
     let span = expect::span().with_fields(
         expect::field("foo")
             .with_value(&"bar")
-            .and(expect::field("param").with_value(&1u32))
+            .and(expect::field("param").with_value(&1_u32))
             .only(),
     );
     run_test(span, || {

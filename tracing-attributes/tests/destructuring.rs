@@ -1,5 +1,4 @@
 //! Example binary for tracing workspace checks.
-
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
 use tracing_mock::*;
@@ -74,7 +73,7 @@ fn destructure_refs() {
     let (subscriber, handle) = subscriber::mock()
         .new_span(
             span.clone()
-                .with_fields(expect::field("arg1").with_value(&1usize).only()),
+                .with_fields(expect::field("arg1").with_value(&1_usize).only()),
         )
         .enter(span.clone())
         .exit(span.clone())

@@ -570,7 +570,7 @@ mod test {
     // fields, which it currently can't handle. We should enable this test when
     // that's implemented.
     #[test]
-    #[ignore]
+    #[ignore = "directive parser does not support multi-field directives yet"]
     fn directive_ordering_by_field_num() {
         // TODO(eliza): it would be nice to have a property-based test for this
         // instead.

@@ -5,7 +5,6 @@ use tracing_core::subscriber::NoSubscriber;
 pub(crate) struct NopLayer;
 impl<S: Subscriber> Layer<S> for NopLayer {}
 
-#[allow(dead_code)]
 struct NopLayer2;
 impl<S: Subscriber> Layer<S> for NopLayer2 {}
 
@@ -113,8 +112,6 @@ fn downcasts_to_layer() {
 
 #[cfg(all(feature = "registry", feature = "std"))]
 mod registry_tests {
-    use std::dbg;
-
     use super::*;
     use crate::registry::LookupSpan;
 
@@ -178,7 +175,7 @@ mod registry_tests {
                     .with_filter(LevelFilter::INFO)
                     .and_then(NopLayer.with_filter(LevelFilter::TRACE)),
             );
-            assert_eq!(dbg!(subscriber).max_level_hint(), None);
+            assert_eq!(subscriber.max_level_hint(), None);
         }
 
         #[test]
@@ -188,7 +185,7 @@ mod registry_tests {
                 .with(NopLayer.with_filter(LevelFilter::INFO))
                 .with(NopLayer)
                 .with(NopLayer.with_filter(LevelFilter::INFO));
-            assert_eq!(dbg!(subscriber).max_level_hint(), None);
+            assert_eq!(subscriber.max_level_hint(), None);
         }
 
         #[test]
@@ -196,7 +193,7 @@ mod registry_tests {
             let subscriber = crate::registry()
                 .with(NopLayer.with_filter(LevelFilter::INFO).and_then(NopLayer))
                 .with(NopLayer.and_then(NopLayer.with_filter(LevelFilter::INFO)));
-            assert_eq!(dbg!(subscriber).max_level_hint(), None);
+            assert_eq!(subscriber.max_level_hint(), None);
         }
 
         #[test]
@@ -204,7 +201,7 @@ mod registry_tests {
             let subscriber = crate::registry()
                 .with(NopLayer.with_filter(LevelFilter::INFO))
                 .with(NopLayer.with_filter(filter_fn(|_| true)));
-            assert_eq!(dbg!(subscriber).max_level_hint(), None);
+            assert_eq!(subscriber.max_level_hint(), None);
         }
 
         #[test]
@@ -222,7 +219,7 @@ mod registry_tests {
                         .with_filter(filter_fn(|_| true))
                         .and_then(NopLayer.with_filter(LevelFilter::DEBUG)),
                 );
-            assert_eq!(dbg!(subscriber).max_level_hint(), None);
+            assert_eq!(subscriber.max_level_hint(), None);
         }
 
         #[test]
@@ -232,49 +229,43 @@ mod registry_tests {
             // it should pick the outer hint. This is because the outer filter
             // will disable the spans/events before they make it to the inner
             // filter.
-            let subscriber = dbg!(
-                crate::registry().with(
-                    NopLayer
-                        .with_filter(filter_fn(|_| true))
-                        .and_then(NopLayer.with_filter(filter_fn(|_| true)))
-                        .with_filter(LevelFilter::INFO),
-                )
+            let subscriber = crate::registry().with(
+                NopLayer
+                    .with_filter(filter_fn(|_| true))
+                    .and_then(NopLayer.with_filter(filter_fn(|_| true)))
+                    .with_filter(LevelFilter::INFO),
             );
-            assert_eq!(dbg!(subscriber).max_level_hint(), Some(LevelFilter::INFO));
+            assert_eq!(subscriber.max_level_hint(), Some(LevelFilter::INFO));
         }
 
         #[test]
         fn unhinted_nested_inner() {
-            let subscriber = dbg!(
-                crate::registry()
-                    .with(NopLayer.and_then(NopLayer).with_filter(LevelFilter::INFO))
-                    .with(
-                        NopLayer
-                            .with_filter(filter_fn(|_| true))
-                            .and_then(NopLayer.with_filter(filter_fn(|_| true)))
-                            .with_filter(LevelFilter::WARN),
-                    )
-            );
-            assert_eq!(dbg!(subscriber).max_level_hint(), Some(LevelFilter::INFO));
+            let subscriber = crate::registry()
+                .with(NopLayer.and_then(NopLayer).with_filter(LevelFilter::INFO))
+                .with(
+                    NopLayer
+                        .with_filter(filter_fn(|_| true))
+                        .and_then(NopLayer.with_filter(filter_fn(|_| true)))
+                        .with_filter(LevelFilter::WARN),
+                );
+            assert_eq!(subscriber.max_level_hint(), Some(LevelFilter::INFO));
         }
 
         #[test]
         fn unhinted_nested_inner_mixed() {
-            let subscriber = dbg!(
-                crate::registry()
-                    .with(
-                        NopLayer
-                            .and_then(NopLayer.with_filter(filter_fn(|_| true)))
-                            .with_filter(LevelFilter::INFO)
-                    )
-                    .with(
-                        NopLayer
-                            .with_filter(filter_fn(|_| true))
-                            .and_then(NopLayer.with_filter(filter_fn(|_| true)))
-                            .with_filter(LevelFilter::WARN),
-                    )
-            );
-            assert_eq!(dbg!(subscriber).max_level_hint(), Some(LevelFilter::INFO));
+            let subscriber = crate::registry()
+                .with(
+                    NopLayer
+                        .and_then(NopLayer.with_filter(filter_fn(|_| true)))
+                        .with_filter(LevelFilter::INFO),
+                )
+                .with(
+                    NopLayer
+                        .with_filter(filter_fn(|_| true))
+                        .and_then(NopLayer.with_filter(filter_fn(|_| true)))
+                        .with_filter(LevelFilter::WARN),
+                );
+            assert_eq!(subscriber.max_level_hint(), Some(LevelFilter::INFO));
         }
 
         #[test]
@@ -282,7 +273,7 @@ mod registry_tests {
             let subscriber = crate::registry()
                 .with(NopLayer.with_filter(LevelFilter::WARN))
                 .with(NopLayer.with_filter(LevelFilter::DEBUG));
-            assert_eq!(dbg!(subscriber).max_level_hint(), Some(LevelFilter::DEBUG));
+            assert_eq!(subscriber.max_level_hint(), Some(LevelFilter::DEBUG));
         }
 
         #[test]
@@ -292,7 +283,7 @@ mod registry_tests {
                 .with(NopLayer.with_filter(LevelFilter::DEBUG))
                 .with(NopLayer.with_filter(LevelFilter::INFO))
                 .with(NopLayer.with_filter(LevelFilter::ERROR));
-            assert_eq!(dbg!(subscriber).max_level_hint(), Some(LevelFilter::DEBUG));
+            assert_eq!(subscriber.max_level_hint(), Some(LevelFilter::DEBUG));
         }
 
         #[test]
@@ -310,7 +301,7 @@ mod registry_tests {
                         .with_filter(LevelFilter::INFO)
                         .and_then(NopLayer.with_filter(LevelFilter::ERROR)),
                 );
-            assert_eq!(dbg!(subscriber).max_level_hint(), Some(LevelFilter::DEBUG));
+            assert_eq!(subscriber.max_level_hint(), Some(LevelFilter::DEBUG));
         }
     }
 }

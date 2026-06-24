@@ -16,6 +16,7 @@ categories = [
 keywords = ["logging", "tracing"]
 license.workspace = true
 rust-version.workspace = true
+readme = "README.md"
 
 [features]
 default = ["tower-layer", "tower-make"]

@@ -111,7 +111,7 @@ use crate::{
     dispatcher::Dispatch,
     metadata::{LevelFilter, Metadata},
     subscriber::Interest,
-    sync::Mutex,
+    sync::{self, Mutex},
 };
 
 /// Trait implemented by callsites.
@@ -189,8 +189,11 @@ pub struct Identifier(
 /// A default [`Callsite`] implementation.
 #[derive(Debug)]
 pub struct DefaultCallsite {
+    /// Cached interest value encoded for atomic storage.
     interest: AtomicU8,
+    /// Registration state encoded for one-time callsite insertion.
     registration: AtomicU8,
+    /// Static metadata owned by the callsite.
     meta: &'static Metadata<'static>,
 }
 
@@ -218,7 +221,7 @@ pub struct DefaultCallsite {
 /// [`Subscriber`]: super::subscriber::Subscriber
 /// [cache-docs]: crate::callsite#rebuilding-cached-interest
 pub fn rebuild_interest_cache() {
-    CALLSITES.rebuild_interest(DISPATCHERS.rebuilder());
+    CALLSITES.rebuild_interest(&DISPATCHERS.rebuilder());
 }
 
 /// Register a new [`Callsite`] with the global registry.
@@ -236,28 +239,39 @@ pub fn register(callsite: &'static dyn Callsite) {
     rebuild_callsite_interest(callsite, &DISPATCHERS.rebuilder());
 }
 
+/// Global registry of every callsite observed in this process.
 static CALLSITES: Callsites = Callsites {
-    registry: Mutex::new(Vec::new()),
+    registry: sync::mutex(Vec::new()),
 };
 
+/// Global registry of dispatchers that must rebuild callsite interest.
 static DISPATCHERS: Dispatchers = Dispatchers::new();
 
+/// Registered callsites protected by a non-poisoning lock.
 struct Callsites {
+    /// Registered callsites, deduplicated by pointer identity.
     registry: Mutex<Vec<&'static dyn Callsite>>,
 }
 
 // === impl DefaultCallsite ===
 
 impl DefaultCallsite {
+    /// Callsite has not started registration.
     const UNREGISTERED: u8 = 0;
+    /// Callsite registration is in progress.
     const REGISTERING: u8 = 1;
+    /// Callsite has completed registration.
     const REGISTERED: u8 = 2;
 
+    /// Cached `Interest::never`.
     const INTEREST_NEVER: u8 = 0;
+    /// Cached `Interest::sometimes`.
     const INTEREST_SOMETIMES: u8 = 1;
+    /// Cached `Interest::always`.
     const INTEREST_ALWAYS: u8 = 2;
 
     /// Returns a new `DefaultCallsite` with the specified `Metadata`.
+    #[must_use]
     pub const fn new(meta: &'static Metadata<'static>) -> Self {
         Self {
             interest: AtomicU8::new(0xFF),
@@ -302,13 +316,16 @@ impl DefaultCallsite {
             // previous cached interest.
             Err(Self::REGISTERED) => {}
             // Someone else is registering...
-            Err(_state) => {
-                debug_assert_eq!(
-                    _state,
-                    Self::REGISTERING,
-                    "weird callsite registration state"
-                );
+            Err(Self::REGISTERING) => {
                 // Just hit `enabled` this time.
+                return Interest::sometimes();
+            }
+            // An unknown state means the atomic was corrupted. Resetting this
+            // callsite to unregistered makes the next access retry the normal
+            // registration path without panicking in production.
+            Err(_state) => {
+                self.registration
+                    .store(Self::UNREGISTERED, Ordering::Release);
                 return Interest::sometimes();
             }
         }
@@ -335,15 +352,17 @@ impl DefaultCallsite {
 
 impl Callsite for DefaultCallsite {
     fn set_interest(&self, interest: Interest) {
-        let interest = match () {
-            _ if interest.is_never() => Self::INTEREST_NEVER,
-            _ if interest.is_always() => Self::INTEREST_ALWAYS,
-            _ => Self::INTEREST_SOMETIMES,
+        let encoded_interest = if interest.is_never() {
+            Self::INTEREST_NEVER
+        } else if interest.is_always() {
+            Self::INTEREST_ALWAYS
+        } else {
+            Self::INTEREST_SOMETIMES
         };
-        self.interest.store(interest, Ordering::SeqCst);
+        self.interest.store(encoded_interest, Ordering::SeqCst);
     }
 
-    #[inline(always)]
+    #[inline]
     fn metadata(&self) -> &Metadata<'static> {
         self.meta
     }
@@ -352,7 +371,7 @@ impl Callsite for DefaultCallsite {
 // ===== impl Identifier =====
 
 impl PartialEq for Identifier {
-    fn eq(&self, other: &Identifier) -> bool {
+    fn eq(&self, other: &Self) -> bool {
         ptr::addr_eq(self.0, other.0)
     }
 }
@@ -370,7 +389,7 @@ impl Hash for Identifier {
     where
         H: Hasher,
     {
-        ptr::from_ref(self.0).hash(state)
+        ptr::from_ref(self.0).hash(state);
     }
 }
 
@@ -380,7 +399,7 @@ impl Callsites {
     /// Rebuild `Interest`s for all callsites in the registry.
     ///
     /// This also re-computes the max level hint.
-    fn rebuild_interest(&self, dispatchers: dispatchers::Rebuilder<'_>) {
+    fn rebuild_interest(&self, dispatchers: &dispatchers::Rebuilder<'_>) {
         let mut max_level = LevelFilter::OFF;
         dispatchers.for_each(|dispatch| {
             // If the subscriber did not provide a max level hint, assume
@@ -392,17 +411,17 @@ impl Callsites {
         });
 
         self.for_each(|callsite| {
-            rebuild_callsite_interest(callsite, &dispatchers);
+            rebuild_callsite_interest(callsite, dispatchers);
         });
         LevelFilter::set_max(max_level);
     }
 
     /// Push a callsite to the callsite registry.
     fn push(&self, callsite: &'static dyn Callsite) {
-        let mut registered = self.registry.lock().unwrap();
+        let mut registered = self.registry.lock();
         if registered
             .iter()
-            .any(|registered| ptr::addr_eq(*registered, callsite))
+            .any(|existing| ptr::addr_eq(*existing, callsite))
         {
             return;
         }
@@ -411,82 +430,95 @@ impl Callsites {
 
     /// Invokes the provided closure `f` with each callsite in the registry.
     fn for_each(&self, mut f: impl FnMut(&'static dyn Callsite)) {
-        let registered = self.registry.lock().unwrap();
-        for &callsite in registered.iter() {
+        let registered = self.registry.lock();
+        for &callsite in &*registered {
             f(callsite);
         }
     }
 }
 
+/// Registers a dispatcher and rebuilds callsite interest for its subscriber.
 pub(crate) fn register_dispatch(dispatch: &Dispatch) {
     let dispatchers = DISPATCHERS.register_dispatch(dispatch);
     dispatch.subscriber().on_register_dispatch(dispatch);
-    CALLSITES.rebuild_interest(dispatchers);
+    CALLSITES.rebuild_interest(&dispatchers);
 }
 
+/// Recomputes one callsite's aggregate interest across active dispatchers.
 fn rebuild_callsite_interest(
     callsite: &'static dyn Callsite,
     dispatchers: &dispatchers::Rebuilder<'_>,
 ) {
     let meta = callsite.metadata();
 
-    let mut interest = None;
+    let mut combined_interest: Option<Interest> = None;
     dispatchers.for_each(|dispatch| {
         let this_interest = dispatch.register_callsite(meta);
-        interest = match interest.take() {
-            None => Some(this_interest),
-            Some(that_interest) => Some(that_interest.and(this_interest)),
-        }
+        combined_interest = combined_interest
+            .take()
+            .map_or(Some(this_interest), |that_interest| {
+                Some(that_interest.and(this_interest))
+            });
     });
 
-    let interest = interest.unwrap_or_else(Interest::never);
-    callsite.set_interest(interest)
+    let resolved_interest = combined_interest.unwrap_or_else(Interest::never);
+    callsite.set_interest(resolved_interest);
 }
 
+/// Private constructors for sealed callsite APIs.
 mod private {
-    /// Don't call this function, it's private.
-    #[allow(missing_debug_implementations)]
+    /// Wrapper that prevents downstream code from naming hidden callsite APIs.
     pub struct Private<T>(pub(crate) T);
 }
 
+/// Dispatcher registry used by `std` builds.
 #[cfg(feature = "std")]
 mod dispatchers {
-    use crate::dispatcher;
     use alloc::vec::Vec;
-    use std::sync::{
-        RwLock, RwLockReadGuard, RwLockWriteGuard,
-        atomic::{AtomicBool, Ordering},
-    };
+    use core::sync::atomic::{AtomicBool, Ordering};
 
+    use crate::dispatcher;
+    use crate::sync::{self, RwLockReadGuard, RwLockWriteGuard};
+
+    /// Tracks whether one or many dispatchers must be consulted.
     pub(super) struct Dispatchers {
+        /// Fast-path bit for the common single-dispatcher case.
         has_just_one: AtomicBool,
     }
 
-    static LOCKED_DISPATCHERS: RwLock<Vec<dispatcher::Registrar>> = RwLock::new(Vec::new());
+    /// Dispatchers that may need callsite interest rebuilt.
+    static LOCKED_DISPATCHERS: sync::RwLock<Vec<dispatcher::Registrar>> = sync::rwlock(Vec::new());
 
+    /// Borrowed dispatcher registry used during interest rebuilds.
     pub(super) enum Rebuilder<'a> {
+        /// Only the current default dispatcher exists.
         JustOne,
+        /// Shared access to the dispatcher registry.
         Read(RwLockReadGuard<'a, Vec<dispatcher::Registrar>>),
+        /// Exclusive access after registering a new dispatcher.
         Write(RwLockWriteGuard<'a, Vec<dispatcher::Registrar>>),
     }
 
     impl Dispatchers {
+        /// Returns a dispatcher registry initialized for the fast path.
         pub(super) const fn new() -> Self {
             Self {
                 has_just_one: AtomicBool::new(true),
             }
         }
 
+        /// Returns the current interest-rebuild view.
         pub(super) fn rebuilder(&self) -> Rebuilder<'_> {
             if self.has_just_one.load(Ordering::SeqCst) {
                 return Rebuilder::JustOne;
             }
-            Rebuilder::Read(LOCKED_DISPATCHERS.read().unwrap())
+            Rebuilder::Read(LOCKED_DISPATCHERS.read())
         }
 
+        /// Registers one dispatch and returns the rebuilt registry view.
         pub(super) fn register_dispatch(&self, dispatch: &dispatcher::Dispatch) -> Rebuilder<'_> {
-            let mut dispatchers = LOCKED_DISPATCHERS.write().unwrap();
-            dispatchers.retain(|d| d.upgrade().is_some());
+            let mut dispatchers = LOCKED_DISPATCHERS.write();
+            dispatchers.retain(|registered| registered.upgrade().is_some());
             dispatchers.push(dispatch.registrar());
             self.has_just_one
                 .store(dispatchers.len() <= 1, Ordering::SeqCst);
@@ -495,37 +527,44 @@ mod dispatchers {
     }
 
     impl Rebuilder<'_> {
+        /// Invokes `f` for each live dispatcher in this rebuild view.
         pub(super) fn for_each(&self, mut f: impl FnMut(&dispatcher::Dispatch)) {
-            let iter = match self {
-                Rebuilder::JustOne => {
+            let iter = match *self {
+                Self::JustOne => {
                     dispatcher::get_default(f);
                     return;
                 }
-                Rebuilder::Read(vec) => vec.iter(),
-                Rebuilder::Write(vec) => vec.iter(),
+                Self::Read(ref vec) => vec.iter(),
+                Self::Write(ref vec) => vec.iter(),
             };
             iter.filter_map(dispatcher::Registrar::upgrade)
-                .for_each(|dispatch| f(&dispatch))
+                .for_each(|dispatch| f(&dispatch));
         }
     }
 }
 
+/// Dispatcher registry used by `no_std` builds.
 #[cfg(not(feature = "std"))]
 mod dispatchers {
     use crate::dispatcher;
 
+    /// Empty registry for the single-dispatcher `no_std` model.
     pub(super) struct Dispatchers(());
+    /// Optional dispatcher being installed during a rebuild.
     pub(super) struct Rebuilder<'a>(Option<&'a dispatcher::Dispatch>);
 
     impl Dispatchers {
+        /// Returns the `no_std` dispatcher registry.
         pub(super) const fn new() -> Self {
             Self(())
         }
 
+        /// Returns the current interest-rebuild view.
         pub(super) fn rebuilder(&self) -> Rebuilder<'_> {
             Rebuilder(None)
         }
 
+        /// Registers the single `no_std` dispatcher.
         pub(super) fn register_dispatch<'dispatch>(
             &self,
             dispatch: &'dispatch dispatcher::Dispatch,
@@ -536,18 +575,19 @@ mod dispatchers {
     }
 
     impl Rebuilder<'_> {
+        /// Invokes `f` for the active `no_std` dispatcher.
         #[inline]
         pub(super) fn for_each(&self, mut f: impl FnMut(&dispatcher::Dispatch)) {
             if let Some(dispatch) = self.0 {
                 // we are rebuilding the interest cache because a new dispatcher
                 // is about to be set. on `no_std`, this should only happen
                 // once, because the new dispatcher will be the global default.
-                f(dispatch)
+                f(dispatch);
             } else {
                 // otherwise, we are rebuilding the cache because the subscriber
                 // configuration changed, so use the global default.
                 // on no_std, there can only ever be one dispatcher
-                dispatcher::get_default(f)
+                dispatcher::get_default(f);
             }
         }
     }

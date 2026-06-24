@@ -1,5 +1,4 @@
 //! Example binary for tracing workspace checks.
-
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use tracing::debug;
@@ -9,7 +8,7 @@ use tracing_core::{
     span::{Attributes, Id, Record},
     subscriber::Subscriber,
 };
-use tracing_serde::AsSerde;
+use tracing_serde::AsSerde as _;
 
 use serde_json::json;
 

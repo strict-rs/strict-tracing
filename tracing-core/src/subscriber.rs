@@ -2,7 +2,10 @@
 use crate::{Dispatch, Event, LevelFilter, Metadata, span};
 
 use alloc::{boxed::Box, sync::Arc};
-use core::any::{Any, TypeId};
+use core::{
+    any::{Any, TypeId},
+    num::NonZeroU64,
+};
 
 /// Provides `Any` access for type-erased `Subscriber` downcasting.
 #[doc(hidden)]
@@ -110,9 +113,7 @@ pub trait Subscriber: AsAny {
     ///
     /// [`WeakDispatch`]: crate::dispatcher::WeakDispatch
     /// [upgraded]: crate::dispatcher::WeakDispatch::upgrade
-    fn on_register_dispatch(&self, subscriber: &Dispatch) {
-        let _ = subscriber;
-    }
+    fn on_register_dispatch(&self, _subscriber: &Dispatch) {}
 
     /// Registers a new [callsite] with this subscriber, returning whether or not
     /// the subscriber is interested in being notified about the callsite.
@@ -305,7 +306,7 @@ pub trait Subscriber: AsAny {
     /// [visitor]: super::field::Visit
     /// [`record`]: super::span::Attributes::record
     /// [`record` method]: super::span::Record::record
-    fn record(&self, span: &span::Id, values: &span::Record<'_>);
+    fn record(&self, span: span::Id, values: &span::Record<'_>);
 
     /// Adds an indication that `span` follows from the span with the id
     /// `follows`.
@@ -325,7 +326,7 @@ pub trait Subscriber: AsAny {
     /// subscriber knows about, or if a cyclical relationship would be created
     /// (i.e., some span _a_ which proceeds some other span _b_ may not also
     /// follow from _b_), it may silently do nothing.
-    fn record_follows_from(&self, span: &span::Id, follows: &span::Id);
+    fn record_follows_from(&self, span: span::Id, follows: span::Id);
 
     /// Determine if an [`Event`] should be recorded.
     ///
@@ -333,8 +334,7 @@ pub trait Subscriber: AsAny {
     /// [`event`][Self::event] without any penalty. However, when `event` is
     /// more complicated, this can be used to determine if `event` should be
     /// called at all, separating out the decision from the processing.
-    fn event_enabled(&self, event: &Event<'_>) -> bool {
-        let _ = event;
+    fn event_enabled(&self, _event: &Event<'_>) -> bool {
         true
     }
 
@@ -366,7 +366,7 @@ pub trait Subscriber: AsAny {
     /// tracking the current span accordingly.
     ///
     /// [span ID]: super::span::Id
-    fn enter(&self, span: &span::Id);
+    fn enter(&self, span: span::Id);
 
     /// Records that a span has been exited.
     ///
@@ -378,7 +378,7 @@ pub trait Subscriber: AsAny {
     /// Exiting a span does not imply that the span will not be re-entered.
     ///
     /// [span ID]: super::span::Id
-    fn exit(&self, span: &span::Id);
+    fn exit(&self, span: span::Id);
 
     /// Notifies the subscriber that a [span ID] has been cloned.
     ///
@@ -400,8 +400,8 @@ pub trait Subscriber: AsAny {
     ///
     /// [span ID]: super::span::Id
     /// [`try_close`]: Subscriber::try_close
-    fn clone_span(&self, id: &span::Id) -> span::Id {
-        id.clone()
+    fn clone_span(&self, id: span::Id) -> span::Id {
+        id
     }
 
     /// **This method is deprecated.**
@@ -453,7 +453,6 @@ pub trait Subscriber: AsAny {
     /// [`clone_span`]: Subscriber::clone_span
     /// [`drop_span`]: Subscriber::drop_span
     fn try_close(&self, id: span::Id) -> bool {
-        #[allow(deprecated)]
         self.drop_span(id);
         false
     }
@@ -489,11 +488,7 @@ pub trait Subscriber: AsAny {
     #[doc(hidden)]
     fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
         let this = self.as_any();
-        if this.type_id() == id {
-            Some(this)
-        } else {
-            None
-        }
+        (this.type_id() == id).then_some(this)
     }
 }
 
@@ -531,7 +526,7 @@ impl dyn Subscriber + Sync {
         self.downcast_ref::<T>().is_some()
     }
 
-    /// Returns some reference to this `[`Subscriber`] value if it is of type `T`,
+    /// Returns some reference to this [`Subscriber`] value if it is of type `T`,
     /// or `None` if it isn't.
     pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
         self.downcast_ref_by_id(TypeId::of::<T>())?
@@ -563,10 +558,14 @@ impl dyn Subscriber + Send + Sync {
 #[derive(Copy, Clone, Debug)]
 pub struct Interest(InterestKind);
 
+/// Encodes the three possible callsite-interest states.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 enum InterestKind {
+    /// The subscriber is never interested in this callsite.
     Never = 0,
+    /// The subscriber must be asked dynamically for this callsite.
     Sometimes = 1,
+    /// The subscriber is always interested in this callsite.
     Always = 2,
 }
 
@@ -577,8 +576,9 @@ impl Interest {
     /// If all active subscribers are `never()` interested in a callsite, it will
     /// be completely disabled unless a new subscriber becomes active.
     #[inline]
-    pub fn never() -> Self {
-        Interest(InterestKind::Never)
+    #[must_use]
+    pub const fn never() -> Self {
+        Self(InterestKind::Never)
     }
 
     /// Returns an `Interest` indicating the subscriber is sometimes interested
@@ -589,8 +589,9 @@ impl Interest {
     /// callsite every time it creates a span. This will be the case until a new
     /// subscriber expresses that it is `always` interested in the callsite.
     #[inline]
-    pub fn sometimes() -> Self {
-        Interest(InterestKind::Sometimes)
+    #[must_use]
+    pub const fn sometimes() -> Self {
+        Self(InterestKind::Sometimes)
     }
 
     /// Returns an `Interest` indicating the subscriber is always interested in
@@ -599,28 +600,32 @@ impl Interest {
     /// If any subscriber expresses that it is `always()` interested in a given
     /// callsite, then the callsite will always be enabled.
     #[inline]
-    pub fn always() -> Self {
-        Interest(InterestKind::Always)
+    #[must_use]
+    pub const fn always() -> Self {
+        Self(InterestKind::Always)
     }
 
     /// Returns `true` if the subscriber is never interested in being notified
     /// about this callsite.
     #[inline]
-    pub fn is_never(&self) -> bool {
+    #[must_use]
+    pub const fn is_never(self) -> bool {
         matches!(self.0, InterestKind::Never)
     }
 
     /// Returns `true` if the subscriber is sometimes interested in being notified
     /// about this callsite.
     #[inline]
-    pub fn is_sometimes(&self) -> bool {
+    #[must_use]
+    pub const fn is_sometimes(self) -> bool {
         matches!(self.0, InterestKind::Sometimes)
     }
 
     /// Returns `true` if the subscriber is always interested in being notified
     /// about this callsite.
     #[inline]
-    pub fn is_always(&self) -> bool {
+    #[must_use]
+    pub const fn is_always(self) -> bool {
         matches!(self.0, InterestKind::Always)
     }
 
@@ -630,11 +635,11 @@ impl Interest {
     /// Otherwise, if they differ, the result must always be
     /// `Interest::sometimes` --- if the two subscribers differ in opinion, we
     /// will have to ask the current subscriber what it thinks, no matter what.
-    pub(crate) fn and(self, rhs: Interest) -> Self {
+    pub(crate) fn and(self, rhs: Self) -> Self {
         if self.0 == rhs.0 {
             self
         } else {
-            Interest::sometimes()
+            Self::sometimes()
         }
     }
 }
@@ -653,22 +658,22 @@ impl Subscriber for NoSubscriber {
     }
 
     fn new_span(&self, _: &span::Attributes<'_>) -> span::Id {
-        span::Id::from_u64(0xDEAD)
+        span::Id::from_non_zero_u64(NonZeroU64::MIN)
     }
 
     fn event(&self, _event: &Event<'_>) {}
 
-    fn record(&self, _span: &span::Id, _values: &span::Record<'_>) {}
+    fn record(&self, _span: span::Id, _values: &span::Record<'_>) {}
 
-    fn record_follows_from(&self, _span: &span::Id, _follows: &span::Id) {}
+    fn record_follows_from(&self, _span: span::Id, _follows: span::Id) {}
 
     #[inline]
     fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
         false
     }
 
-    fn enter(&self, _span: &span::Id) {}
-    fn exit(&self, _span: &span::Id) {}
+    fn enter(&self, _span: span::Id) {}
+    fn exit(&self, _span: span::Id) {}
 }
 
 impl NoSubscriber {
@@ -704,13 +709,13 @@ where
     }
 
     #[inline]
-    fn record(&self, span: &span::Id, values: &span::Record<'_>) {
-        self.as_ref().record(span, values)
+    fn record(&self, span: span::Id, values: &span::Record<'_>) {
+        self.as_ref().record(span, values);
     }
 
     #[inline]
-    fn record_follows_from(&self, span: &span::Id, follows: &span::Id) {
-        self.as_ref().record_follows_from(span, follows)
+    fn record_follows_from(&self, span: span::Id, follows: span::Id) {
+        self.as_ref().record_follows_from(span, follows);
     }
 
     #[inline]
@@ -720,21 +725,21 @@ where
 
     #[inline]
     fn event(&self, event: &Event<'_>) {
-        self.as_ref().event(event)
+        self.as_ref().event(event);
     }
 
     #[inline]
-    fn enter(&self, span: &span::Id) {
-        self.as_ref().enter(span)
+    fn enter(&self, span: span::Id) {
+        self.as_ref().enter(span);
     }
 
     #[inline]
-    fn exit(&self, span: &span::Id) {
-        self.as_ref().exit(span)
+    fn exit(&self, span: span::Id) {
+        self.as_ref().exit(span);
     }
 
     #[inline]
-    fn clone_span(&self, id: &span::Id) -> span::Id {
+    fn clone_span(&self, id: span::Id) -> span::Id {
         self.as_ref().clone_span(id)
     }
 
@@ -744,7 +749,6 @@ where
     }
 
     #[inline]
-    #[allow(deprecated)]
     fn drop_span(&self, id: span::Id) {
         let _closed = self.as_ref().try_close(id);
     }
@@ -790,13 +794,13 @@ where
     }
 
     #[inline]
-    fn record(&self, span: &span::Id, values: &span::Record<'_>) {
-        self.as_ref().record(span, values)
+    fn record(&self, span: span::Id, values: &span::Record<'_>) {
+        self.as_ref().record(span, values);
     }
 
     #[inline]
-    fn record_follows_from(&self, span: &span::Id, follows: &span::Id) {
-        self.as_ref().record_follows_from(span, follows)
+    fn record_follows_from(&self, span: span::Id, follows: span::Id) {
+        self.as_ref().record_follows_from(span, follows);
     }
 
     #[inline]
@@ -806,21 +810,21 @@ where
 
     #[inline]
     fn event(&self, event: &Event<'_>) {
-        self.as_ref().event(event)
+        self.as_ref().event(event);
     }
 
     #[inline]
-    fn enter(&self, span: &span::Id) {
-        self.as_ref().enter(span)
+    fn enter(&self, span: span::Id) {
+        self.as_ref().enter(span);
     }
 
     #[inline]
-    fn exit(&self, span: &span::Id) {
-        self.as_ref().exit(span)
+    fn exit(&self, span: span::Id) {
+        self.as_ref().exit(span);
     }
 
     #[inline]
-    fn clone_span(&self, id: &span::Id) -> span::Id {
+    fn clone_span(&self, id: span::Id) -> span::Id {
         self.as_ref().clone_span(id)
     }
 
@@ -830,7 +834,6 @@ where
     }
 
     #[inline]
-    #[allow(deprecated)]
     fn drop_span(&self, id: span::Id) {
         let _closed = self.as_ref().try_close(id);
     }

@@ -17,7 +17,6 @@ fn err() -> Result<u8, TryFromIntError> {
 }
 
 #[instrument(err)]
-#[allow(dead_code)]
 fn err_suspicious_else() -> Result<u8, TryFromIntError> {
     {}
     u8::try_from(1234)
@@ -163,7 +162,7 @@ fn impl_trait_return_type() {
     let (subscriber, handle) = subscriber::mock()
         .new_span(
             span.clone()
-                .with_fields(expect::field("x").with_value(&10usize).only()),
+                .with_fields(expect::field("x").with_value(&10_usize).only()),
         )
         .enter(span.clone())
         .exit(span.clone())

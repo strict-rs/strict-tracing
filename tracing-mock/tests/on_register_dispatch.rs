@@ -1,4 +1,4 @@
-//! Tests for `on_register_dispatch` expectations in MockSubscriber and MockLayer.
+//! Tests for `on_register_dispatch` expectations in `MockSubscriber` and `MockLayer`.
 
 use tracing_mock::subscriber;
 
