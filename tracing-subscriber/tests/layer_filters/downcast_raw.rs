@@ -1,7 +1,7 @@
 use tracing::Subscriber;
+use tracing_subscriber::Layer;
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::prelude::*;
-use tracing_subscriber::Layer;
 
 #[test]
 fn downcast_ref_to_inner_layer_and_filter() {

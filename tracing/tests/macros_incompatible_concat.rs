@@ -1,4 +1,4 @@
-use tracing::{enabled, event, span, Level};
+use tracing::{Level, enabled, event, span};
 
 #[macro_export]
 macro_rules! concat {

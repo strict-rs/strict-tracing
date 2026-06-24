@@ -1,8 +1,15 @@
+use bytes::Bytes;
 use futures::future;
 use http::{Request, Response};
-use hyper::{Body, Server};
+use http_body_util::Full;
+use hyper::body::Incoming;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto;
+use hyper_util::service::TowerToHyperService;
+use std::convert::Infallible;
 use std::task::{Context, Poll};
 use std::time::Duration;
+use tokio::net::TcpListener;
 use tower::{Service, ServiceBuilder};
 use tracing::dispatcher;
 use tracing::info;
@@ -24,27 +31,27 @@ fn req_span<A>(req: &Request<A>) -> tracing::Span {
 
 const ROOT: &str = "/";
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Svc;
 
-impl Service<Request<Body>> for Svc {
-    type Response = Response<Body>;
-    type Error = hyper::Error;
+impl Service<Request<Incoming>> for Svc {
+    type Response = Response<Full<Bytes>>;
+    type Error = Infallible;
     type Future = future::Ready<Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Ok(()).into()
     }
 
-    fn call(&mut self, req: Request<Body>) -> Self::Future {
+    fn call(&mut self, req: Request<Incoming>) -> Self::Future {
         let rsp = Response::builder();
 
         let uri = req.uri();
         let rsp = if uri.path() != ROOT {
-            let body = Body::from(Vec::new());
+            let body = Full::new(Bytes::new());
             rsp.status(404).body(body).unwrap()
         } else {
-            let body = Body::from(Vec::from(&b"heyo!"[..]));
+            let body = Full::new(Bytes::from_static(b"heyo!"));
             rsp.status(200).body(body).unwrap()
         };
         let span = tracing::info_span!(
@@ -88,15 +95,29 @@ async fn main() -> Result<(), Err> {
         .with_env_filter("tower=trace")
         .try_init()?;
 
-    let svc = ServiceBuilder::new()
+    let mut make_svc = ServiceBuilder::new()
         .timeout(Duration::from_millis(250))
         .layer(make::layer::<_, Svc, _>(req_span))
         .service(MakeSvc);
 
-    let addr = "127.0.0.1:3000".parse()?;
-    let server = Server::bind(&addr).serve(svc);
+    let addr: std::net::SocketAddr = "127.0.0.1:3000".parse()?;
+    let listener = TcpListener::bind(addr).await?;
     info!(message = "listening", addr = ?addr);
-    server.await?;
 
-    Ok(())
+    loop {
+        let (stream, remote_addr) = listener.accept().await?;
+        let io = TokioIo::new(stream);
+
+        let svc = make_svc.call(remote_addr).await?;
+        let hyper_svc = TowerToHyperService::new(svc);
+
+        tokio::spawn(async move {
+            if let Err(e) = auto::Builder::new(TokioExecutor::new())
+                .serve_connection(io, hyper_svc)
+                .await
+            {
+                tracing::error!(error = %e, "connection error");
+            }
+        });
+    }
 }

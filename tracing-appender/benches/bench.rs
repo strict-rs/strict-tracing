@@ -1,9 +1,9 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::{
     thread::{self, JoinHandle},
     time::Instant,
 };
-use tracing::{event, Level};
+use tracing::{Level, event};
 use tracing_appender::non_blocking;
 use tracing_subscriber::fmt::MakeWriter;
 

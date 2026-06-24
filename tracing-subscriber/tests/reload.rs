@@ -1,9 +1,9 @@
 #![cfg(feature = "registry")]
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing_core::{
+    Event, LevelFilter, Metadata, Subscriber,
     span::{Attributes, Id, Record},
     subscriber::Interest,
-    Event, LevelFilter, Metadata, Subscriber,
 };
 use tracing_subscriber::{layer, prelude::*, reload::*};
 

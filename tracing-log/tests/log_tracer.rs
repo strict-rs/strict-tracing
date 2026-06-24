@@ -1,11 +1,11 @@
 use std::sync::{Arc, Mutex};
 use tracing::subscriber::with_default;
 use tracing_core::span::{Attributes, Record};
-use tracing_core::{span, Event, Level, LevelFilter, Metadata, Subscriber};
+use tracing_core::{Event, Level, LevelFilter, Metadata, Subscriber, span};
 use tracing_log::{LogTracer, NormalizeEvent};
 
 struct State {
-    last_normalized_metadata: Mutex<(bool, Option<OwnedMetadata>)>,
+    normalized_metadata: Mutex<Vec<(bool, Option<OwnedMetadata>)>>,
 }
 
 #[derive(PartialEq, Debug)]
@@ -40,7 +40,7 @@ impl Subscriber for TestSubscriber {
 
     fn event(&self, event: &Event<'_>) {
         dbg!(event);
-        *self.0.last_normalized_metadata.lock().unwrap() = (
+        self.0.normalized_metadata.lock().unwrap().push((
             event.is_log(),
             event.normalized_metadata().map(|normalized| OwnedMetadata {
                 name: normalized.name().to_string(),
@@ -50,7 +50,7 @@ impl Subscriber for TestSubscriber {
                 file: normalized.file().map(String::from),
                 line: normalized.line(),
             }),
-        )
+        ))
     }
 
     fn enter(&self, _span: &span::Id) {}
@@ -62,7 +62,7 @@ impl Subscriber for TestSubscriber {
 fn normalized_metadata() {
     LogTracer::init().unwrap();
     let me = Arc::new(State {
-        last_normalized_metadata: Mutex::new((false, None)),
+        normalized_metadata: Mutex::new(Vec::new()),
     });
     let state = me.clone();
 
@@ -109,15 +109,30 @@ fn normalized_metadata() {
             }),
         );
 
+        clear(&state);
         tracing::info!("test with a tracing info");
-        last(&state, false, None);
+        observed(&state, false, None);
     })
 }
 
 fn last(state: &State, should_be_log: bool, expected: Option<OwnedMetadata>) {
-    let lock = state.last_normalized_metadata.lock().unwrap();
-    let (is_log, metadata) = &*lock;
+    let lock = state.normalized_metadata.lock().unwrap();
+    let (is_log, metadata) = lock.last().expect("expected at least one event");
     dbg!(&metadata);
     assert_eq!(dbg!(*is_log), should_be_log);
     assert_eq!(metadata.as_ref(), expected.as_ref());
+}
+
+fn observed(state: &State, should_be_log: bool, expected: Option<OwnedMetadata>) {
+    let lock = state.normalized_metadata.lock().unwrap();
+    assert!(
+        lock.iter()
+            .any(|(is_log, metadata)| *is_log == should_be_log
+                && metadata.as_ref() == expected.as_ref()),
+        "expected event ({should_be_log:?}, {expected:?}) in {lock:?}"
+    );
+}
+
+fn clear(state: &State) {
+    state.normalized_metadata.lock().unwrap().clear();
 }

@@ -694,10 +694,10 @@
 use crate::filter;
 
 use tracing_core::{
+    Dispatch, Event, LevelFilter,
     metadata::Metadata,
     span,
     subscriber::{Interest, Subscriber},
-    Dispatch, Event, LevelFilter,
 };
 
 use core::any::TypeId;
@@ -1563,21 +1563,21 @@ where
     S: Subscriber,
 {
     fn on_layer(&mut self, subscriber: &mut S) {
-        if let Some(ref mut layer) = self {
+        if let Some(layer) = self {
             layer.on_layer(subscriber)
         }
     }
 
     #[inline]
     fn on_register_dispatch(&self, subscriber: &Dispatch) {
-        if let Some(ref layer) = self {
+        if let Some(layer) = self {
             layer.on_register_dispatch(subscriber);
         }
     }
 
     #[inline]
     fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
-        if let Some(ref inner) = self {
+        if let Some(inner) = self {
             inner.on_new_span(attrs, id, ctx)
         }
     }
@@ -1585,7 +1585,7 @@ where
     #[inline]
     fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
         match self {
-            Some(ref inner) => inner.register_callsite(metadata),
+            Some(inner) => inner.register_callsite(metadata),
             None => Interest::always(),
         }
     }
@@ -1593,7 +1593,7 @@ where
     #[inline]
     fn enabled(&self, metadata: &Metadata<'_>, ctx: Context<'_, S>) -> bool {
         match self {
-            Some(ref inner) => inner.enabled(metadata, ctx),
+            Some(inner) => inner.enabled(metadata, ctx),
             None => true,
         }
     }
@@ -1601,7 +1601,7 @@ where
     #[inline]
     fn max_level_hint(&self) -> Option<LevelFilter> {
         match self {
-            Some(ref inner) => inner.max_level_hint(),
+            Some(inner) => inner.max_level_hint(),
             None => {
                 // There is no inner layer, so this layer will
                 // never enable anything.
@@ -1612,14 +1612,14 @@ where
 
     #[inline]
     fn on_record(&self, span: &span::Id, values: &span::Record<'_>, ctx: Context<'_, S>) {
-        if let Some(ref inner) = self {
+        if let Some(inner) = self {
             inner.on_record(span, values, ctx);
         }
     }
 
     #[inline]
     fn on_follows_from(&self, span: &span::Id, follows: &span::Id, ctx: Context<'_, S>) {
-        if let Some(ref inner) = self {
+        if let Some(inner) = self {
             inner.on_follows_from(span, follows, ctx);
         }
     }
@@ -1627,42 +1627,42 @@ where
     #[inline]
     fn event_enabled(&self, event: &Event<'_>, ctx: Context<'_, S>) -> bool {
         match self {
-            Some(ref inner) => inner.event_enabled(event, ctx),
+            Some(inner) => inner.event_enabled(event, ctx),
             None => true,
         }
     }
 
     #[inline]
     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-        if let Some(ref inner) = self {
+        if let Some(inner) = self {
             inner.on_event(event, ctx);
         }
     }
 
     #[inline]
     fn on_enter(&self, id: &span::Id, ctx: Context<'_, S>) {
-        if let Some(ref inner) = self {
+        if let Some(inner) = self {
             inner.on_enter(id, ctx);
         }
     }
 
     #[inline]
     fn on_exit(&self, id: &span::Id, ctx: Context<'_, S>) {
-        if let Some(ref inner) = self {
+        if let Some(inner) = self {
             inner.on_exit(id, ctx);
         }
     }
 
     #[inline]
     fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
-        if let Some(ref inner) = self {
+        if let Some(inner) = self {
             inner.on_close(id, ctx);
         }
     }
 
     #[inline]
     fn on_id_change(&self, old: &span::Id, new: &span::Id, ctx: Context<'_, S>) {
-        if let Some(ref inner) = self {
+        if let Some(inner) = self {
             inner.on_id_change(old, new, ctx)
         }
     }

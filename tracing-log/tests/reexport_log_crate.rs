@@ -1,4 +1,4 @@
-use tracing_log::{log::LevelFilter, LogTracer};
+use tracing_log::{LogTracer, log::LevelFilter};
 
 /// This test makes sure we can access `log::LevelFilter` through the `tracing_log` crate and don't
 /// have to depend on `log` separately.

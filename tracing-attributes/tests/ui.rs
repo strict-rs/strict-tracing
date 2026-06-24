@@ -3,13 +3,13 @@
 #[rustversion::stable]
 #[test]
 fn pass() {
-    let t = trybuild::TestCases::new();
+    let mut t = trybuild::TestCases::new();
     t.pass("tests/ui/pass/*.rs");
 }
 
 #[rustversion::stable]
 #[test]
 fn compile_fail() {
-    let t = trybuild::TestCases::new();
+    let mut t = trybuild::TestCases::new();
     t.compile_fail("tests/ui/fail/*.rs");
 }

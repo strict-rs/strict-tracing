@@ -3,13 +3,13 @@
 use std::sync::{Arc, Mutex};
 
 use tracing::{
-    span::{self, Id},
     Dispatch, Event, Metadata, Subscriber,
+    span::{self, Id},
 };
 use tracing_core::{Interest, LevelFilter};
 use tracing_subscriber::{
-    layer::{Context, SubscriberExt},
     Layer, Registry,
+    layer::{Context, SubscriberExt},
 };
 
 #[test]
@@ -75,7 +75,10 @@ fn span_entered_on_different_thread_from_subscriber() {
         }
 
         unsafe fn downcast_raw(&self, id: std::any::TypeId) -> Option<*const ()> {
-            self.inner.downcast_raw(id)
+            // SAFETY: `CountingSubscriber` forwards the exact `Subscriber::downcast_raw`
+            // contract to the wrapped `Registry` without changing the requested type ID
+            // or interpreting the returned pointer.
+            unsafe { self.inner.downcast_raw(id) }
         }
 
         fn enabled(&self, metadata: &Metadata<'_>) -> bool {

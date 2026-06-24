@@ -12,8 +12,8 @@
 //! [`slog` README]: https://github.com/slog-rs/slog#terminal-output-example
 use nu_ansi_term::{Color, Style};
 use tracing::{
-    field::{Field, Visit},
     Id, Level, Subscriber,
+    field::{Field, Visit},
 };
 
 use std::{
@@ -22,8 +22,8 @@ use std::{
     fmt,
     io::{self, Write},
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Mutex,
+        atomic::{AtomicUsize, Ordering},
     },
     thread,
     time::SystemTime,

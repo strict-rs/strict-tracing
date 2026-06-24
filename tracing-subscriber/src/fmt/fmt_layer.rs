@@ -1048,10 +1048,10 @@ where
             {
                 let mut writer = self.make_writer.make_writer_for(event.metadata());
                 let res = io::Write::write_all(&mut writer, buf.as_bytes());
-                if self.log_internal_errors {
-                    if let Err(e) = res {
-                        eprintln!("[tracing-subscriber] Unable to write an event to the Writer for this Subscriber! Error: {}\n", e);
-                    }
+                if self.log_internal_errors
+                    && let Err(e) = res
+                {
+                    eprintln!("[tracing-subscriber] Unable to write an event to the Writer for this Subscriber! Error: {}\n", e);
                 }
             } else if self.log_internal_errors {
                 let err_msg = format!("Unable to format the following event. Name: {}; Fields: {:?}\n",
@@ -1614,8 +1614,8 @@ mod test {
         impl Drop for RestoreEnvVar {
             fn drop(&mut self) {
                 match self.0 {
-                    Ok(ref var) => env::set_var(NO_COLOR, var),
-                    Err(_) => env::remove_var(NO_COLOR),
+                    Ok(ref var) => unsafe { env::set_var(NO_COLOR, var) },
+                    Err(_) => unsafe { env::remove_var(NO_COLOR) },
                 }
             }
         }
@@ -1632,9 +1632,9 @@ mod test {
 
         for (var, ansi) in cases {
             if let Some(value) = var {
-                env::set_var(NO_COLOR, value);
+                unsafe { env::set_var(NO_COLOR, value); }
             } else {
-                env::remove_var(NO_COLOR);
+                unsafe { env::remove_var(NO_COLOR); }
             }
 
             let layer: Layer<()> = fmt::Layer::default();

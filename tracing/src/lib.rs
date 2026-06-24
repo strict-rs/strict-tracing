@@ -19,7 +19,7 @@
 //! The `tracing` crate provides the APIs necessary for instrumenting libraries
 //! and applications to emit trace data.
 //!
-//! *Compiler support: [requires `rustc` 1.65+][msrv]*
+//! *Compiler support: [requires `rustc` 1.96+][msrv]*
 //!
 //! [msrv]: #supported-rust-versions
 //! # Core Concepts
@@ -873,7 +873,7 @@
 //! ## Supported Rust Versions
 //!
 //! Tracing is built against the latest stable release. The minimum supported
-//! version is 1.65. The current Tracing version is not guaranteed to build on
+//! version is 1.96. The current Tracing version is not guaranteed to build on
 //! Rust versions earlier than the minimum supported version.
 //!
 //! Tracing follows the same compiler support policies as the rest of the Tokio
@@ -918,7 +918,7 @@
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
     html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
-    issue_tracker_base_url = "https://github.com/tokio-rs/tracing/issues/"
+    issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
 #![warn(
     missing_debug_implementations,
@@ -959,12 +959,12 @@ pub use self::{dispatcher::Dispatch, event::Event, field::Value, subscriber::Sub
 #[doc(hidden)]
 pub use self::span::Id;
 
+pub use tracing_core::{Level, Metadata, event};
 #[doc(hidden)]
 pub use tracing_core::{
     callsite::{self, Callsite},
     metadata,
 };
-pub use tracing_core::{event, Level, Metadata};
 
 #[doc(inline)]
 pub use self::span::Span;
@@ -987,7 +987,7 @@ pub mod subscriber;
 #[doc(hidden)]
 pub mod __macro_support {
     pub use crate::callsite::Callsite;
-    use crate::{subscriber::Interest, Metadata};
+    use crate::{Metadata, subscriber::Interest};
     use core::{fmt, str};
     // Re-export the `core` functions that are used in macros. This allows
     // a crate to be named `core` and avoid name clashes.

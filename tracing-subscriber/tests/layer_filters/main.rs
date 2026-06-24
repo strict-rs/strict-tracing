@@ -8,9 +8,9 @@ mod targets;
 mod trees;
 mod vec;
 
-use tracing::{level_filters::LevelFilter, Level};
+use tracing::{Level, level_filters::LevelFilter};
 use tracing_mock::{expect, layer, subscriber};
-use tracing_subscriber::{filter, prelude::*, Layer};
+use tracing_subscriber::{Layer, filter, prelude::*};
 
 #[test]
 fn basic_layer_filters() {
@@ -32,11 +32,11 @@ fn basic_layer_filters() {
         .only()
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry()
+    let subscriber = tracing_subscriber::registry()
         .with(trace_layer.with_filter(LevelFilter::TRACE))
         .with(debug_layer.with_filter(LevelFilter::DEBUG))
-        .with(info_layer.with_filter(LevelFilter::INFO))
-        .set_default();
+        .with(info_layer.with_filter(LevelFilter::INFO));
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::trace!("hello trace");
     tracing::debug!("hello debug");
@@ -67,11 +67,11 @@ fn basic_layer_filter_spans() {
         .only()
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry()
+    let subscriber = tracing_subscriber::registry()
         .with(trace_layer.with_filter(LevelFilter::TRACE))
         .with(debug_layer.with_filter(LevelFilter::DEBUG))
-        .with(info_layer.with_filter(LevelFilter::INFO))
-        .set_default();
+        .with(info_layer.with_filter(LevelFilter::INFO));
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::trace_span!("hello trace");
     tracing::debug_span!("hello debug");
@@ -91,10 +91,10 @@ fn global_filters_subscribers_still_work() {
         .only()
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry()
+    let subscriber = tracing_subscriber::registry()
         .with(expect)
-        .with(LevelFilter::INFO)
-        .set_default();
+        .with(LevelFilter::INFO);
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::trace!("hello trace");
     tracing::debug!("hello debug");
@@ -113,7 +113,7 @@ fn global_filter_interests_are_cached() {
         .only()
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry()
+    let subscriber = tracing_subscriber::registry()
         .with(expect.with_filter(filter::filter_fn(|meta| {
             assert!(
                 meta.level() <= &Level::INFO,
@@ -121,8 +121,8 @@ fn global_filter_interests_are_cached() {
             );
             meta.level() <= &Level::WARN
         })))
-        .with(LevelFilter::INFO)
-        .set_default();
+        .with(LevelFilter::INFO);
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::trace!("hello trace");
     tracing::debug!("hello debug");
@@ -142,10 +142,10 @@ fn global_filters_affect_subscriber_filters() {
         .only()
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry()
+    let subscriber = tracing_subscriber::registry()
         .with(expect.with_filter(LevelFilter::DEBUG))
-        .with(LevelFilter::INFO)
-        .set_default();
+        .with(LevelFilter::INFO);
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::trace!("hello trace");
     tracing::debug!("hello debug");
@@ -174,11 +174,11 @@ fn filter_fn() {
         .only()
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry()
+    let subscriber = tracing_subscriber::registry()
         .with(all)
         .with(foo.with_filter(filter::filter_fn(|meta| meta.target().starts_with("foo"))))
-        .with(bar.with_filter(filter::filter_fn(|meta| meta.target().starts_with("bar"))))
-        .set_default();
+        .with(bar.with_filter(filter::filter_fn(|meta| meta.target().starts_with("bar"))));
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::trace!(target: "foo", "hello foo");
     tracing::trace!(target: "bar", "hello bar");

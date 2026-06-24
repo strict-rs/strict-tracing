@@ -5,7 +5,7 @@
 mod yak_shave;
 
 use std::io;
-use tracing_subscriber::{fmt, layer::SubscriberExt, EnvFilter};
+use tracing_subscriber::{EnvFilter, fmt, layer::SubscriberExt};
 
 fn main() {
     let dir = tempfile::tempdir().expect("Failed to create tempdir");

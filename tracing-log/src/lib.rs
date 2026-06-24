@@ -14,7 +14,7 @@
 //! - [`LogTracer`], a [`log::Log`] implementation that consumes [`log::Record`]s
 //!   and outputs them as [`tracing::Event`].
 //!
-//! *Compiler support: [requires `rustc` 1.65+][msrv]*
+//! *Compiler support: [requires `rustc` 1.96+][msrv]*
 //!
 //! [msrv]: #supported-rust-versions
 //!
@@ -75,7 +75,7 @@
 //! ## Supported Rust Versions
 //!
 //! Tracing is built against the latest stable release. The minimum supported
-//! version is 1.65. The current Tracing version is not guaranteed to build on
+//! version is 1.96. The current Tracing version is not guaranteed to build on
 //! Rust versions earlier than the minimum supported version.
 //!
 //! Tracing follows the same compiler support policies as the rest of the Tokio
@@ -97,7 +97,7 @@
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
     html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
-    issue_tracker_base_url = "https://github.com/tokio-rs/tracing/issues/"
+    issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg), deny(rustdoc::broken_intra_doc_links))]
 #![warn(
@@ -127,12 +127,13 @@ use once_cell::sync::Lazy;
 use std::{fmt, io};
 
 use tracing_core::{
+    Event, Metadata,
     callsite::{self, Callsite},
     dispatcher,
     field::{self, Field, Visit},
     identify_callsite,
     metadata::{Kind, Level},
-    subscriber, Event, Metadata,
+    subscriber,
 };
 
 #[cfg(feature = "log-tracer")]

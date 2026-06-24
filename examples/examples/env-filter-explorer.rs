@@ -6,14 +6,14 @@ use std::{
 use ansi_to_tui::IntoText;
 use crossterm::event;
 use ratatui::{
+    DefaultTerminal, Frame,
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
     style::Stylize,
     widgets::{Block, Widget},
-    DefaultTerminal, Frame,
 };
-use tracing_subscriber::{filter::ParseError, fmt::MakeWriter, EnvFilter};
-use tui_textarea::{Input, Key, TextArea};
+use ratatui_textarea::{Input, Key, TextArea};
+use tracing_subscriber::{EnvFilter, filter::ParseError, fmt::MakeWriter};
 
 /// A list of preset filters to make it easier to explore the filter syntax.
 ///

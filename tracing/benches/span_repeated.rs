@@ -1,5 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use tracing::{span, Level};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
+use tracing::{Level, span};
 
 mod shared;
 

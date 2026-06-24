@@ -1,7 +1,7 @@
-use std::any::{type_name, TypeId};
+use std::any::{TypeId, type_name};
 use std::fmt;
 use std::marker::PhantomData;
-use tracing::{span, Dispatch, Metadata, Subscriber};
+use tracing::{Dispatch, Metadata, Subscriber, span};
 use tracing_subscriber::fmt::format::{DefaultFields, FormatFields};
 use tracing_subscriber::{
     fmt::FormattedFields,

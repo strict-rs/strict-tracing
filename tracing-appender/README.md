@@ -23,8 +23,8 @@ Writers for logging events and spans
 [docs-v0.2.x-url]: https://docs.rs/tracing-appender/
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [mit-url]: ../LICENSE
-[actions-badge]: https://github.com/tokio-rs/tracing/workflows/CI/badge.svg
-[actions-url]:https://github.com/tokio-rs/tracing/actions?query=workflow%3ACI
+[actions-badge]: https://github.com/strict-rs/strict-tracing/workflows/CI/badge.svg
+[actions-url]:https://github.com/strict-rs/strict-tracing/actions?query=workflow%3ACI
 [discord-badge]: https://img.shields.io/discord/500028886025895936?logo=discord&label=discord&logoColor=white
 [discord-url]: https://discord.gg/EeF3cQw
 
@@ -36,7 +36,7 @@ allows events and spans to be recorded in a non-blocking manner through a
 dedicated logging thread. It also provides a [`RollingFileAppender`][file_appender] 
 that can be used with _or_ without the non-blocking writer.
 
-*Compiler support: [requires `rustc` 1.63+][msrv]*
+*Compiler support: [requires `rustc` 1.96+][msrv]*
 
 [msrv]: #supported-rust-versions
 
@@ -146,7 +146,7 @@ fn main() {
 ## Supported Rust Versions
 
 `tracing-appender` is built against the latest stable release. The minimum supported
-version is 1.63. The current `tracing-appender` version is not guaranteed to build on
+version is 1.96. The current `tracing-appender` version is not guaranteed to build on
 Rust versions earlier than the minimum supported version.
 
 Tracing follows the same compiler support policies as the rest of the Tokio

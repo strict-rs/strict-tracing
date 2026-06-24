@@ -1,7 +1,7 @@
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use std::time::Duration;
-use tracing::{dispatcher::Dispatch, span, Event, Id, Metadata};
-use tracing_subscriber::{prelude::*, EnvFilter};
+use tracing::{Event, Id, Metadata, dispatcher::Dispatch, span};
+use tracing_subscriber::{EnvFilter, prelude::*};
 
 mod support;
 use support::MultithreadedBench;

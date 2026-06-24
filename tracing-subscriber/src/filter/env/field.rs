@@ -270,13 +270,13 @@ impl ValueMatch {
 impl fmt::Display for ValueMatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            ValueMatch::Bool(ref inner) => fmt::Display::fmt(inner, f),
-            ValueMatch::F64(ref inner) => fmt::Display::fmt(inner, f),
+            ValueMatch::Bool(inner) => fmt::Display::fmt(inner, f),
+            ValueMatch::F64(inner) => fmt::Display::fmt(inner, f),
             ValueMatch::NaN => fmt::Display::fmt(&f64::NAN, f),
-            ValueMatch::I64(ref inner) => fmt::Display::fmt(inner, f),
-            ValueMatch::U64(ref inner) => fmt::Display::fmt(inner, f),
-            ValueMatch::Debug(ref inner) => fmt::Display::fmt(inner, f),
-            ValueMatch::Pat(ref inner) => fmt::Display::fmt(inner, f),
+            ValueMatch::I64(inner) => fmt::Display::fmt(inner, f),
+            ValueMatch::U64(inner) => fmt::Display::fmt(inner, f),
+            ValueMatch::Debug(inner) => fmt::Display::fmt(inner, f),
+            ValueMatch::Pat(inner) => fmt::Display::fmt(inner, f),
         }
     }
 }
@@ -508,10 +508,10 @@ impl SpanMatch {
 impl Visit for MatchVisitor<'_> {
     fn record_f64(&mut self, field: &Field, value: f64) {
         match self.inner.fields.get(field) {
-            Some((ValueMatch::NaN, ref matched)) if value.is_nan() => {
+            Some((ValueMatch::NaN, matched)) if value.is_nan() => {
                 matched.store(true, Release);
             }
-            Some((ValueMatch::F64(ref e), ref matched)) if (value - *e).abs() < f64::EPSILON => {
+            Some((ValueMatch::F64(e), matched)) if (value - *e).abs() < f64::EPSILON => {
                 matched.store(true, Release);
             }
             _ => {}
@@ -522,10 +522,10 @@ impl Visit for MatchVisitor<'_> {
         use std::convert::TryInto;
 
         match self.inner.fields.get(field) {
-            Some((ValueMatch::I64(ref e), ref matched)) if value == *e => {
+            Some((ValueMatch::I64(e), matched)) if value == *e => {
                 matched.store(true, Release);
             }
-            Some((ValueMatch::U64(ref e), ref matched)) if Ok(value) == (*e).try_into() => {
+            Some((ValueMatch::U64(e), matched)) if Ok(value) == (*e).try_into() => {
                 matched.store(true, Release);
             }
             _ => {}
@@ -534,7 +534,7 @@ impl Visit for MatchVisitor<'_> {
 
     fn record_u64(&mut self, field: &Field, value: u64) {
         match self.inner.fields.get(field) {
-            Some((ValueMatch::U64(ref e), ref matched)) if value == *e => {
+            Some((ValueMatch::U64(e), matched)) if value == *e => {
                 matched.store(true, Release);
             }
             _ => {}
@@ -543,7 +543,7 @@ impl Visit for MatchVisitor<'_> {
 
     fn record_bool(&mut self, field: &Field, value: bool) {
         match self.inner.fields.get(field) {
-            Some((ValueMatch::Bool(ref e), ref matched)) if value == *e => {
+            Some((ValueMatch::Bool(e), matched)) if value == *e => {
                 matched.store(true, Release);
             }
             _ => {}
@@ -552,10 +552,10 @@ impl Visit for MatchVisitor<'_> {
 
     fn record_str(&mut self, field: &Field, value: &str) {
         match self.inner.fields.get(field) {
-            Some((ValueMatch::Pat(ref e), ref matched)) if e.str_matches(&value) => {
+            Some((ValueMatch::Pat(e), matched)) if e.str_matches(&value) => {
                 matched.store(true, Release);
             }
-            Some((ValueMatch::Debug(ref e), ref matched)) if e.debug_matches(&value) => {
+            Some((ValueMatch::Debug(e), matched)) if e.debug_matches(&value) => {
                 matched.store(true, Release)
             }
             _ => {}
@@ -564,10 +564,10 @@ impl Visit for MatchVisitor<'_> {
 
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         match self.inner.fields.get(field) {
-            Some((ValueMatch::Pat(ref e), ref matched)) if e.debug_matches(&value) => {
+            Some((ValueMatch::Pat(e), matched)) if e.debug_matches(&value) => {
                 matched.store(true, Release);
             }
-            Some((ValueMatch::Debug(ref e), ref matched)) if e.debug_matches(&value) => {
+            Some((ValueMatch::Debug(e), matched)) if e.debug_matches(&value) => {
                 matched.store(true, Release)
             }
             _ => {}

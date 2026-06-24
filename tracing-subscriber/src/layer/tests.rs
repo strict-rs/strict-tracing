@@ -232,42 +232,48 @@ mod registry_tests {
             // it should pick the outer hint. This is because the outer filter
             // will disable the spans/events before they make it to the inner
             // filter.
-            let subscriber = dbg!(crate::registry().with(
-                NopLayer
-                    .with_filter(filter_fn(|_| true))
-                    .and_then(NopLayer.with_filter(filter_fn(|_| true)))
-                    .with_filter(LevelFilter::INFO),
-            ));
+            let subscriber = dbg!(
+                crate::registry().with(
+                    NopLayer
+                        .with_filter(filter_fn(|_| true))
+                        .and_then(NopLayer.with_filter(filter_fn(|_| true)))
+                        .with_filter(LevelFilter::INFO),
+                )
+            );
             assert_eq!(dbg!(subscriber).max_level_hint(), Some(LevelFilter::INFO));
         }
 
         #[test]
         fn unhinted_nested_inner() {
-            let subscriber = dbg!(crate::registry()
-                .with(NopLayer.and_then(NopLayer).with_filter(LevelFilter::INFO))
-                .with(
-                    NopLayer
-                        .with_filter(filter_fn(|_| true))
-                        .and_then(NopLayer.with_filter(filter_fn(|_| true)))
-                        .with_filter(LevelFilter::WARN),
-                ));
+            let subscriber = dbg!(
+                crate::registry()
+                    .with(NopLayer.and_then(NopLayer).with_filter(LevelFilter::INFO))
+                    .with(
+                        NopLayer
+                            .with_filter(filter_fn(|_| true))
+                            .and_then(NopLayer.with_filter(filter_fn(|_| true)))
+                            .with_filter(LevelFilter::WARN),
+                    )
+            );
             assert_eq!(dbg!(subscriber).max_level_hint(), Some(LevelFilter::INFO));
         }
 
         #[test]
         fn unhinted_nested_inner_mixed() {
-            let subscriber = dbg!(crate::registry()
-                .with(
-                    NopLayer
-                        .and_then(NopLayer.with_filter(filter_fn(|_| true)))
-                        .with_filter(LevelFilter::INFO)
-                )
-                .with(
-                    NopLayer
-                        .with_filter(filter_fn(|_| true))
-                        .and_then(NopLayer.with_filter(filter_fn(|_| true)))
-                        .with_filter(LevelFilter::WARN),
-                ));
+            let subscriber = dbg!(
+                crate::registry()
+                    .with(
+                        NopLayer
+                            .and_then(NopLayer.with_filter(filter_fn(|_| true)))
+                            .with_filter(LevelFilter::INFO)
+                    )
+                    .with(
+                        NopLayer
+                            .with_filter(filter_fn(|_| true))
+                            .and_then(NopLayer.with_filter(filter_fn(|_| true)))
+                            .with_filter(LevelFilter::WARN),
+                    )
+            );
             assert_eq!(dbg!(subscriber).max_level_hint(), Some(LevelFilter::INFO));
         }
 

@@ -6,7 +6,7 @@
 //!
 //! [`ExpectedSpan`]: crate::span::ExpectedSpan
 //!
-use tracing::{subscriber::with_default, Level};
+use tracing::{Level, subscriber::with_default};
 use tracing_mock::{expect, subscriber};
 
 #[test]

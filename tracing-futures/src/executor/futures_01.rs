@@ -1,7 +1,7 @@
 use crate::{Instrument, Instrumented, WithDispatch};
 use futures_01::{
-    future::{ExecuteError, Executor},
     Future,
+    future::{ExecuteError, Executor},
 };
 
 impl<T, F> Executor<F> for Instrumented<T>
@@ -34,18 +34,18 @@ where
     }
 }
 
-#[cfg(feature = "tokio")]
+#[cfg(feature = "tokio-executor")]
 #[allow(unreachable_pub, unused_imports)] // https://github.com/rust-lang/rust/issues/57411
-pub use self::tokio::*;
+pub use self::tokio_executor::*;
 
-#[cfg(feature = "tokio")]
-mod tokio {
+/// `tokio_executor::Executor`/`TypedExecutor` integration for the instrumented
+/// wrappers. Enabled by the `tokio-executor` feature (and by `tokio`, which
+/// implies it).
+#[cfg(feature = "tokio-executor")]
+mod tokio_executor {
     use crate::{Instrument, Instrumented, WithDispatch};
+    use ::tokio_executor::{Executor, SpawnError, TypedExecutor};
     use futures_01::Future;
-    use tokio_01::{
-        executor::{Executor, SpawnError, TypedExecutor},
-        runtime::{current_thread, Runtime, TaskExecutor},
-    };
 
     impl<T> Executor for Instrumented<T>
     where
@@ -73,6 +73,46 @@ mod tokio {
             self.inner.status()
         }
     }
+
+    impl<T> Executor for WithDispatch<T>
+    where
+        T: Executor,
+    {
+        fn spawn(
+            &mut self,
+            future: Box<dyn Future<Error = (), Item = ()> + 'static + Send>,
+        ) -> Result<(), SpawnError> {
+            // TODO: get rid of double box?
+            let future = Box::new(self.with_dispatch(future));
+            self.inner.spawn(future)
+        }
+    }
+
+    impl<T, F> TypedExecutor<F> for WithDispatch<T>
+    where
+        T: TypedExecutor<WithDispatch<F>>,
+    {
+        fn spawn(&mut self, future: F) -> Result<(), SpawnError> {
+            self.inner.spawn(self.with_dispatch(future))
+        }
+
+        fn status(&self) -> Result<(), SpawnError> {
+            self.inner.status()
+        }
+    }
+}
+
+#[cfg(feature = "tokio")]
+#[allow(unreachable_pub, unused_imports)] // https://github.com/rust-lang/rust/issues/57411
+pub use self::tokio_runtime::*;
+
+/// tokio 0.1 runtime conveniences (`Runtime`/`current_thread::Runtime`).
+/// Provided only by the full `tokio` feature.
+#[cfg(feature = "tokio")]
+mod tokio_runtime {
+    use crate::{Instrument, Instrumented, WithDispatch};
+    use futures_01::Future;
+    use tokio_01::runtime::{Runtime, TaskExecutor, current_thread};
 
     impl Instrumented<Runtime> {
         /// Spawn an instrumented future onto the Tokio runtime.
@@ -188,33 +228,6 @@ mod tokio {
         /// futures prior to spawning them.
         pub fn handle(&self) -> Instrumented<current_thread::Handle> {
             self.inner.handle().instrument(self.span.clone())
-        }
-    }
-
-    impl<T> Executor for WithDispatch<T>
-    where
-        T: Executor,
-    {
-        fn spawn(
-            &mut self,
-            future: Box<dyn Future<Error = (), Item = ()> + 'static + Send>,
-        ) -> Result<(), SpawnError> {
-            // TODO: get rid of double box?
-            let future = Box::new(self.with_dispatch(future));
-            self.inner.spawn(future)
-        }
-    }
-
-    impl<T, F> TypedExecutor<F> for WithDispatch<T>
-    where
-        T: TypedExecutor<WithDispatch<F>>,
-    {
-        fn spawn(&mut self, future: F) -> Result<(), SpawnError> {
-            self.inner.spawn(self.with_dispatch(future))
-        }
-
-        fn status(&self) -> Result<(), SpawnError> {
-            self.inner.status()
         }
     }
 

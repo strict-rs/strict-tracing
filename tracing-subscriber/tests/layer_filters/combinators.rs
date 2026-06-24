@@ -25,9 +25,9 @@ fn and() {
     // spans and events that *both* filters will enable:
     let filter = target_filter.and(level_filter);
 
-    let _subscriber = tracing_subscriber::registry()
-        .with(layer.with_filter(filter))
-        .set_default();
+    let subscriber = tracing_subscriber::registry()
+        .with(layer.with_filter(filter));
+        let _subscriber = tracing::subscriber::set_default(subscriber);
 
     // This event will *not* be enabled:
     tracing::info!("an event with an uninteresting target");

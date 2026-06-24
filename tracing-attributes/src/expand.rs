@@ -2,17 +2,17 @@ use std::iter;
 
 use proc_macro2::TokenStream;
 use quote::TokenStreamExt;
-use quote::{quote, quote_spanned, ToTokens};
+use quote::{ToTokens, quote, quote_spanned};
 use syn::visit_mut::VisitMut;
 use syn::{
-    punctuated::Punctuated, spanned::Spanned, Expr, ExprAsync, ExprCall, FieldPat, FnArg, Ident,
-    Item, ItemFn, Pat, PatIdent, PatReference, PatStruct, PatTuple, PatTupleStruct, PatType, Path,
-    ReturnType, Signature, Stmt, Token, Type, TypePath,
+    Expr, ExprAsync, ExprCall, FieldPat, FnArg, Ident, Item, ItemFn, Pat, PatIdent, PatReference,
+    PatStruct, PatTuple, PatTupleStruct, PatType, Path, ReturnType, Signature, Stmt, Token, Type,
+    TypePath, punctuated::Punctuated, spanned::Spanned,
 };
 
 use crate::{
-    attr::{Field, FieldName, Fields, FormatMode, InstrumentArgs, Level},
     MaybeItemFn, MaybeItemFnRef,
+    attr::{Field, FieldName, Fields, FormatMode, InstrumentArgs, Level},
 };
 
 /// Given an existing function, generate an instrumented version of that function
@@ -210,7 +210,7 @@ fn gen_block<B: ToTokens>(
                 // If any parameters have the same name as a custom field, skip
                 // and allow them to be formatted by the custom field.
                 if let Some(ref fields) = args.fields {
-                    fields.0.iter().all(|Field { ref name, .. }| {
+                    fields.0.iter().all(|Field { name, .. }| {
                         match name {
                             // #3158: Expressions cannot be evaluated at compile time and will
                             // incur a runtime cost to de-duplicate.
@@ -678,20 +678,19 @@ impl<'block> AsyncInfo<'block> {
         // parameter type) with the type of "_self"
         let mut self_type = None;
         for arg in &func.sig.inputs {
-            if let FnArg::Typed(ty) = arg {
-                if let Pat::Ident(PatIdent { ref ident, .. }) = *ty.pat {
-                    if ident == "_self" {
-                        let mut ty = *ty.ty.clone();
-                        // extract the inner type if the argument is "&self" or "&mut self"
-                        if let Type::Reference(syn::TypeReference { elem, .. }) = ty {
-                            ty = *elem;
-                        }
+            if let FnArg::Typed(ty) = arg
+                && let Pat::Ident(PatIdent { ref ident, .. }) = *ty.pat
+                && ident == "_self"
+            {
+                let mut ty = *ty.ty.clone();
+                // extract the inner type if the argument is "&self" or "&mut self"
+                if let Type::Reference(syn::TypeReference { elem, .. }) = ty {
+                    ty = *elem;
+                }
 
-                        if let Type::Path(tp) = ty {
-                            self_type = Some(tp);
-                            break;
-                        }
-                    }
+                if let Type::Path(tp) = ty {
+                    self_type = Some(tp);
+                    break;
                 }
             }
         }
@@ -816,10 +815,10 @@ impl VisitMut for IdentAndTypesRenamer<'_> {
 
     fn visit_type_mut(&mut self, ty: &mut Type) {
         for (type_name, new_type) in &self.types {
-            if let Type::Path(TypePath { path, .. }) = ty {
-                if path_to_string(path) == *type_name {
-                    *ty = Type::Path(new_type.clone());
-                }
+            if let Type::Path(TypePath { path, .. }) = ty
+                && path_to_string(path) == *type_name
+            {
+                *ty = Type::Path(new_type.clone());
             }
         }
     }

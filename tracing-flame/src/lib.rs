@@ -10,7 +10,7 @@
 //! issues bottlenecks in an application. For more details, see Brendan Gregg's [post]
 //! on flamegraphs.
 //!
-//! *Compiler support: [requires `rustc` 1.65+][msrv]*
+//! *Compiler support: [requires `rustc` 1.96+][msrv]*
 //!
 //! [msrv]: #supported-rust-versions
 //! [post]: http://www.brendangregg.com/flamegraphs.html
@@ -95,7 +95,7 @@
 //! ## Supported Rust Versions
 //!
 //! Tracing is built against the latest stable release. The minimum supported
-//! version is 1.65. The current Tracing version is not guaranteed to build on
+//! version is 1.96. The current Tracing version is not guaranteed to build on
 //! Rust versions earlier than the minimum supported version.
 //!
 //! Tracing follows the same compiler support policies as the rest of the Tokio
@@ -109,7 +109,7 @@
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
     html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
-    issue_tracker_base_url = "https://github.com/tokio-rs/tracing/issues/"
+    issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
 #![cfg_attr(docsrs, deny(rustdoc::broken_intra_doc_links))]
 #![warn(
@@ -149,12 +149,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
-use tracing::span;
 use tracing::Subscriber;
+use tracing::span;
+use tracing_subscriber::Layer;
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::registry::SpanRef;
-use tracing_subscriber::Layer;
 
 mod error;
 
@@ -486,10 +486,10 @@ fn write<S>(dest: &mut String, span: SpanRef<'_, S>, config: &Config) -> fmt::Re
 where
     S: Subscriber + for<'span> LookupSpan<'span>,
 {
-    if config.module_path {
-        if let Some(module_path) = span.metadata().module_path() {
-            write!(dest, "{}::", module_path)?;
-        }
+    if config.module_path
+        && let Some(module_path) = span.metadata().module_path()
+    {
+        write!(dest, "{}::", module_path)?;
     }
 
     write!(dest, "{}", span.name())?;

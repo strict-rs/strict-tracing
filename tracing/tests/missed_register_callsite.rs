@@ -6,7 +6,7 @@ use std::{
 };
 
 use tracing::Subscriber;
-use tracing_core::{span, Metadata};
+use tracing_core::{Metadata, span};
 
 struct TestSubscriber {
     creator_thread: String,

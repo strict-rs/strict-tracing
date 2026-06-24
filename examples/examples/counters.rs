@@ -1,18 +1,19 @@
 #![deny(rust_2018_idioms)]
 
 use tracing::{
+    Event, Id, Level, Metadata,
     field::{Field, Visit},
     info, span,
     subscriber::{self, Subscriber},
-    warn, Event, Id, Level, Metadata,
+    warn,
 };
 
 use std::{
     collections::HashMap,
     fmt,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc, RwLock, RwLockReadGuard,
+        atomic::{AtomicUsize, Ordering},
     },
 };
 

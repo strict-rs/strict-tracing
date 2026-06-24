@@ -2,8 +2,8 @@
 name = "tracing-tower"
 version = "0.1.0"
 authors = ["Eliza Weisman <eliza@buoyant.io>"]
-edition = "2018"
-repository = "https://github.com/tokio-rs/tracing"
+edition.workspace = true
+repository.workspace = true
 homepage = "https://tokio.rs"
 description = """
 Compatibility with the `tower` ecosystem.
@@ -14,24 +14,23 @@ categories = [
     "asynchronous",
 ]
 keywords = ["logging", "tracing"]
-license = "MIT"
-rust-version = "1.65.0"
+license.workspace = true
+rust-version.workspace = true
 
 [features]
 default = ["tower-layer", "tower-make"]
-tower-make = [
-    "tower_make",
-    "pin-project-lite",
-]
+tower-layer = ["dep:tower-layer"]
+tower-make = ["dep:tower_make", "dep:pin-project-lite"]
+http = ["dep:http"]
 
 [dependencies]
-tracing = { path = "../tracing", version = "0.1.35", default-features = false, features = ["std"] }
-futures = "0.3.21"
-tower-service = "0.3.2"
-tower-layer = { version = "0.3.1", optional = true }
-tower_make = { package = "tower-make", version = "0.3.0", optional = true }
-pin-project-lite = { version = "0.2.9", optional = true }
-http = { version = "0.2.8", optional = true }
+tracing = { workspace = true, features = ["std"] }
+futures = { workspace = true, default-features = true }
+tower-service = { workspace = true }
+tower-layer = { workspace = true, optional = true }
+tower_make = { workspace = true, optional = true }
+pin-project-lite = { workspace = true, optional = true }
+http = { workspace = true, optional = true }
 
 [badges]
 maintenance = { status = "experimental" }

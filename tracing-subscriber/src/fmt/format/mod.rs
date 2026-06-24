@@ -992,10 +992,10 @@ where
                 seen = true;
 
                 let ext = span.extensions();
-                if let Some(fields) = &ext.get::<FormattedFields<N>>() {
-                    if !fields.is_empty() {
-                        write!(writer, "{}{}{}", bold.paint("{"), fields, bold.paint("}"))?;
-                    }
+                if let Some(fields) = ext.get::<FormattedFields<N>>()
+                    && !fields.is_empty()
+                {
+                    write!(writer, "{}{}{}", bold.paint("{"), fields, bold.paint("}"))?;
                 }
                 write!(writer, "{}", dimmed.paint(":"))?;
             }
@@ -1020,16 +1020,16 @@ where
             None
         };
 
-        if self.display_filename {
-            if let Some(filename) = meta.file() {
-                write!(
-                    writer,
-                    "{}{}{}",
-                    dimmed.paint(filename),
-                    dimmed.paint(":"),
-                    if line_number.is_some() { "" } else { " " }
-                )?;
-            }
+        if self.display_filename
+            && let Some(filename) = meta.file()
+        {
+            write!(
+                writer,
+                "{}{}{}",
+                dimmed.paint(filename),
+                dimmed.paint(":"),
+                if line_number.is_some() { "" } else { " " }
+            )?;
         }
 
         if let Some(line_number) = line_number {
@@ -1133,28 +1133,28 @@ where
             needs_space = true;
         }
 
-        if self.display_filename {
-            if let Some(filename) = meta.file() {
-                if self.display_target {
-                    writer.write_char(' ')?;
-                }
-                write!(writer, "{}{}", dimmed.paint(filename), dimmed.paint(":"))?;
-                needs_space = true;
+        if self.display_filename
+            && let Some(filename) = meta.file()
+        {
+            if self.display_target {
+                writer.write_char(' ')?;
             }
+            write!(writer, "{}{}", dimmed.paint(filename), dimmed.paint(":"))?;
+            needs_space = true;
         }
 
-        if self.display_line_number {
-            if let Some(line_number) = meta.line() {
-                write!(
-                    writer,
-                    "{}{}{}{}",
-                    dimmed.prefix(),
-                    line_number,
-                    dimmed.suffix(),
-                    dimmed.paint(":")
-                )?;
-                needs_space = true;
-            }
+        if self.display_line_number
+            && let Some(line_number) = meta.line()
+        {
+            write!(
+                writer,
+                "{}{}{}{}",
+                dimmed.prefix(),
+                line_number,
+                dimmed.suffix(),
+                dimmed.paint(":")
+            )?;
+            needs_space = true;
         }
 
         if needs_space {
@@ -1169,10 +1169,10 @@ where
             .flat_map(crate::registry::Scope::from_root)
         {
             let exts = span.extensions();
-            if let Some(fields) = exts.get::<FormattedFields<N>>() {
-                if !fields.is_empty() {
-                    write!(writer, " {}", dimmed.paint(&fields.fields))?;
-                }
+            if let Some(fields) = exts.get::<FormattedFields<N>>()
+                && !fields.is_empty()
+            {
+                write!(writer, " {}", dimmed.paint(&fields.fields))?;
             }
         }
         writeln!(writer)

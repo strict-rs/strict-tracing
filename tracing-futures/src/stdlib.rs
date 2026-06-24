@@ -22,8 +22,8 @@ mod no_std {
 
     pub(crate) use core::{
         any, array, ascii, cell, char, clone, cmp, convert, default, f32, f64, ffi, future, hash,
-        hint, i128, i16, i8, isize, iter, marker, mem, num, ops, option, pin, ptr, result, task,
-        time, u128, u16, u32, u8, usize,
+        hint, i8, i16, i128, isize, iter, marker, mem, num, ops, option, pin, ptr, result, task,
+        time, u8, u16, u32, u128, usize,
     };
 
     pub(crate) mod borrow {

@@ -74,8 +74,8 @@ impl Directive {
             .iter()
             .filter_map(
                 |field::Match {
-                     ref name,
-                     ref value,
+                     name,
+                     value,
                  }| {
                     if let Some(field) = fieldset.field(name) {
                         let value = value.as_ref().cloned()?;
@@ -242,18 +242,18 @@ impl Match for Directive {
     fn cares_about(&self, meta: &Metadata<'_>) -> bool {
         // Does this directive have a target filter, and does it match the
         // metadata's target?
-        if let Some(ref target) = self.target {
-            if !meta.target().starts_with(&target[..]) {
-                return false;
-            }
+        if let Some(target) = self.target.as_deref()
+            && !meta.target().starts_with(target)
+        {
+            return false;
         }
 
         // Do we have a name filter, and does it match the metadata's name?
         // TODO(eliza): put name globbing here?
-        if let Some(ref name) = self.in_span {
-            if name != meta.name() {
-                return false;
-            }
+        if let Some(name) = self.in_span.as_deref()
+            && name != meta.name()
+        {
+            return false;
         }
 
         // Does the metadata define all the fields that this directive cares about?

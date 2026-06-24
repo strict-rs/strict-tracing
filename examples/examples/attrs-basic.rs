@@ -1,6 +1,6 @@
 #![deny(rust_2018_idioms)]
 
-use tracing::{debug, info, span, Level};
+use tracing::{Level, debug, info, span};
 use tracing_attributes::instrument;
 
 #[instrument]

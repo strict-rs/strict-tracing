@@ -122,8 +122,8 @@ use std::{
 };
 
 use tracing_core::{
-    span::{Attributes, Id, Record},
     Event, Subscriber,
+    span::{Attributes, Id, Record},
 };
 use tracing_subscriber::{
     layer::{Context, Layer},
@@ -131,7 +131,7 @@ use tracing_subscriber::{
 };
 
 use crate::{
-    ancestry::{get_ancestry, ActualAncestry, HasAncestry},
+    ancestry::{ActualAncestry, HasAncestry, get_ancestry},
     event::ExpectedEvent,
     expect::Expect,
     span::{ActualSpan, ExpectedSpan, NewSpan},
@@ -979,10 +979,8 @@ where
         );
         let mut expected = self.expected.lock().unwrap();
         let was_expected = matches!(expected.front(), Some(Expect::NewSpan(_)));
-        if was_expected {
-            if let Expect::NewSpan(mut expected) = expected.pop_front().unwrap() {
-                expected.check(span, || context_get_ancestry(span, &cx), &self.name);
-            }
+        if was_expected && let Expect::NewSpan(mut expected) = expected.pop_front().unwrap() {
+            expected.check(span, || context_get_ancestry(span, &cx), &self.name);
         }
     }
 
@@ -1047,13 +1045,13 @@ where
         }
         if let Ok(mut expected) = self.expected.try_lock() {
             let was_expected = match expected.front() {
-                Some(Expect::DropSpan(ref expected_span)) => {
+                Some(Expect::DropSpan(expected_span)) => {
                     // Don't assert if this function was called while panicking,
                     // as failing the assertion can cause a double panic.
-                    if !::std::thread::panicking() {
-                        if let Some(ref span) = span {
-                            expected_span.check(&span.into(), "to close a span", &self.name);
-                        }
+                    if !::std::thread::panicking()
+                        && let Some(ref span) = span
+                    {
+                        expected_span.check(&span.into(), "to close a span", &self.name);
                     }
                     true
                 }

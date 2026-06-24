@@ -25,13 +25,19 @@
 
 use bytes::Bytes;
 use futures::{
-    future::{self, Ready},
     Future,
+    future::{self, Ready},
 };
-use http::{header, Method, Request, Response, StatusCode};
-use hyper::{server::conn::AddrStream, Body, Client, Server};
-use rand::Rng;
+use http::{Method, Request, Response, StatusCode, header};
+use http_body_util::{BodyExt, Empty, Full, combinators::BoxBody};
+use hyper::body::Incoming;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::server::conn::auto;
+use hyper_util::service::TowerToHyperService;
+use rand::RngExt;
 use std::{
+    convert::Infallible,
     error::Error,
     fmt,
     net::SocketAddr,
@@ -39,15 +45,17 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
+use tokio::net::TcpListener;
 use tokio::{time, try_join};
 use tower::{Service, ServiceBuilder, ServiceExt};
 use tracing::{
-    self, debug, error, info, info_span, span, trace, warn, Instrument as _, Level, Span,
+    self, Instrument as _, Level, Span, debug, error, info, info_span, span, trace, warn,
 };
 use tracing_subscriber::{filter::EnvFilter, reload::Handle};
-use tracing_tower::{request_span, request_span::make};
+use tracing_tower::{GetSpan, request_span, request_span::make};
 
 type Err = Box<dyn Error + Send + Sync + 'static>;
+type RspBody = BoxBody<Bytes, Infallible>;
 
 #[tokio::main]
 async fn main() -> Result<(), Err> {
@@ -60,21 +68,18 @@ async fn main() -> Result<(), Err> {
     let addr = "[::1]:3000".parse::<SocketAddr>()?;
     let admin_addr = "[::1]:3001".parse::<SocketAddr>()?;
 
-    let admin = ServiceBuilder::new().service(AdminSvc { handle });
+    let admin = AdminSvc { handle };
 
-    let svc = ServiceBuilder::new()
+    let make_svc = ServiceBuilder::new()
         .layer(make::layer::<_, Svc, _>(req_span))
         .service(MakeSvc);
-
-    let svc = Server::bind(&addr).serve(svc);
-    let admin = Server::bind(&admin_addr).serve(admin);
 
     let res = try_join!(
         tokio::spawn(load_gen(addr)),
         tokio::spawn(load_gen(addr)),
         tokio::spawn(load_gen(addr)),
-        tokio::spawn(svc),
-        tokio::spawn(admin)
+        tokio::spawn(serve(addr, make_svc)),
+        tokio::spawn(serve_admin(admin_addr, admin)),
     );
 
     match res {
@@ -86,9 +91,54 @@ async fn main() -> Result<(), Err> {
     Ok(())
 }
 
+async fn serve<G>(
+    addr: SocketAddr,
+    mut make_svc: make::MakeService<MakeSvc, Request<Incoming>, G>,
+) -> Result<(), Err>
+where
+    G: GetSpan<Request<Incoming>> + Clone + Send + 'static,
+{
+    let listener = TcpListener::bind(addr).await?;
+    loop {
+        let (stream, remote_addr) = listener.accept().await?;
+        let io = TokioIo::new(stream);
+        let svc = make_svc.call(remote_addr).await?;
+        let hyper_svc = TowerToHyperService::new(svc);
+        tokio::spawn(async move {
+            if let Err(e) = auto::Builder::new(TokioExecutor::new())
+                .serve_connection(io, hyper_svc)
+                .await
+            {
+                error!(error = %e, "connection error");
+            }
+        });
+    }
+}
+
+async fn serve_admin<S>(addr: SocketAddr, admin: AdminSvc<S>) -> Result<(), Err>
+where
+    S: tracing::Subscriber + 'static,
+{
+    let listener = TcpListener::bind(addr).await?;
+    loop {
+        let (stream, _remote_addr) = listener.accept().await?;
+        let io = TokioIo::new(stream);
+        let hyper_svc = TowerToHyperService::new(admin.clone());
+        tokio::spawn(async move {
+            if let Err(e) = auto::Builder::new(TokioExecutor::new())
+                .serve_connection(io, hyper_svc)
+                .await
+            {
+                error!(error = %e, "admin connection error");
+            }
+        });
+    }
+}
+
+#[derive(Clone)]
 struct Svc;
-impl Service<Request<Body>> for Svc {
-    type Response = Response<Body>;
+impl Service<Request<Incoming>> for Svc {
+    type Response = Response<RspBody>;
     type Error = Err;
     type Future = Ready<Result<Self::Response, Self::Error>>;
 
@@ -96,7 +146,7 @@ impl Service<Request<Body>> for Svc {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: Request<Body>) -> Self::Future {
+    fn call(&mut self, req: Request<Incoming>) -> Self::Future {
         let rsp = Self::handle_request(req)
             .map(|body| {
                 trace!("sending response");
@@ -121,7 +171,7 @@ impl Service<Request<Body>> for Svc {
 }
 
 impl Svc {
-    fn handle_request(req: Request<Body>) -> Result<String, HandleError> {
+    fn handle_request(req: Request<Incoming>) -> Result<String, HandleError> {
         const BAD_METHOD: WrongMethod = WrongMethod(&[Method::GET]);
         trace!("handling request...");
         match (req.method(), req.uri().path()) {
@@ -171,6 +221,7 @@ enum HandleError {
 #[derive(Debug, Clone)]
 struct WrongMethod(&'static [Method]);
 
+#[derive(Clone)]
 struct MakeSvc;
 impl<T> Service<T> for MakeSvc {
     type Response = Svc;
@@ -198,36 +249,19 @@ impl<S> Clone for AdminSvc<S> {
     }
 }
 
-impl<'a, S> Service<&'a AddrStream> for AdminSvc<S>
-where
-    S: tracing::Subscriber,
-{
-    type Response = AdminSvc<S>;
-    type Error = hyper::Error;
-    type Future = Ready<Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
-
-    fn call(&mut self, _: &'a AddrStream) -> Self::Future {
-        future::ok(self.clone())
-    }
-}
-
-impl<S> Service<Request<Body>> for AdminSvc<S>
+impl<S> Service<Request<Incoming>> for AdminSvc<S>
 where
     S: tracing::Subscriber + 'static,
 {
-    type Response = Response<Body>;
+    type Response = Response<RspBody>;
     type Error = Err;
-    type Future = Pin<Box<dyn Future<Output = Result<Response<Body>, Err>> + std::marker::Send>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Response<RspBody>, Err>> + std::marker::Send>>;
 
     fn poll_ready(&mut self, _: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, req: Request<Body>) -> Self::Future {
+    fn call(&mut self, req: Request<Incoming>) -> Self::Future {
         // we need to clone so that the reference to self
         // isn't outlived by the returned future.
         let handle = self.clone();
@@ -236,13 +270,13 @@ where
                 (&Method::PUT, "/filter") => {
                     trace!("setting filter");
 
-                    let body = hyper::body::to_bytes(req).await?;
+                    let body = req.into_body().collect().await?.to_bytes();
                     match handle.set_from(body) {
                         Err(error) => {
                             error!(%error, "setting filter failed!");
                             rsp(StatusCode::INTERNAL_SERVER_ERROR, error)
                         }
-                        Ok(()) => rsp(StatusCode::NO_CONTENT, Body::empty()),
+                        Ok(()) => rsp(StatusCode::NO_CONTENT, empty()),
                     }
                 }
                 _ => rsp(StatusCode::NOT_FOUND, "try `/filter`"),
@@ -268,11 +302,15 @@ where
     }
 }
 
-fn rsp(status: StatusCode, body: impl Into<Body>) -> Response<Body> {
+fn rsp(status: StatusCode, body: impl Into<Bytes>) -> Response<RspBody> {
     Response::builder()
         .status(status)
-        .body(body.into())
+        .body(Full::new(body.into()).boxed())
         .expect("builder with known status code must not fail")
+}
+
+fn empty() -> Bytes {
+    Bytes::new()
 }
 
 impl HandleError {
@@ -286,7 +324,7 @@ impl fmt::Display for HandleError {
         match self {
             HandleError::BadPath => f.pad("path must be a single ASCII character"),
             HandleError::NoContentLength => f.pad("request must have Content-Length header"),
-            HandleError::BadRequest(ref e) => write!(f, "bad request: {}", e),
+            HandleError::BadRequest(e) => write!(f, "bad request: {}", e),
             HandleError::Unknown => f.pad("unknown internal error"),
         }
     }
@@ -304,20 +342,21 @@ impl std::error::Error for WrongMethod {}
 
 fn gen_uri(authority: &str) -> (usize, String) {
     static ALPHABET: &str = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    let mut rng = rand::thread_rng();
-    let idx = rng.gen_range(0, ALPHABET.len() + 1);
-    let len = rng.gen_range(0, 26);
+    let mut rng = rand::rng();
+    let idx = rng.random_range(0..ALPHABET.len() + 1);
+    let len = rng.random_range(0..26);
     let letter = ALPHABET.get(idx..=idx).unwrap_or("");
     (len, format!("http://{}/{}", authority, letter))
 }
 
 #[tracing::instrument(target = "gen", "load_gen")]
 async fn load_gen(addr: SocketAddr) -> Result<(), Err> {
+    let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
     let svc = ServiceBuilder::new()
         .buffer(5)
         .layer(request_span::layer(req_span))
         .timeout(Duration::from_millis(200))
-        .service(Client::new());
+        .service(client);
     let mut interval = tokio::time::interval(Duration::from_millis(50));
 
     loop {
@@ -326,13 +365,13 @@ async fn load_gen(addr: SocketAddr) -> Result<(), Err> {
         let mut svc = svc.clone().ready_oneshot().await?;
 
         let f = async move {
-            let sleep = rand::thread_rng().gen_range(0, 25);
+            let sleep = rand::rng().random_range(0..25);
             time::sleep(Duration::from_millis(sleep)).await;
 
             let (len, uri) = gen_uri(&authority);
             let req = Request::get(&uri[..])
                 .header("Content-Length", len)
-                .body(Body::empty())
+                .body(Empty::<Bytes>::new())
                 .unwrap();
 
             let span = tracing::debug_span!(
@@ -356,12 +395,12 @@ async fn load_gen(addr: SocketAddr) -> Result<(), Err> {
                     error!(target: "gen", status = ?status, "error received from server!");
                 }
 
-                let body = match hyper::body::to_bytes(rsp).await {
+                let body = match rsp.into_body().collect().await {
                     Err(e) => {
                         error!(target: "gen", error = ?e, "body error!");
                         return Err(e.into());
                     }
-                    Ok(body) => body,
+                    Ok(body) => body.to_bytes(),
                 };
                 let body = String::from_utf8(body.to_vec())?;
                 info!(target: "gen", message = "response complete.", rsp.body = %body);

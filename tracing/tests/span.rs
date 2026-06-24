@@ -6,11 +6,10 @@
 use std::thread;
 
 use tracing::{
-    error_span,
-    field::{debug, display, Empty},
+    Level, Span, error_span,
+    field::{Empty, debug, display},
     record_all,
     subscriber::with_default,
-    Level, Span,
 };
 use tracing_mock::*;
 

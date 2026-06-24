@@ -2,11 +2,11 @@
 // that may influence the interest cache.
 
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
     Arc,
+    atomic::{AtomicUsize, Ordering},
 };
 use tracing_mock::{expect, layer};
-use tracing_subscriber::{filter, prelude::*, Layer};
+use tracing_subscriber::{Layer, filter, prelude::*};
 
 /// A `None` filter should always be interested in events, and it should not
 /// needlessly degrade the caching of other filters.
@@ -37,7 +37,7 @@ fn none_interest_cache() {
         .with(layer_none)
         .with(layer_filter_fn);
 
-    let _guard = subscriber.set_default();
+    let _guard = tracing::subscriber::set_default(subscriber);
     for _ in 0..2 {
         tracing::debug!(target: "always_interesting", x="bar");
     }

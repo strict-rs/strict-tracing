@@ -22,8 +22,13 @@
 //! * `release_max_level_trace`
 //!
 //! These features control the value of the `STATIC_MAX_LEVEL` constant. The
-//! instrumentation macros macros check this value before recording an event or
+//! instrumentation macros check this value before recording an event or
 //! constructing a span. By default, no levels are disabled.
+//!
+//! Cargo features are additive, so if more than one static max level feature is
+//! enabled in the same profile, the most permissive enabled level is used.
+//! For example, enabling both `max_level_off` and `max_level_info` resolves to
+//! `INFO`, and enabling all `max_level_*` features resolves to `TRACE`.
 //!
 //! For example, a crate can disable trace level instrumentation in debug builds
 //! and trace, debug, and info level instrumentation in release builds with the
@@ -50,7 +55,7 @@
 //! [`log`]: https://docs.rs/log/
 //! [`log` crate]: https://docs.rs/log/latest/log/#compile-time-filters
 //! [f]: https://docs.rs/tracing/latest/tracing/#emitting-log-records
-pub use tracing_core::{metadata::ParseLevelFilterError, LevelFilter};
+pub use tracing_core::{LevelFilter, metadata::ParseLevelFilterError};
 
 /// The statically configured maximum trace level.
 ///
@@ -66,48 +71,110 @@ pub use tracing_core::{metadata::ParseLevelFilterError, LevelFilter};
 pub const STATIC_MAX_LEVEL: LevelFilter = get_max_level_inner();
 
 const fn get_max_level_inner() -> LevelFilter {
-    if cfg!(all(
-        not(debug_assertions),
-        feature = "release_max_level_off"
-    )) {
-        LevelFilter::OFF
-    } else if cfg!(all(
-        not(debug_assertions),
-        feature = "release_max_level_error"
-    )) {
-        LevelFilter::ERROR
-    } else if cfg!(all(
-        not(debug_assertions),
-        feature = "release_max_level_warn"
-    )) {
-        LevelFilter::WARN
-    } else if cfg!(all(
-        not(debug_assertions),
-        feature = "release_max_level_info"
-    )) {
-        LevelFilter::INFO
-    } else if cfg!(all(
-        not(debug_assertions),
-        feature = "release_max_level_debug"
-    )) {
-        LevelFilter::DEBUG
-    } else if cfg!(all(
-        not(debug_assertions),
-        feature = "release_max_level_trace"
-    )) {
-        LevelFilter::TRACE
-    } else if cfg!(feature = "max_level_off") {
-        LevelFilter::OFF
-    } else if cfg!(feature = "max_level_error") {
-        LevelFilter::ERROR
-    } else if cfg!(feature = "max_level_warn") {
-        LevelFilter::WARN
-    } else if cfg!(feature = "max_level_info") {
-        LevelFilter::INFO
-    } else if cfg!(feature = "max_level_debug") {
-        LevelFilter::DEBUG
+    if !cfg!(debug_assertions) && release_max_level_configured() {
+        select_max_level(
+            cfg!(feature = "release_max_level_off"),
+            cfg!(feature = "release_max_level_error"),
+            cfg!(feature = "release_max_level_warn"),
+            cfg!(feature = "release_max_level_info"),
+            cfg!(feature = "release_max_level_debug"),
+            cfg!(feature = "release_max_level_trace"),
+        )
     } else {
-        // Same as branch cfg!(feature = "max_level_trace")
+        select_max_level(
+            cfg!(feature = "max_level_off"),
+            cfg!(feature = "max_level_error"),
+            cfg!(feature = "max_level_warn"),
+            cfg!(feature = "max_level_info"),
+            cfg!(feature = "max_level_debug"),
+            cfg!(feature = "max_level_trace"),
+        )
+    }
+}
+
+const fn release_max_level_configured() -> bool {
+    cfg!(feature = "release_max_level_off")
+        || cfg!(feature = "release_max_level_error")
+        || cfg!(feature = "release_max_level_warn")
+        || cfg!(feature = "release_max_level_info")
+        || cfg!(feature = "release_max_level_debug")
+        || cfg!(feature = "release_max_level_trace")
+}
+
+const fn select_max_level(
+    off: bool,
+    error: bool,
+    warn: bool,
+    info: bool,
+    debug: bool,
+    trace: bool,
+) -> LevelFilter {
+    if trace {
         LevelFilter::TRACE
+    } else if debug {
+        LevelFilter::DEBUG
+    } else if info {
+        LevelFilter::INFO
+    } else if warn {
+        LevelFilter::WARN
+    } else if error {
+        LevelFilter::ERROR
+    } else if off {
+        LevelFilter::OFF
+    } else {
+        LevelFilter::TRACE
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LevelFilter, select_max_level};
+
+    #[test]
+    fn select_max_level_defaults_to_trace() {
+        assert_eq!(
+            select_max_level(false, false, false, false, false, false),
+            LevelFilter::TRACE
+        );
+    }
+
+    #[test]
+    fn select_max_level_preserves_single_restrictive_features() {
+        assert_eq!(
+            select_max_level(true, false, false, false, false, false),
+            LevelFilter::OFF
+        );
+        assert_eq!(
+            select_max_level(false, true, false, false, false, false),
+            LevelFilter::ERROR
+        );
+        assert_eq!(
+            select_max_level(false, false, true, false, false, false),
+            LevelFilter::WARN
+        );
+        assert_eq!(
+            select_max_level(false, false, false, true, false, false),
+            LevelFilter::INFO
+        );
+        assert_eq!(
+            select_max_level(false, false, false, false, true, false),
+            LevelFilter::DEBUG
+        );
+    }
+
+    #[test]
+    fn select_max_level_uses_most_permissive_enabled_feature() {
+        assert_eq!(
+            select_max_level(true, false, false, true, false, false),
+            LevelFilter::INFO
+        );
+        assert_eq!(
+            select_max_level(true, true, true, true, true, false),
+            LevelFilter::DEBUG
+        );
+        assert_eq!(
+            select_max_level(true, true, true, true, true, true),
+            LevelFilter::TRACE
+        );
     }
 }

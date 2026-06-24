@@ -1,4 +1,4 @@
-use tracing_core::{metadata::Metadata, span, Dispatch, Event, Interest, LevelFilter, Subscriber};
+use tracing_core::{Dispatch, Event, Interest, LevelFilter, Subscriber, metadata::Metadata, span};
 
 use crate::{
     filter,

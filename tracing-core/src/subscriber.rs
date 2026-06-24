@@ -1,5 +1,5 @@
 //! Collectors collect and record trace data.
-use crate::{span, Dispatch, Event, LevelFilter, Metadata};
+use crate::{Dispatch, Event, LevelFilter, Metadata, span};
 
 use alloc::{boxed::Box, sync::Arc};
 use core::any::{Any, TypeId};

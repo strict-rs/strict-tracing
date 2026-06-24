@@ -6,7 +6,7 @@
 use std::{future::Future, pin::Pin, task};
 
 use futures::FutureExt as _;
-use tracing::{subscriber::with_default, Instrument as _, Level};
+use tracing::{Instrument as _, Level, subscriber::with_default};
 use tracing_mock::*;
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

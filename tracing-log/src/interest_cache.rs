@@ -4,8 +4,9 @@ use lru::LruCache;
 use once_cell::sync::Lazy;
 use std::cell::RefCell;
 use std::hash::Hasher;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::num::NonZeroUsize;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// The interest cache configuration.
 #[derive(Debug)]
@@ -90,7 +91,7 @@ struct Key {
 struct State {
     min_verbosity: Level,
     epoch: usize,
-    cache: LruCache<Key, u64, ahash::RandomState>,
+    cache: Option<LruCache<Key, u64, ahash::RandomState>>,
 }
 
 impl State {
@@ -98,7 +99,8 @@ impl State {
         State {
             epoch,
             min_verbosity: config.min_verbosity,
-            cache: LruCache::new(config.lru_cache_size),
+            cache: NonZeroUsize::new(config.lru_cache_size)
+                .map(|cap| LruCache::with_hasher(cap, ahash::RandomState::default())),
         }
     }
 }
@@ -169,9 +171,12 @@ pub(crate) fn try_cache(metadata: &Metadata<'_>, callback: impl FnOnce() -> bool
         }
 
         let level = metadata.level();
-        if state.cache.cap() == 0 || level < state.min_verbosity {
+        if level < state.min_verbosity {
             return callback();
         }
+        let Some(cache) = state.cache.as_mut() else {
+            return callback();
+        };
 
         let target = metadata.target();
 
@@ -201,7 +206,7 @@ pub(crate) fn try_cache(metadata: &Metadata<'_>, callback: impl FnOnce() -> bool
             level_and_length: level as usize | target.len().wrapping_shl(3),
         };
 
-        if let Some(&cached) = state.cache.get(&key) {
+        if let Some(&cached) = cache.get(&key) {
             // And here we make sure that the target actually matches.
             //
             // This is just a hash of the target string, so theoretically we're not guaranteed
@@ -223,7 +228,7 @@ pub(crate) fn try_cache(metadata: &Metadata<'_>, callback: impl FnOnce() -> bool
         }
 
         let interest = callback();
-        state.cache.put(key, target_hash | interest as u64);
+        cache.put(key, target_hash | interest as u64);
 
         interest
     })
@@ -499,9 +504,9 @@ mod tests {
                 .target("dummy_2")
                 .build();
             try_cache(&metadata_1, || true);
-            assert_eq!(try_cache(&metadata_1, || { unreachable!() }), true);
+            assert!(try_cache(&metadata_1, || { unreachable!() }));
             try_cache(&metadata_2, || false);
-            assert_eq!(try_cache(&metadata_2, || { unreachable!() }), false);
+            assert!(!try_cache(&metadata_2, || { unreachable!() }));
         })
         .join()
         .unwrap();
@@ -521,7 +526,7 @@ mod tests {
                 .build();
 
             try_cache(&metadata_1, || true);
-            assert_eq!(try_cache(&metadata_1, || { unreachable!() }), true);
+            assert!(try_cache(&metadata_1, || { unreachable!() }));
 
             *target.last_mut().unwrap() = b'2';
             let metadata_2 = log::MetadataBuilder::new()
@@ -530,7 +535,7 @@ mod tests {
                 .build();
 
             try_cache(&metadata_2, || false);
-            assert_eq!(try_cache(&metadata_2, || { unreachable!() }), false);
+            assert!(!try_cache(&metadata_2, || { unreachable!() }));
         })
         .join()
         .unwrap();

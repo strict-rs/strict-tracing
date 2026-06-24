@@ -38,15 +38,15 @@ macro_rules! span {
             {
                 let meta = __CALLSITE.metadata();
                 // span with explicit parent
-                $crate::Span::child_of(
-                    $parent,
-                    meta,
-                    &$crate::valueset_all!(meta.fields(), $($fields)*),
-                )
+                $crate::valueset_all!(@with meta.fields(), |value_set| {
+                    $crate::Span::child_of($parent, meta, value_set)
+                }, $($fields)*)
             } else {
                 let span = $crate::__macro_support::__disabled_span(__CALLSITE.metadata());
                 $crate::if_log_enabled! { $lvl, {
-                    span.record_all(&$crate::valueset_all!(__CALLSITE.metadata().fields(), $($fields)*));
+                    $crate::valueset_all!(@with __CALLSITE.metadata().fields(), |value_set| {
+                        span.record_all(value_set);
+                    }, $($fields)*);
                 }};
                 span
             }
@@ -69,14 +69,15 @@ macro_rules! span {
             {
                 let meta = __CALLSITE.metadata();
                 // span with contextual parent
-                $crate::Span::new(
-                    meta,
-                    &$crate::valueset_all!(meta.fields(), $($fields)*),
-                )
+                $crate::valueset_all!(@with meta.fields(), |value_set| {
+                    $crate::Span::new(meta, value_set)
+                }, $($fields)*)
             } else {
                 let span = $crate::__macro_support::__disabled_span(__CALLSITE.metadata());
                 $crate::if_log_enabled! { $lvl, {
-                    span.record_all(&$crate::valueset_all!(__CALLSITE.metadata().fields(), $($fields)*));
+                    $crate::valueset_all!(@with __CALLSITE.metadata().fields(), |value_set| {
+                        span.record_all(value_set);
+                    }, $($fields)*);
                 }};
                 span
             }
@@ -151,11 +152,10 @@ macro_rules! span {
 #[macro_export]
 macro_rules! record_all {
     ($span:expr, $($fields:tt)*) => {
-        if let Some(meta) = $span.metadata() {
-            $span.record_all(&$crate::valueset!(
-                meta.fields(),
-                $($fields)*
-            ));
+        if let $crate::__macro_support::Option::Some(meta) = $span.metadata() {
+            $crate::valueset!(@with meta.fields(), |value_set| {
+                $span.record_all(value_set);
+            }, $($fields)*);
         }
     };
 }
@@ -629,26 +629,16 @@ macro_rules! event {
             !interest.is_never() && $crate::__macro_support::__is_enabled(__CALLSITE.metadata(), interest)
         };
         if enabled {
-            (|value_set: $crate::field::ValueSet| {
-                $crate::__tracing_log!(
-                    $lvl,
-                    __CALLSITE,
-                    &value_set
-                );
+            $crate::valueset_all!(@with __CALLSITE.metadata().fields(), |value_set| {
+                $crate::__tracing_log!($lvl, __CALLSITE, value_set);
                 let meta = __CALLSITE.metadata();
                 // event with explicit parent
-                $crate::Event::child_of(
-                    $parent,
-                    meta,
-                    &value_set
-                );
-            })($crate::valueset_all!(__CALLSITE.metadata().fields(), $($fields)*));
+                $crate::Event::child_of($parent, meta, value_set);
+            }, $($fields)*);
         } else {
-            $crate::__tracing_log!(
-                $lvl,
-                __CALLSITE,
-                &$crate::valueset_all!(__CALLSITE.metadata().fields(), $($fields)*)
-            );
+            $crate::valueset_all!(@with __CALLSITE.metadata().fields(), |value_set| {
+                $crate::__tracing_log!($lvl, __CALLSITE, value_set);
+            }, $($fields)*);
         }
     });
     (name: $name:expr, target: $target:expr, parent: $parent:expr, $lvl:expr, { $($fields:tt)* }, $($arg:tt)+ ) => (
@@ -682,25 +672,16 @@ macro_rules! event {
             !interest.is_never() && $crate::__macro_support::__is_enabled(__CALLSITE.metadata(), interest)
         };
         if enabled {
-            (|value_set: $crate::field::ValueSet| {
+            $crate::valueset_all!(@with __CALLSITE.metadata().fields(), |value_set| {
                 let meta = __CALLSITE.metadata();
                 // event with contextual parent
-                $crate::Event::dispatch(
-                    meta,
-                    &value_set
-                );
-                $crate::__tracing_log!(
-                    $lvl,
-                    __CALLSITE,
-                    &value_set
-                );
-            })($crate::valueset_all!(__CALLSITE.metadata().fields(), $($fields)*));
+                $crate::Event::dispatch(meta, value_set);
+                $crate::__tracing_log!($lvl, __CALLSITE, value_set);
+            }, $($fields)*);
         } else {
-            $crate::__tracing_log!(
-                $lvl,
-                __CALLSITE,
-                &$crate::valueset_all!(__CALLSITE.metadata().fields(), $($fields)*)
-            );
+            $crate::valueset_all!(@with __CALLSITE.metadata().fields(), |value_set| {
+                $crate::__tracing_log!($lvl, __CALLSITE, value_set);
+            }, $($fields)*);
         }
     });
     (name: $name:expr, target: $target:expr, $lvl:expr, { $($fields:tt)* }, $($arg:tt)+ ) => (
@@ -739,26 +720,16 @@ macro_rules! event {
             !interest.is_never() && $crate::__macro_support::__is_enabled(__CALLSITE.metadata(), interest)
         };
         if enabled {
-            (|value_set: $crate::field::ValueSet| {
-                $crate::__tracing_log!(
-                    $lvl,
-                    __CALLSITE,
-                    &value_set
-                );
+            $crate::valueset_all!(@with __CALLSITE.metadata().fields(), |value_set| {
+                $crate::__tracing_log!($lvl, __CALLSITE, value_set);
                 let meta = __CALLSITE.metadata();
                 // event with explicit parent
-                $crate::Event::child_of(
-                    $parent,
-                    meta,
-                    &value_set
-                );
-            })($crate::valueset_all!(__CALLSITE.metadata().fields(), $($fields)*));
+                $crate::Event::child_of($parent, meta, value_set);
+            }, $($fields)*);
         } else {
-            $crate::__tracing_log!(
-                $lvl,
-                __CALLSITE,
-                &$crate::valueset_all!(__CALLSITE.metadata().fields(), $($fields)*)
-            );
+            $crate::valueset_all!(@with __CALLSITE.metadata().fields(), |value_set| {
+                $crate::__tracing_log!($lvl, __CALLSITE, value_set);
+            }, $($fields)*);
         }
     });
     (target: $target:expr, parent: $parent:expr, $lvl:expr, { $($fields:tt)* }, $($arg:tt)+ ) => (
@@ -792,26 +763,16 @@ macro_rules! event {
             !interest.is_never() && $crate::__macro_support::__is_enabled(__CALLSITE.metadata(), interest)
         };
         if enabled {
-            (|value_set: $crate::field::ValueSet| {
-                $crate::__tracing_log!(
-                    $lvl,
-                    __CALLSITE,
-                    &value_set
-                );
+            $crate::valueset_all!(@with __CALLSITE.metadata().fields(), |value_set| {
+                $crate::__tracing_log!($lvl, __CALLSITE, value_set);
                 let meta = __CALLSITE.metadata();
                 // event with explicit parent
-                $crate::Event::child_of(
-                    $parent,
-                    meta,
-                    &value_set
-                );
-            })($crate::valueset_all!(__CALLSITE.metadata().fields(), $($fields)*));
+                $crate::Event::child_of($parent, meta, value_set);
+            }, $($fields)*);
         } else {
-            $crate::__tracing_log!(
-                $lvl,
-                __CALLSITE,
-                &$crate::valueset_all!(__CALLSITE.metadata().fields(), $($fields)*)
-            );
+            $crate::valueset_all!(@with __CALLSITE.metadata().fields(), |value_set| {
+                $crate::__tracing_log!($lvl, __CALLSITE, value_set);
+            }, $($fields)*);
         }
     });
     (name: $name:expr, parent: $parent:expr, $lvl:expr, { $($fields:tt)* }, $($arg:tt)+ ) => (
@@ -844,25 +805,16 @@ macro_rules! event {
             !interest.is_never() && $crate::__macro_support::__is_enabled(__CALLSITE.metadata(), interest)
         };
         if enabled {
-            (|value_set: $crate::field::ValueSet| {
+            $crate::valueset_all!(@with __CALLSITE.metadata().fields(), |value_set| {
                 let meta = __CALLSITE.metadata();
                 // event with contextual parent
-                $crate::Event::dispatch(
-                    meta,
-                    &value_set
-                );
-                $crate::__tracing_log!(
-                    $lvl,
-                    __CALLSITE,
-                    &value_set
-                );
-            })($crate::valueset_all!(__CALLSITE.metadata().fields(), $($fields)*));
+                $crate::Event::dispatch(meta, value_set);
+                $crate::__tracing_log!($lvl, __CALLSITE, value_set);
+            }, $($fields)*);
         } else {
-            $crate::__tracing_log!(
-                $lvl,
-                __CALLSITE,
-                &$crate::valueset_all!(__CALLSITE.metadata().fields(), $($fields)*)
-            );
+            $crate::valueset_all!(@with __CALLSITE.metadata().fields(), |value_set| {
+                $crate::__tracing_log!($lvl, __CALLSITE, value_set);
+            }, $($fields)*);
         }
     });
     (name: $name:expr, $lvl:expr, { $($fields:tt)* }, $($arg:tt)+ ) => (
@@ -899,25 +851,16 @@ macro_rules! event {
             !interest.is_never() && $crate::__macro_support::__is_enabled(__CALLSITE.metadata(), interest)
         };
         if enabled {
-            (|value_set: $crate::field::ValueSet| {
+            $crate::valueset_all!(@with __CALLSITE.metadata().fields(), |value_set| {
                 let meta = __CALLSITE.metadata();
                 // event with contextual parent
-                $crate::Event::dispatch(
-                    meta,
-                    &value_set
-                );
-                $crate::__tracing_log!(
-                    $lvl,
-                    __CALLSITE,
-                    &value_set
-                );
-            })($crate::valueset_all!(__CALLSITE.metadata().fields(), $($fields)*));
+                $crate::Event::dispatch(meta, value_set);
+                $crate::__tracing_log!($lvl, __CALLSITE, value_set);
+            }, $($fields)*);
         } else {
-            $crate::__tracing_log!(
-                $lvl,
-                __CALLSITE,
-                &$crate::valueset_all!(__CALLSITE.metadata().fields(), $($fields)*)
-            );
+            $crate::valueset_all!(@with __CALLSITE.metadata().fields(), |value_set| {
+                $crate::__tracing_log!($lvl, __CALLSITE, value_set);
+            }, $($fields)*);
         }
     });
     (target: $target:expr, $lvl:expr, { $($fields:tt)* }, $($arg:tt)+ ) => (
@@ -2812,6 +2755,257 @@ macro_rules! level_enabled {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! valueset_all {
+    (@with $fields:expr, |$value_set:ident| $body:block, $($kvs:tt)+) => {{
+        #[allow(unused_imports)]
+        use $crate::field::{debug, display, Value};
+        $crate::valueset_all!(@with_out $fields, |$value_set| $body, { }, $($kvs)+)
+    }};
+    (@with $fields:expr, |$value_set:ident| $body:block,) => {{
+        let __tracing_values = [];
+        let __tracing_value_set = $fields.value_set_all(&__tracing_values);
+        let $value_set = &__tracing_value_set;
+        $body
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($val:expr),* $(,)* } $(,)*) => {{
+        let __tracing_values = [ $($val),* ];
+        let __tracing_value_set = $fields.value_set_all(&__tracing_values);
+        let $value_set = &__tracing_value_set;
+        $body
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, $($k:ident).+ = ?$val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::debug(__tracing_value);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, $($k:ident).+ = %$val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::display(__tracing_value);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, $($k:ident).+ = $val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(__tracing_value as &dyn $crate::field::Value) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, $($k:ident).+, $($rest:tt)*) => {{
+        let __tracing_value = &$($k).+;
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(__tracing_value as &dyn $crate::field::Value) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, ?$($k:ident).+, $($rest:tt)*) => {{
+        let __tracing_value = &$($k).+;
+        let __tracing_value = $crate::field::debug(__tracing_value);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, %$($k:ident).+, $($rest:tt)*) => {{
+        let __tracing_value = &$($k).+;
+        let __tracing_value = $crate::field::display(__tracing_value);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, $($k:ident).+ = ?$val:expr) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::debug(__tracing_value);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, $($k:ident).+ = %$val:expr) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::display(__tracing_value);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, $($k:ident).+ = $val:expr) => {{
+        let __tracing_value = &$val;
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(__tracing_value as &dyn $crate::field::Value) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, $($k:ident).+) => {{
+        let __tracing_value = &$($k).+;
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(__tracing_value as &dyn $crate::field::Value) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, ?$($k:ident).+) => {{
+        let __tracing_value = &$($k).+;
+        let __tracing_value = $crate::field::debug(__tracing_value);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, %$($k:ident).+) => {{
+        let __tracing_value = &$($k).+;
+        let __tracing_value = $crate::field::display(__tracing_value);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value) },
+        )
+    }};
+
+    // Handle literal names.
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, $k:literal = ?$val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::debug(__tracing_value);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, $k:literal = %$val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::display(__tracing_value);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, $k:literal = $val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(__tracing_value as &dyn $crate::field::Value) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, $k:literal = ?$val:expr) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::debug(__tracing_value);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, $k:literal = %$val:expr) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::display(__tracing_value);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, $k:literal = $val:expr) => {{
+        let __tracing_value = &$val;
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(__tracing_value as &dyn $crate::field::Value) },
+        )
+    }};
+
+    // Handle constant names.
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, { $k:expr } = ?$val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::debug(__tracing_value);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, { $k:expr } = %$val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::display(__tracing_value);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, { $k:expr } = $val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(__tracing_value as &dyn $crate::field::Value) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, { $k:expr } = ?$val:expr) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::debug(__tracing_value);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, { $k:expr } = %$val:expr) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::display(__tracing_value);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, { $k:expr } = $val:expr) => {{
+        let __tracing_value = &$val;
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $($out,)* $crate::__macro_support::Option::Some(__tracing_value as &dyn $crate::field::Value) },
+        )
+    }};
+
+    // Remainder is unparsable, but exists --- must be format args!
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $($out:expr),* }, $($rest:tt)+) => {{
+        let __tracing_value = $crate::__macro_support::format_args!($($rest)+);
+        $crate::valueset_all!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value), $($out),* },
+        )
+    }};
 
     // === base case ===
     (@ { $(,)* $($val:expr),* $(,)* } $(,)*) => {
@@ -2990,6 +3184,344 @@ macro_rules! valueset_all {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! valueset {
+    (@with $fields:expr, |$value_set:ident| $body:block, $($kvs:tt)+) => {{
+        #[allow(unused_imports)]
+        use $crate::field::{debug, display, Value};
+        $crate::valueset!(@with_out $fields, |$value_set| $body, { }, $($kvs)+)
+    }};
+    (@with $fields:expr, |$value_set:ident| $body:block,) => {{
+        let __tracing_values = [];
+        let __tracing_value_set = $fields.value_set(&__tracing_values);
+        let $value_set = &__tracing_value_set;
+        $body
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $val:expr)),* $(,)* } $(,)*) => {{
+        let __tracing_values = [ $(($field, $val),)* ];
+        let __tracing_value_set = $fields.value_set(&__tracing_values);
+        let $value_set = &__tracing_value_set;
+        $body
+    }};
+
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, $($k:ident).+ = ?$val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::debug(__tracing_value);
+        let __tracing_field = $fields.field($crate::__tracing_stringify!($($k).+));
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value)) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, $($k:ident).+ = %$val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::display(__tracing_value);
+        let __tracing_field = $fields.field($crate::__tracing_stringify!($($k).+));
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value)) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, $($k:ident).+ = $val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        let __tracing_field = $fields.field($crate::__tracing_stringify!($($k).+));
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(__tracing_value as &dyn $crate::field::Value)) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, $($k:ident).+, $($rest:tt)*) => {{
+        let __tracing_value = &$($k).+;
+        let __tracing_field = $fields.field($crate::__tracing_stringify!($($k).+));
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(__tracing_value as &dyn $crate::field::Value)) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, ?$($k:ident).+, $($rest:tt)*) => {{
+        let __tracing_value = &$($k).+;
+        let __tracing_value = $crate::field::debug(__tracing_value);
+        let __tracing_field = $fields.field($crate::__tracing_stringify!($($k).+));
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value)) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, %$($k:ident).+, $($rest:tt)*) => {{
+        let __tracing_value = &$($k).+;
+        let __tracing_value = $crate::field::display(__tracing_value);
+        let __tracing_field = $fields.field($crate::__tracing_stringify!($($k).+));
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value)) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, $($k:ident).+ = ?$val:expr) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::debug(__tracing_value);
+        let __tracing_field = $fields.field($crate::__tracing_stringify!($($k).+));
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value)) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, $($k:ident).+ = %$val:expr) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::display(__tracing_value);
+        let __tracing_field = $fields.field($crate::__tracing_stringify!($($k).+));
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value)) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, $($k:ident).+ = $val:expr) => {{
+        let __tracing_value = &$val;
+        let __tracing_field = $fields.field($crate::__tracing_stringify!($($k).+));
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(__tracing_value as &dyn $crate::field::Value)) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, $($k:ident).+) => {{
+        let __tracing_value = &$($k).+;
+        let __tracing_field = $fields.field($crate::__tracing_stringify!($($k).+));
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(__tracing_value as &dyn $crate::field::Value)) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, ?$($k:ident).+) => {{
+        let __tracing_value = &$($k).+;
+        let __tracing_value = $crate::field::debug(__tracing_value);
+        let __tracing_field = $fields.field($crate::__tracing_stringify!($($k).+));
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value)) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, %$($k:ident).+) => {{
+        let __tracing_value = &$($k).+;
+        let __tracing_value = $crate::field::display(__tracing_value);
+        let __tracing_field = $fields.field($crate::__tracing_stringify!($($k).+));
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value)) },
+        )
+    }};
+
+    // Handle literal names
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, $k:literal = ?$val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::debug(__tracing_value);
+        let __tracing_field = $fields.field($k);
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value)) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, $k:literal = %$val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::display(__tracing_value);
+        let __tracing_field = $fields.field($k);
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value)) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, $k:literal = $val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        let __tracing_field = $fields.field($k);
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(__tracing_value as &dyn $crate::field::Value)) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, $k:literal = ?$val:expr) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::debug(__tracing_value);
+        let __tracing_field = $fields.field($k);
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value)) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, $k:literal = %$val:expr) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::display(__tracing_value);
+        let __tracing_field = $fields.field($k);
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value)) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, $k:literal = $val:expr) => {{
+        let __tracing_value = &$val;
+        let __tracing_field = $fields.field($k);
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(__tracing_value as &dyn $crate::field::Value)) },
+        )
+    }};
+
+    // Handle constant names
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, { $k:expr } = ?$val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::debug(__tracing_value);
+        let __tracing_field = $fields.field($k);
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value)) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, { $k:expr } = %$val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::display(__tracing_value);
+        let __tracing_field = $fields.field($k);
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value)) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, { $k:expr } = $val:expr, $($rest:tt)*) => {{
+        let __tracing_value = &$val;
+        let __tracing_field = $fields.field($k);
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(__tracing_value as &dyn $crate::field::Value)) },
+            $($rest)*
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, { $k:expr } = ?$val:expr) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::debug(__tracing_value);
+        let __tracing_field = $fields.field($k);
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value)) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, { $k:expr } = %$val:expr) => {{
+        let __tracing_value = &$val;
+        let __tracing_value = $crate::field::display(__tracing_value);
+        let __tracing_field = $fields.field($k);
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(&__tracing_value as &dyn $crate::field::Value)) },
+        )
+    }};
+    (@with_out $fields:expr, |$value_set:ident| $body:block, { $(,)* $(($field:expr, $out:expr)),* }, { $k:expr } = $val:expr) => {{
+        let __tracing_value = &$val;
+        let __tracing_field = $fields.field($k);
+        let __tracing_field = __tracing_field
+            .as_ref()
+            .unwrap_or(&$crate::__macro_support::FAKE_FIELD);
+        $crate::valueset!(
+            @with_out $fields,
+            |$value_set| $body,
+            { $(($field, $out),)* (__tracing_field, $crate::__macro_support::Option::Some(__tracing_value as &dyn $crate::field::Value)) },
+        )
+    }};
 
     // === base case ===
     (@ $fields:expr, { $(,)* $(($field:expr, $val:expr)),* $(,)* } $(,)*) => {{

@@ -262,7 +262,7 @@ mod tests {
     use super::*;
     use crate::ErrorLayer;
     use tracing::subscriber::with_default;
-    use tracing::{span, Level};
+    use tracing::{Level, span};
     use tracing_subscriber::{prelude::*, registry::Registry};
 
     #[test]

@@ -321,8 +321,9 @@
 pub use tracing_core::span::{Attributes, Id, Record};
 
 use crate::{
+    Metadata,
     dispatcher::{self, Dispatch},
-    field, Metadata,
+    field,
 };
 use core::{
     cmp, fmt,
@@ -1209,14 +1210,12 @@ impl Span {
         field: &Q,
         value: V,
     ) -> &Self {
-        if let Some(meta) = self.meta {
-            if let Some(field) = field.as_field(meta) {
-                self.record_all(
-                    &meta
-                        .fields()
-                        .value_set(&[(&field, Some(&value as &dyn field::Value))]),
-                );
-            }
+        if let Some(meta) = self.meta
+            && let Some(field) = field.as_field(meta)
+        {
+            let values = [(&field, Some(&value as &dyn field::Value))];
+            let value_set = meta.fields().value_set(&values);
+            self.record_all(&value_set);
         }
 
         self
@@ -1322,10 +1321,10 @@ impl Span {
     /// span.follows_from(id);
     /// ```
     pub fn follows_from(&self, from: impl Into<Option<Id>>) -> &Self {
-        if let Some(ref inner) = self.inner {
-            if let Some(from) = from.into() {
-                inner.follows_from(&from);
-            }
+        if let Some(inner) = self.inner.as_ref()
+            && let Some(from) = from.into()
+        {
+            inner.follows_from(&from);
         }
         self
     }
@@ -1343,32 +1342,32 @@ impl Span {
     #[cfg(feature = "log")]
     #[inline]
     fn log(&self, target: &str, level: log::Level, message: fmt::Arguments<'_>) {
-        if let Some(meta) = self.meta {
-            if level_to_log!(*meta.level()) <= log::max_level() {
-                let logger = log::logger();
-                let log_meta = log::Metadata::builder().level(level).target(target).build();
-                if logger.enabled(&log_meta) {
-                    if let Some(ref inner) = self.inner {
-                        logger.log(
-                            &log::Record::builder()
-                                .metadata(log_meta)
-                                .module_path(meta.module_path())
-                                .file(meta.file())
-                                .line(meta.line())
-                                .args(format_args!("{} span={}", message, inner.id.into_u64()))
-                                .build(),
-                        );
-                    } else {
-                        logger.log(
-                            &log::Record::builder()
-                                .metadata(log_meta)
-                                .module_path(meta.module_path())
-                                .file(meta.file())
-                                .line(meta.line())
-                                .args(message)
-                                .build(),
-                        );
-                    }
+        if let Some(meta) = self.meta
+            && level_to_log!(*meta.level()) <= log::max_level()
+        {
+            let logger = log::logger();
+            let log_meta = log::Metadata::builder().level(level).target(target).build();
+            if logger.enabled(&log_meta) {
+                if let Some(ref inner) = self.inner {
+                    logger.log(
+                        &log::Record::builder()
+                            .metadata(log_meta)
+                            .module_path(meta.module_path())
+                            .file(meta.file())
+                            .line(meta.line())
+                            .args(format_args!("{} span={}", message, inner.id.into_u64()))
+                            .build(),
+                    );
+                } else {
+                    logger.log(
+                        &log::Record::builder()
+                            .metadata(log_meta)
+                            .module_path(meta.module_path())
+                            .file(meta.file())
+                            .line(meta.line())
+                            .args(message)
+                            .build(),
+                    );
                 }
             }
         }

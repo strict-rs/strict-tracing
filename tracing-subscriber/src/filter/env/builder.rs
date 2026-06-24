@@ -331,10 +331,11 @@ impl Builder {
             regex: self.regex,
         };
 
-        if !has_dynamics && filter.statics.is_empty() {
-            if let Some(ref default) = self.default_directive {
-                filter = filter.add_directive(default.clone());
-            }
+        if !has_dynamics
+            && filter.statics.is_empty()
+            && let Some(default) = self.default_directive.as_ref()
+        {
+            filter = filter.add_directive(default.clone());
         }
 
         filter

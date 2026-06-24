@@ -23,8 +23,8 @@ Application-level tracing for Rust.
 [docs-v0.2.x-url]: https://tracing.rs/tracing
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [mit-url]: LICENSE
-[actions-badge]: https://github.com/tokio-rs/tracing/workflows/CI/badge.svg
-[actions-url]:https://github.com/tokio-rs/tracing/actions?query=workflow%3ACI
+[actions-badge]: https://github.com/strict-rs/strict-tracing/workflows/CI/badge.svg
+[actions-url]:https://github.com/strict-rs/strict-tracing/actions?query=workflow%3ACI
 [discord-badge]: https://img.shields.io/discord/500028886025895936?logo=discord&label=discord&logoColor=white
 [discord-url]: https://discord.gg/EeF3cQw
 
@@ -47,7 +47,7 @@ data as well as textual messages.
 The `tracing` crate provides the APIs necessary for instrumenting libraries
 and applications to emit trace data.
 
-*Compiler support: [requires `rustc` 1.65+][msrv]*
+*Compiler support: [requires `rustc` 1.96+][msrv]*
 
 [msrv]: #supported-rust-versions
 
@@ -328,20 +328,6 @@ be invoked with the same syntax as the similarly-named macros from the `log`
 crate. Often, the process of converting a project to use `tracing` can begin
 with a simple drop-in replacement.
 
-## Supported Rust Versions
-
-Tracing is built against the latest stable release. The minimum supported
-version is 1.42. The current Tracing version is not guaranteed to build on Rust
-versions earlier than the minimum supported version.
-
-Tracing follows the same compiler support policies as the rest of the Tokio
-project. The current stable Rust compiler and the three most recent minor
-versions before it will always be supported. For example, if the current stable
-compiler version is 1.45, the minimum supported version will not be increased
-past 1.42, three minor versions prior. Increasing the minimum supported compiler
-version is not considered a semver breaking change as long as doing so complies
-with this policy.
-
 ## Ecosystem
 
 ### Related Crates
@@ -447,7 +433,7 @@ undergoing active development. They may be less stable than `tracing` and
 ## Supported Rust Versions
 
 Tracing is built against the latest stable release. The minimum supported
-version is 1.65. The current Tracing version is not guaranteed to build on Rust
+version is 1.96. The current Tracing version is not guaranteed to build on Rust
 versions earlier than the minimum supported version.
 
 Tracing follows the same compiler support policies as the rest of the Tokio

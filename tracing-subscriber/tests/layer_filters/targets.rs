@@ -1,6 +1,6 @@
 use super::*;
 use tracing_subscriber::{
-    filter::{filter_fn, Targets},
+    filter::{Targets, filter_fn},
     prelude::*,
 };
 
@@ -24,10 +24,8 @@ fn log_events() {
     let layer =
         tracing_subscriber::layer::Identity::new().with_filter(filter_fn(move |_meta| true));
 
-    let _guard = tracing_subscriber::registry()
-        .with(filter)
-        .with(layer)
-        .set_default();
+    let subscriber = tracing_subscriber::registry().with(filter).with(layer);
+    let _guard = tracing::subscriber::set_default(subscriber);
 
     inner::logs();
 }
@@ -44,13 +42,13 @@ fn inner_layer_short_circuits() {
 
     let filter = Targets::new().with_target("magic_target", LevelFilter::DEBUG);
 
-    let _guard = tracing_subscriber::registry()
+    let subscriber = tracing_subscriber::registry()
         // Note: we don't just use a `LevelFilter` for the global filter here,
         // because it will just return a max level filter, and the chain of
         // `register_callsite` calls that would trigger the bug never happens...
         .with(filter::filter_fn(|meta| meta.level() <= &Level::INFO))
-        .with(layer.with_filter(filter))
-        .set_default();
+        .with(layer.with_filter(filter));
+    let _guard = tracing::subscriber::set_default(subscriber);
 
     tracing::debug!("skip me please!");
     tracing::info!(target: "magic_target", "hello world");

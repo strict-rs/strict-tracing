@@ -11,9 +11,9 @@ authors = [
     "Jane Lusby <jlusby@yaah.dev>",
     "Tokio Contributors <team@tokio.rs>"
 ]
-license = "MIT"
+license.workspace = true
 readme = "README.md"
-repository = "https://github.com/tokio-rs/tracing"
+repository.workspace = true
 homepage = "https://tokio.rs"
 description = """
 Utilities for enriching errors with `tracing`.
@@ -28,16 +28,16 @@ keywords = [
     "exception-reporting",
     "backtrace"
 ]
-edition = "2018"
-rust-version = "1.65.0"
+edition.workspace = true
+rust-version.workspace = true
 
 [features]
 default = ["traced-error"]
 traced-error = []
 
 [dependencies]
-tracing-subscriber = { path = "../tracing-subscriber", version = "0.3.0", default-features = false, features = ["registry", "fmt"] }
-tracing = { path = "../tracing", version = "0.1.35", default-features = false, features = ["std"] }
+tracing-subscriber = { workspace = true, features = ["registry", "fmt"] }
+tracing = { workspace = true, features = ["std"] }
 
 [badges]
 maintenance = { status = "experimental" }

@@ -516,8 +516,8 @@ mod dispatchers {
     use crate::dispatcher;
     use alloc::vec::Vec;
     use std::sync::{
-        atomic::{AtomicBool, Ordering},
         RwLock, RwLockReadGuard, RwLockWriteGuard,
+        atomic::{AtomicBool, Ordering},
     };
 
     pub(super) struct Dispatchers {

@@ -125,15 +125,15 @@
 //! [`Subscriber`]: crate::Subscriber
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+pub use tracing_core::dispatcher::DefaultGuard;
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub use tracing_core::dispatcher::set_default;
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub use tracing_core::dispatcher::with_default;
-#[cfg(feature = "std")]
-#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-pub use tracing_core::dispatcher::DefaultGuard;
 pub use tracing_core::dispatcher::{
-    get_default, set_global_default, Dispatch, SetGlobalDefaultError, WeakDispatch,
+    Dispatch, SetGlobalDefaultError, WeakDispatch, get_default, set_global_default,
 };
 
 /// Private API for internal use by tracing's macros.

@@ -5,9 +5,9 @@ authors = [
     "Zeki Sherif <zekshi@amazon.com>",
     "Tokio Contributors <team@tokio.rs>"
 ]
-license = "MIT"
+license.workspace = true
 readme = "README.md"
-repository = "https://github.com/tokio-rs/tracing"
+repository.workspace = true
 homepage = "https://tokio.rs"
 description = """
 Provides utilities for file appenders and making non-blocking writers.
@@ -17,26 +17,21 @@ categories = [
     "asynchronous",
 ]
 keywords = ["logging", "tracing", "file-appender", "non-blocking-writer"]
-edition = "2018"
-rust-version = "1.63.0"
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-crossbeam-channel = "0.5.6"
-time = { version = "0.3.2", default-features = false, features = ["formatting", "parsing"] }
-parking_lot = { optional = true, version = "0.12.1" }
-symlink = "0.1.0"
-thiserror = "2"
-
-[dependencies.tracing-subscriber]
-path = "../tracing-subscriber"
-version = "0.3.18"
-default-features = false
-features = ["fmt", "std"]
+crossbeam-channel = { workspace = true }
+time = { workspace = true, features = ["formatting", "parsing"] }
+parking_lot = { workspace = true, optional = true }
+symlink = { workspace = true }
+thiserror = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
 
 [dev-dependencies]
-criterion = { version = "0.3.6", default-features = false }
-tracing = { path = "../tracing", version = "0.1.35" }
-tempfile = "3"
+criterion = { workspace = true }
+tracing = { workspace = true, default-features = true }
+tempfile = { workspace = true }
 
 [[bench]]
 name = "bench"

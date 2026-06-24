@@ -6,10 +6,10 @@
 // file, which is :(
 #![cfg(feature = "std")]
 use tracing::{
+    Event, Level, Metadata,
     field::display,
     span::{Attributes, Id, Record},
-    subscriber::{with_default, Interest, Subscriber},
-    Event, Level, Metadata,
+    subscriber::{Interest, Subscriber, with_default},
 };
 use tracing_mock::{expect, subscriber};
 

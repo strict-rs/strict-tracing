@@ -11,7 +11,7 @@ authors = [
     "Eliza Weisman <eliza@buoyant.io>",
     "David Barsky <dbarsky@amazon.com>",
 ]
-repository = "https://github.com/tokio-rs/tracing"
+repository.workspace = true
 homepage = "https://tokio.rs"
 description = """
 Procedural macro attributes for automatically instrumenting functions.
@@ -22,10 +22,10 @@ categories = [
     "asynchronous",
 ]
 keywords = ["logging", "tracing", "macro", "instrument", "log"]
-license = "MIT"
+license.workspace = true
 readme = "README.md"
-edition = "2018"
-rust-version = "1.65.0"
+edition.workspace = true
+rust-version.workspace = true
 
 [lib]
 proc-macro = true
@@ -36,29 +36,19 @@ proc-macro = true
 async-await = []
 
 [dependencies]
-proc-macro2 = "1.0.60"
-syn = { version = "2.0", default-features = false, features = [
-    "full",
-    "parsing",
-    "printing",
-    "visit-mut",
-    "clone-impls",
-    "extra-traits",
-    "proc-macro",
-] }
-quote = "1.0.20"
+proc-macro2 = { workspace = true }
+syn = { workspace = true }
+quote = { workspace = true }
 
 [dev-dependencies]
-tracing = { path = "../tracing", version = "0.1.42" }
-tracing-mock = { path = "../tracing-mock" }
-tokio-test = "0.4.2"
-tracing-subscriber = { path = "../tracing-subscriber", version = "0.3.0", features = [
-    "env-filter",
-] }
-tracing-test = { path = "../tracing-test" }
-async-trait = "0.1.67"
-trybuild = "1.0.64"
-rustversion = "1.0.9"
+tracing = { workspace = true, default-features = true }
+tracing-mock = { workspace = true }
+tokio-test = { workspace = true }
+tracing-subscriber = { workspace = true, default-features = true, features = ["env-filter"] }
+tracing-test = { workspace = true }
+async-trait = { workspace = true }
+trybuild = { workspace = true }
+rustversion = { workspace = true }
 
 [badges]
 maintenance = { status = "experimental" }

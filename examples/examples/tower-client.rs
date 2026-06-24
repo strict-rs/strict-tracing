@@ -1,5 +1,8 @@
+use bytes::Bytes;
 use http::{Method, Request, Uri};
-use hyper::{client::Client, Body};
+use http_body_util::Empty;
+use hyper_util::client::legacy::Client;
+use hyper_util::rt::TokioExecutor;
 use std::time::Duration;
 use tower::{Service, ServiceBuilder};
 use tracing::info;
@@ -25,17 +28,19 @@ async fn main() -> Result<(), Err> {
         .with_env_filter("tower=trace")
         .try_init()?;
 
+    let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
+
     let mut svc = ServiceBuilder::new()
         .timeout(Duration::from_millis(250))
         .layer(request_span::layer(req_span))
-        .service(Client::new());
+        .service(client);
 
     let uri = Uri::from_static("http://httpbin.org");
 
     let req = Request::builder()
         .method(Method::GET)
         .uri(uri)
-        .body(Body::empty())
+        .body(Empty::<Bytes>::new())
         .expect("Unable to build request; this is a bug.");
 
     let res = svc.call(req).await?;

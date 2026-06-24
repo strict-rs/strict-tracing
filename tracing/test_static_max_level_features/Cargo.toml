@@ -5,10 +5,11 @@
 [workspace]
 
 [package]
-name = "test_cargo_max_level_features"
+name = "test_static_max_level_features"
 version = "0.1.0"
 publish = false
-edition = "2018"
+edition = "2024"
+rust-version = "1.96"
 
 [dependencies]
 tracing-core = { path = "../../tracing-core" }
@@ -18,5 +19,5 @@ path = ".."
 features = ["max_level_debug", "release_max_level_info"]
 
 [dev-dependencies]
-tokio-test = "0.2.0"
+tokio-test = "0.4.5"
 tracing-test = { path = "../../tracing-test" }

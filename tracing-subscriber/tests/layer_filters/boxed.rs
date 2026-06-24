@@ -1,6 +1,6 @@
 use super::*;
 use tracing_mock::layer::MockLayer;
-use tracing_subscriber::{filter, prelude::*, Layer};
+use tracing_subscriber::{Layer, filter, prelude::*};
 
 fn layer() -> (MockLayer, subscriber::MockHandle) {
     layer::mock().only().run_with_handle()
@@ -18,7 +18,7 @@ fn box_works() {
     let (layer, handle) = layer();
     let layer = Box::new(layer.with_filter(filter()));
 
-    let _guard = tracing_subscriber::registry().with(layer).set_default();
+    let _guard = tracing::subscriber::set_default(tracing_subscriber::registry().with(layer));
 
     for i in 0..2 {
         tracing::info!(i);
@@ -33,7 +33,7 @@ fn dyn_box_works() {
     let (layer, handle) = layer();
     let layer: Box<dyn Layer<_> + Send + Sync + 'static> = Box::new(layer.with_filter(filter()));
 
-    let _guard = tracing_subscriber::registry().with(layer).set_default();
+    let _guard = tracing::subscriber::set_default(tracing_subscriber::registry().with(layer));
 
     for i in 0..2 {
         tracing::info!(i);

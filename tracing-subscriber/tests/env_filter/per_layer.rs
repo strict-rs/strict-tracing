@@ -14,9 +14,8 @@ fn level_filter_event() {
         .only()
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry()
-        .with(layer.with_filter(filter))
-        .set_default();
+    let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::trace!("this should be disabled");
     tracing::info!("this shouldn't be");
@@ -48,9 +47,8 @@ fn same_name_spans() {
         .only()
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry()
-        .with(layer.with_filter(filter))
-        .set_default();
+    let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::trace_span!("foo", bar = 1);
     tracing::trace_span!("foo", baz = 1);
@@ -70,9 +68,8 @@ fn level_filter_event_with_target() {
         .only()
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry()
-        .with(layer.with_filter(filter))
-        .set_default();
+    let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::trace!("this should be disabled");
     tracing::info!("this shouldn't be");
@@ -104,9 +101,8 @@ fn level_filter_event_with_target_and_span() {
         .only()
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry()
-        .with(layer.with_filter(filter))
-        .set_default();
+    let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     {
         let _span = tracing::info_span!(target: "stuff", "cool_span").entered();
@@ -137,9 +133,8 @@ fn not_order_dependent() {
         .only()
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry()
-        .with(layer.with_filter(filter))
-        .set_default();
+    let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::trace!("this should be disabled");
     tracing::info!("this shouldn't be");
@@ -169,9 +164,8 @@ fn add_directive_enables_event() {
         .only()
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry()
-        .with(layer.with_filter(filter))
-        .set_default();
+    let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::info!(target: "hello", "hello info");
     tracing::trace!(target: "hello", "hello trace");
@@ -222,9 +216,8 @@ fn span_name_filter_is_dynamic() {
         .only()
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry()
-        .with(layer.with_filter(filter))
-        .set_default();
+    let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::trace!("this should be disabled");
     tracing::info!("this shouldn't be");
@@ -286,10 +279,8 @@ fn multiple_dynamic_filters() {
         (layer.with_filter(filter), handle)
     };
 
-    let _subscriber = tracing_subscriber::registry()
-        .with(layer1)
-        .with(layer2)
-        .set_default();
+    let subscriber = tracing_subscriber::registry().with(layer1).with(layer2);
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::info_span!("span1").in_scope(|| {
         tracing::debug!("hello from span 1");

@@ -1,7 +1,7 @@
 use snafu::{ResultExt, Snafu};
 use std::error::Error;
 use thiserror::Error;
-use tracing::{debug, error, info, span, trace, warn, Level};
+use tracing::{Level, debug, error, info, span, trace, warn};
 
 // the `#[tracing::instrument]` attribute creates and enters a span
 // every time the instrumented function is called. The span is named after the
@@ -16,10 +16,10 @@ pub fn shave(yak: usize) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     trace!(excitement = "yay!", "hello! I'm gonna shave a yak");
     if yak == 3 {
         warn!("could not locate yak");
-        return OutOfCash
+        return OutOfCashSnafu
             .fail()
             .map_err(|source| MissingYakError::OutOfSpace { source })
-            .context(MissingYak)
+            .context(MissingYakSnafu)
             .map_err(|err| err.into());
     } else {
         trace!("yak shaved successfully");

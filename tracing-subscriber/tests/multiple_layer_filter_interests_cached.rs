@@ -60,7 +60,7 @@ fn multiple_layer_filter_interests_are_cached() {
         .with(info_layer);
     assert!(subscriber.max_level_hint().is_none());
 
-    let _subscriber = subscriber.set_default();
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     fn events() {
         tracing::trace!("hello trace");

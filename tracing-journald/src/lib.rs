@@ -11,7 +11,7 @@
 //! and events to [`systemd-journald`][journald], on Linux distributions that
 //! use `systemd`.
 //!
-//! *Compiler support: [requires `rustc` 1.65+][msrv]*
+//! *Compiler support: [requires `rustc` 1.96+][msrv]*
 //!
 //! [msrv]: #supported-rust-versions
 //! [`tracing`]: https://crates.io/crates/tracing
@@ -20,7 +20,7 @@
 //! ## Supported Rust Versions
 //!
 //! Tracing is built against the latest stable release. The minimum supported
-//! version is 1.65. The current Tracing version is not guaranteed to build on
+//! version is 1.96. The current Tracing version is not guaranteed to build on
 //! Rust versions earlier than the minimum supported version.
 //!
 //! Tracing follows the same compiler support policies as the rest of the Tokio
@@ -34,18 +34,20 @@
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
     html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
-    issue_tracker_base_url = "https://github.com/tokio-rs/tracing/issues/"
+    issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
 #![cfg_attr(docsrs, deny(rustdoc::broken_intra_doc_links))]
 #[cfg(unix)]
 use std::os::unix::net::UnixDatagram;
+#[cfg(unix)]
+use std::path::PathBuf;
 use std::{fmt, io, io::Write};
 
 use tracing_core::{
+    Field, Level, Metadata, Subscriber,
     event::Event,
     field::Visit,
     span::{Attributes, Id, Record},
-    Field, Level, Metadata, Subscriber,
 };
 use tracing_subscriber::{layer::Context, registry::LookupSpan};
 
@@ -84,6 +86,8 @@ mod socket;
 pub struct Layer {
     #[cfg(unix)]
     socket: UnixDatagram,
+    #[cfg(unix)]
+    socket_path: PathBuf,
     field_prefix: Option<String>,
     syslog_identifier: String,
     additional_fields: Vec<u8>,
@@ -91,7 +95,27 @@ pub struct Layer {
 }
 
 #[cfg(unix)]
-const JOURNALD_PATH: &str = "/run/systemd/journal/socket";
+const SYSTEM_JOURNALD_PATH: &str = "/run/systemd/journal/socket";
+
+/// The journald socket namespace used by a [`Layer`].
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum JournalNamespace {
+    /// Send events to the system journal.
+    System,
+
+    /// Send events to the current user's journal.
+    User,
+}
+
+#[cfg(unix)]
+impl JournalNamespace {
+    fn socket_path(self) -> PathBuf {
+        match self {
+            Self::System => PathBuf::from(SYSTEM_JOURNALD_PATH),
+            Self::User => user_journald_path(),
+        }
+    }
+}
 
 impl Layer {
     /// Construct a journald layer
@@ -101,32 +125,60 @@ impl Layer {
     pub fn new() -> io::Result<Self> {
         #[cfg(unix)]
         {
-            use std::path::Path;
-
-            let socket = UnixDatagram::unbound()?;
-            let layer = Self {
-                socket,
-                field_prefix: Some("F".into()),
-                syslog_identifier: std::env::args_os()
-                    .next()
-                    .as_ref()
-                    .and_then(|p| Path::new(p).file_name())
-                    .map(|n| n.to_string_lossy().into_owned())
-                    // If we fail to get the name of the current executable fall back to an empty string.
-                    .unwrap_or_default(),
-                additional_fields: Vec::new(),
-                priority_mappings: PriorityMappings::new(),
-            };
-            // Check that we can talk to journald, by sending empty payload which journald discards.
-            // However if the socket didn't exist or if none listened we'd get an error here.
-            layer.send_payload(&[])?;
-            Ok(layer)
+            Self::new_in_namespace(JournalNamespace::System)
         }
         #[cfg(not(unix))]
         Err(io::Error::new(
             io::ErrorKind::NotFound,
             "journald does not exist in this environment",
         ))
+    }
+
+    /// Construct a journald layer targeting the current user's journal.
+    ///
+    /// Fails if the user journald socket couldn't be opened.
+    pub fn new_user() -> io::Result<Self> {
+        Self::new_in_namespace(JournalNamespace::User)
+    }
+
+    /// Construct a journald layer targeting a specific journald namespace.
+    ///
+    /// Fails if the selected journald socket couldn't be opened.
+    pub fn new_in_namespace(namespace: JournalNamespace) -> io::Result<Self> {
+        #[cfg(unix)]
+        {
+            Self::new_with_socket_path(namespace.socket_path())
+        }
+        #[cfg(not(unix))]
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "journald does not exist in this environment",
+        ))
+    }
+
+    #[cfg(unix)]
+    fn new_with_socket_path(socket_path: PathBuf) -> io::Result<Self> {
+        use std::path::Path;
+
+        let socket = UnixDatagram::unbound()?;
+        let layer = Self {
+            socket,
+            socket_path,
+            field_prefix: Some("F".into()),
+            syslog_identifier: std::env::args_os()
+                .next()
+                .as_ref()
+                .and_then(|p| Path::new(p).file_name())
+                .map(|n| n.to_string_lossy().into_owned())
+                // If we fail to get the name of the current executable fall back to an empty string.
+                .unwrap_or_default(),
+            additional_fields: Vec::new(),
+            priority_mappings: PriorityMappings::new(),
+        };
+        // Check that we can talk to journald, by sending empty payload which journald discards.
+        // However if the socket didn't exist or if none listened we'd get an error here.
+        layer.send_payload(&[])?;
+        Ok(layer)
     }
 
     /// Sets the prefix to apply to names of user-defined fields other than the event `message`
@@ -242,7 +294,7 @@ impl Layer {
     #[cfg(unix)]
     fn send_payload(&self, payload: &[u8]) -> io::Result<usize> {
         self.socket
-            .send_to(payload, JOURNALD_PATH)
+            .send_to(payload, &self.socket_path)
             .or_else(|error| {
                 if Some(libc::EMSGSIZE) == error.raw_os_error() {
                     self.send_large_payload(payload)
@@ -272,7 +324,7 @@ impl Layer {
         // Fully seal the memfd to signal journald that its backing data won't resize anymore
         // and so is safe to mmap.
         memfd::seal_fully(mem.as_raw_fd())?;
-        socket::send_one_fd_to(&self.socket, mem.as_raw_fd(), JOURNALD_PATH)
+        socket::send_one_fd_to(&self.socket, mem.as_raw_fd(), &self.socket_path)
     }
 
     fn put_priority(&self, buf: &mut Vec<u8>, meta: &Metadata<'_>) {
@@ -295,6 +347,25 @@ impl Layer {
 /// Fails if the journald socket couldn't be opened.
 pub fn layer() -> io::Result<Layer> {
     Layer::new()
+}
+
+/// Construct a journald layer targeting the current user's journal.
+///
+/// Fails if the user journald socket couldn't be opened.
+pub fn user_layer() -> io::Result<Layer> {
+    Layer::new_user()
+}
+
+#[cfg(unix)]
+fn user_journald_path() -> PathBuf {
+    if let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR") {
+        return PathBuf::from(runtime_dir).join("systemd/journal/socket");
+    }
+
+    let uid = unsafe { libc::geteuid() };
+    PathBuf::from("/run/user")
+        .join(uid.to_string())
+        .join("systemd/journal/socket")
 }
 
 impl<S> tracing_subscriber::Layer<S> for Layer
@@ -404,12 +475,12 @@ impl<'a> EventVisitor<'a> {
     }
 
     fn put_prefix(&mut self, field: &Field) {
-        if let Some(prefix) = self.prefix {
-            if field.name() != "message" {
-                // message maps to the standard MESSAGE field so don't prefix it
-                self.buf.extend_from_slice(prefix.as_bytes());
-                self.buf.push(b'_');
-            }
+        if let Some(prefix) = self.prefix
+            && field.name() != "message"
+        {
+            // message maps to the standard MESSAGE field so don't prefix it
+            self.buf.extend_from_slice(prefix.as_bytes());
+            self.buf.push(b'_');
         }
     }
 }

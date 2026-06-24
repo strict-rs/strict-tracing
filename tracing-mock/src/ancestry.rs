@@ -3,8 +3,8 @@
 //! See the documentation on the [`ExpectedAncestry`] enum for further details.
 
 use tracing_core::{
-    span::{self, Attributes},
     Event,
+    span::{self, Attributes},
 };
 
 use crate::span::{ActualSpan, ExpectedSpan};
@@ -63,7 +63,10 @@ impl ExpectedAncestry {
                 Self::HasContextualParent(expected_parent),
                 ActualAncestry::HasContextualParent(actual_parent),
             ) => {
-                println!("----> [{collector_name}] check {expected_parent:?} against actual parent with Id={id:?}", id = actual_parent.id());
+                println!(
+                    "----> [{collector_name}] check {expected_parent:?} against actual parent with Id={id:?}",
+                    id = actual_parent.id()
+                );
                 expected_parent.check(
                     actual_parent,
                     format_args!("{ctx} to have a contextual parent span"),

@@ -5,9 +5,10 @@ extern crate tracing;
 #[cfg(target_arch = "wasm32")]
 extern crate wasm_bindgen_test;
 
+use ::std::convert::From;
 use tracing::{
-    callsite, debug, debug_span, enabled, error, error_span, event, event_enabled, info, info_span,
-    span, span_enabled, trace, trace_span, warn, warn_span, Level,
+    Level, callsite, debug, debug_span, enabled, error, error_span, event, event_enabled, field,
+    info, info_span, record_all, span, span_enabled, trace, trace_span, warn, warn_span,
 };
 
 /// A type that implements `Display` and `Debug`, but not `Value`.
@@ -18,6 +19,52 @@ impl ::std::fmt::Display for DisplayDebug {
     fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
         ::std::write!(f, "Foo")
     }
+}
+
+fn temporary_string() -> ::std::string::String {
+    ::std::format!("temporary {}", "value")
+}
+
+fn temporary_str_ref() -> &'static str {
+    "temporary value"
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn temporary_field_expressions_live_for_macro_dispatch() {
+    event!(
+        Level::INFO,
+        plain = temporary_string(),
+        debug_ref = ?temporary_str_ref(),
+        display_temp = %temporary_string(),
+        "{}",
+        temporary_str_ref()
+    );
+
+    span!(
+        Level::INFO,
+        "temporary_span",
+        plain = temporary_string(),
+        debug_ref = ?temporary_str_ref(),
+        display_temp = %temporary_string()
+    );
+
+    let span = info_span!(
+        "recorded",
+        plain = field::Empty,
+        debug_ref = field::Empty,
+        display_temp = field::Empty
+    );
+    record_all!(
+        span,
+        plain = temporary_string(),
+        debug_ref = ?temporary_str_ref(),
+        display_temp = %temporary_string()
+    );
+
+    let retained = ::std::string::String::from("retained");
+    event!(Level::INFO, retained = retained, ?retained);
+    let _still_available = &retained;
 }
 
 // Tests that macros work across various invocation syntax.

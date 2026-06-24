@@ -1,4 +1,4 @@
-use tracing_core::{metadata::Metadata, span, subscriber::Subscriber, Event};
+use tracing_core::{Event, metadata::Metadata, span, subscriber::Subscriber};
 
 pub struct TestSubscriberA;
 impl Subscriber for TestSubscriberA {

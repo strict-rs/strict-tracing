@@ -58,7 +58,7 @@
 //! [`Subscriber`]: tracing_core::Subscriber
 //! [ctx]: crate::layer::Context
 //! [lookup]: crate::layer::Context::span()
-use tracing_core::{field::FieldSet, span::Id, Metadata};
+use tracing_core::{Metadata, field::FieldSet, span::Id};
 
 feature! {
     #![feature = "std"]
@@ -523,7 +523,7 @@ mod tests {
         sync::{Arc, Mutex},
         vec::Vec,
     };
-    use tracing::{span, Subscriber};
+    use tracing::{Subscriber, span};
 
     #[test]
     fn spanref_scope_iteration_order() {

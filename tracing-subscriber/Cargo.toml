@@ -6,10 +6,10 @@ authors = [
     "David Barsky <me@davidbarsky.com>",
     "Tokio Contributors <team@tokio.rs>",
 ]
-edition = "2018"
-license = "MIT"
+edition.workspace = true
+license.workspace = true
 readme = "README.md"
-repository = "https://github.com/tokio-rs/tracing"
+repository.workspace = true
 homepage = "https://tokio.rs"
 description = """
 Utilities for implementing and composing `tracing` subscribers.
@@ -20,7 +20,7 @@ categories = [
     "asynchronous",
 ]
 keywords = ["logging", "tracing", "metrics", "subscriber"]
-rust-version = "1.65.0"
+rust-version.workspace = true
 
 [features]
 
@@ -41,49 +41,49 @@ nu-ansi-term = ["dep:nu-ansi-term"]
 regex = []
 
 [dependencies]
-tracing-core = { path = "../tracing-core", version = "0.1.35", default-features = false }
+tracing-core = { workspace = true }
 
 # only required by the filter feature
-tracing = { optional = true, path = "../tracing", version = "0.1.43", default-features = false }
-matchers = { optional = true, version = "0.2.0" }
+tracing = { workspace = true, optional = true }
+matchers = { workspace = true, optional = true }
 # required to have matchers::BuildError implement std::error::Error
-regex-automata = { optional = true, version = "0.4", default-features = false, features = ["std"] }
-smallvec = { optional = true, version = "1.9.0" }
-once_cell = { optional = true, version = "1.13.0" }
+regex-automata = { workspace = true, optional = true }
+smallvec = { workspace = true, optional = true }
+once_cell = { workspace = true, optional = true }
 
 # fmt
-tracing-log = { path = "../tracing-log", version = "0.2.0", optional = true, default-features = false, features = ["log-tracer", "std"] }
-nu-ansi-term = { version = "0.50.0", optional = true }
-time = { version = "0.3.2", features = ["formatting"], optional = true }
+tracing-log = { workspace = true, optional = true, features = ["log-tracer", "std"] }
+nu-ansi-term = { workspace = true, optional = true }
+time = { workspace = true, optional = true, default-features = true, features = ["formatting"] }
 
 # only required by the json feature
-serde_json = { version = "1.0.82", optional = true }
-serde = { version = "1.0.140", optional = true }
-tracing-serde = { path = "../tracing-serde", version = "0.2.0", optional = true }
+serde_json = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+tracing-serde = { workspace = true, optional = true }
 
 # opt-in deps
-parking_lot = { version = "0.12.1", optional = true }
-chrono = { version = "0.4.26", default-features = false, features = ["clock", "std"], optional = true }
+parking_lot = { workspace = true, optional = true }
+chrono = { workspace = true, optional = true }
 
 # registry
-sharded-slab = { version = "0.1.4", optional = true }
-thread_local = { version = "1.1.4", optional = true }
+sharded-slab = { workspace = true, optional = true }
+thread_local = { workspace = true, optional = true }
 
 [target.'cfg(tracing_unstable)'.dependencies]
-valuable_crate = { package = "valuable", version = "0.1.0", optional = true, default-features = false }
-valuable-serde = { version = "0.1.0", optional = true, default-features = false }
+valuable_crate = { workspace = true, optional = true }
+valuable-serde = { workspace = true, optional = true }
 
 [dev-dependencies]
-tracing = { path = "../tracing", version = "0.1.43" }
-tracing-mock = { path = "../tracing-mock", features = ["tracing-subscriber"] }
-log = "0.4.17"
-tracing-log = { path = "../tracing-log", version = "0.2.0" }
-criterion = { version = "0.3.6", default-features = false }
-regex = { version = "1", default-features = false, features = ["std"] }
-tracing-futures = { path = "../tracing-futures", version = "0.2.0", default-features = false, features = ["std-future", "std"] }
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
+tracing = { workspace = true, default-features = true }
+tracing-mock = { workspace = true, features = ["tracing-subscriber"] }
+log = { workspace = true }
+tracing-log = { workspace = true, default-features = true }
+criterion = { workspace = true }
+regex = { workspace = true }
+tracing-futures = { workspace = true, features = ["std-future", "std"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
 # Enable the `time` crate's `macros` feature, for examples.
-time = { version = "0.3.2", features = ["formatting", "macros"] }
+time = { workspace = true, default-features = true, features = ["formatting", "macros"] }
 
 [badges]
 maintenance = { status = "experimental" }

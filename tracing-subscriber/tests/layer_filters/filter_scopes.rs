@@ -58,11 +58,11 @@ fn filters_span_scopes() {
         .only()
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry()
+    let subscriber = tracing_subscriber::registry()
         .with(debug_layer.with_filter(LevelFilter::DEBUG))
         .with(info_layer.with_filter(LevelFilter::INFO))
-        .with(warn_layer.with_filter(LevelFilter::WARN))
-        .set_default();
+        .with(warn_layer.with_filter(LevelFilter::WARN));
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     {
         let _trace = tracing::trace_span!("my_span").entered();
@@ -125,7 +125,7 @@ fn filters_interleaved_span_scopes() {
         .only()
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry()
+    let subscriber = tracing_subscriber::registry()
         .with(all_layer.with_filter(LevelFilter::INFO))
         .with(a_layer.with_filter(filter::filter_fn(|meta| {
             let target = meta.target();
@@ -134,8 +134,8 @@ fn filters_interleaved_span_scopes() {
         .with(b_layer.with_filter(filter::filter_fn(|meta| {
             let target = meta.target();
             target == "b" || target == module_path!()
-        })))
-        .set_default();
+        })));
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     {
         let _a1 = tracing::trace_span!(target: "a", "a/trace").entered();

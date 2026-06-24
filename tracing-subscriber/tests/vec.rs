@@ -1,6 +1,6 @@
 #![cfg(feature = "registry")]
-use tracing::level_filters::LevelFilter;
 use tracing::Subscriber;
+use tracing::level_filters::LevelFilter;
 use tracing_subscriber::prelude::*;
 
 #[test]

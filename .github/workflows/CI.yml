@@ -180,7 +180,7 @@ jobs:
             ${CARGO_MINVER[@]} --include-features "${INCLUDE_FEATURES[*]}"
             ;;
           tracing-futures)
-            EXCLUDE_FEATURES=(futures-01 futures_01 tokio tokio_01)
+            EXCLUDE_FEATURES=(futures-01 futures_01 tokio tokio_01 tokio-executor)
             ${CARGO_MINVER[@]} --exclude-features "${EXCLUDE_FEATURES[*]}"
             ;;
           *)

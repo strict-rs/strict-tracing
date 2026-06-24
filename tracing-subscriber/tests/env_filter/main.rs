@@ -2,12 +2,12 @@
 
 mod per_layer;
 
-use tracing::{self, subscriber::with_default, Level};
+use tracing::{self, Level, subscriber::with_default};
 use tracing_mock::{expect, layer, subscriber};
 use tracing_subscriber::{
+    Registry,
     filter::{EnvFilter, LevelFilter},
     prelude::*,
-    Registry,
 };
 
 #[test]
@@ -458,9 +458,8 @@ mod per_layer_filter {
             .only()
             .run_with_handle();
 
-        let _subscriber = tracing_subscriber::registry()
-            .with(layer.with_filter(filter))
-            .set_default();
+        let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
+        let _subscriber = tracing::subscriber::set_default(subscriber);
 
         tracing::trace!("this should be disabled");
         tracing::info!("this shouldn't be");
@@ -492,9 +491,8 @@ mod per_layer_filter {
             .only()
             .run_with_handle();
 
-        let _subscriber = tracing_subscriber::registry()
-            .with(layer.with_filter(filter))
-            .set_default();
+        let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
+        let _subscriber = tracing::subscriber::set_default(subscriber);
 
         tracing::trace_span!("foo", bar = 1);
         tracing::trace_span!("foo", baz = 1);
@@ -514,9 +512,8 @@ mod per_layer_filter {
             .only()
             .run_with_handle();
 
-        let _subscriber = tracing_subscriber::registry()
-            .with(layer.with_filter(filter))
-            .set_default();
+        let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
+        let _subscriber = tracing::subscriber::set_default(subscriber);
 
         tracing::trace!("this should be disabled");
         tracing::info!("this shouldn't be");
@@ -548,9 +545,8 @@ mod per_layer_filter {
             .only()
             .run_with_handle();
 
-        let _subscriber = tracing_subscriber::registry()
-            .with(layer.with_filter(filter))
-            .set_default();
+        let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
+        let _subscriber = tracing::subscriber::set_default(subscriber);
 
         {
             let _span = tracing::info_span!(target: "stuff", "cool_span").entered();
@@ -581,9 +577,8 @@ mod per_layer_filter {
             .only()
             .run_with_handle();
 
-        let _subscriber = tracing_subscriber::registry()
-            .with(layer.with_filter(filter))
-            .set_default();
+        let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
+        let _subscriber = tracing::subscriber::set_default(subscriber);
 
         tracing::trace!("this should be disabled");
         tracing::info!("this shouldn't be");
@@ -613,9 +608,8 @@ mod per_layer_filter {
             .only()
             .run_with_handle();
 
-        let _subscriber = tracing_subscriber::registry()
-            .with(layer.with_filter(filter))
-            .set_default();
+        let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
+        let _subscriber = tracing::subscriber::set_default(subscriber);
 
         tracing::info!(target: "hello", "hello info");
         tracing::trace!(target: "hello", "hello trace");
@@ -666,9 +660,8 @@ mod per_layer_filter {
             .only()
             .run_with_handle();
 
-        let _subscriber = tracing_subscriber::registry()
-            .with(layer.with_filter(filter))
-            .set_default();
+        let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
+        let _subscriber = tracing::subscriber::set_default(subscriber);
 
         tracing::trace!("this should be disabled");
         tracing::info!("this shouldn't be");
@@ -730,10 +723,8 @@ mod per_layer_filter {
             (layer.with_filter(filter), handle)
         };
 
-        let _subscriber = tracing_subscriber::registry()
-            .with(layer1)
-            .with(layer2)
-            .set_default();
+        let subscriber = tracing_subscriber::registry().with(layer1).with(layer2);
+        let _subscriber = tracing::subscriber::set_default(subscriber);
 
         tracing::info_span!("span1").in_scope(|| {
             tracing::debug!("hello from span 1");

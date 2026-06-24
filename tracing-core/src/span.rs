@@ -4,7 +4,7 @@ use core::num::NonZeroU64;
 
 use crate::field::FieldSet;
 use crate::parent::Parent;
-use crate::{field, Metadata};
+use crate::{Metadata, field};
 
 /// Identifies a span within the context of a subscriber.
 ///

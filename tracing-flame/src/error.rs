@@ -30,8 +30,8 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.0 {
-            Kind::CreateFile { ref source, .. } => Some(source),
-            Kind::FlushFile(ref source) => Some(source),
+            Kind::CreateFile { source, .. } => Some(source),
+            Kind::FlushFile(source) => Some(source),
         }
     }
 }

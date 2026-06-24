@@ -627,11 +627,11 @@ mod tests {
             };
             let name = span.name();
             println!("close {} ({:?})", name, id);
-            if let Ok(mut lock) = self.inner.lock() {
-                if let Some(is_removed) = lock.open.remove(name) {
-                    assert!(is_removed.upgrade().is_some());
-                    lock.closed.push((name, is_removed));
-                }
+            if let Ok(mut lock) = self.inner.lock()
+                && let Some(is_removed) = lock.open.remove(name)
+            {
+                assert!(is_removed.upgrade().is_some());
+                lock.closed.push((name, is_removed));
             }
         }
     }

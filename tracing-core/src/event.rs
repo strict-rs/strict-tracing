@@ -1,7 +1,7 @@
 //! Events represent single points in time during the execution of a program.
 use crate::parent::Parent;
 use crate::span::Id;
-use crate::{field, Metadata};
+use crate::{Metadata, field};
 
 /// `Event`s represent single points in time where something occurred during the
 /// execution of a program.

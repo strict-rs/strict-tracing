@@ -7,9 +7,9 @@ name = "tracing"
 # - Create "tracing-0.1.x" git tag
 version = "0.1.44"
 authors = ["Eliza Weisman <eliza@buoyant.io>", "Tokio Contributors <team@tokio.rs>"]
-license = "MIT"
+license.workspace = true
 readme = "README.md"
-repository = "https://github.com/tokio-rs/tracing"
+repository.workspace = true
 homepage = "https://tokio.rs"
 description = """
 Application-level tracing for Rust.
@@ -21,23 +21,23 @@ categories = [
     "no-std",
 ]
 keywords = ["logging", "tracing", "metrics", "async"]
-edition = "2018"
-rust-version = "1.65.0"
+edition.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-tracing-core = { path = "../tracing-core", version = "0.1.36", default-features = false }
-log = { version = "0.4.17", optional = true }
-tracing-attributes = { path = "../tracing-attributes", version = "0.1.31", optional = true }
-pin-project-lite = "0.2.9"
+tracing-core = { workspace = true }
+log = { workspace = true, optional = true }
+tracing-attributes = { workspace = true, optional = true }
+pin-project-lite = { workspace = true }
 
 [dev-dependencies]
-criterion = { version = "0.3.6", default-features = false }
-futures = { version = "0.3.21", default-features = false }
-log = "0.4.17"
-tracing-mock = { path = "../tracing-mock" }
+criterion = { workspace = true }
+futures = { workspace = true }
+log = { workspace = true }
+tracing-mock = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
-wasm-bindgen-test = "0.3.38"
+wasm-bindgen-test = { workspace = true }
 
 [features]
 default = ["std", "attributes"]

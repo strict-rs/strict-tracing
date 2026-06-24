@@ -53,7 +53,7 @@ fn basic_trees() {
         .with_filter(LevelFilter::INFO);
 
     let subscriber = tracing_subscriber::registry().with(info_tree).with(all);
-    let _guard = dbg!(subscriber).set_default();
+    let _guard = tracing::subscriber::set_default(dbg!(subscriber));
 
     tracing::info!("hello world");
     tracing::trace!("hello trace");
@@ -73,9 +73,9 @@ fn filter_span_scopes() {
             .event(
                 expect::event()
                     .with_fields(expect::msg("hello world"))
-                    .in_scope(vec![expect::span()
-                        .with_target(target)
-                        .at_level(Level::INFO)]),
+                    .in_scope(vec![
+                        expect::span().with_target(target).at_level(Level::INFO),
+                    ]),
             )
             .exit(expect::span().with_target(target).at_level(Level::INFO))
             .only()
@@ -153,7 +153,7 @@ fn filter_span_scopes() {
     let subscriber = tracing_subscriber::registry()
         .with(info_tree)
         .with(all_layer);
-    let _guard = dbg!(subscriber).set_default();
+    let _guard = tracing::subscriber::set_default(dbg!(subscriber));
 
     {
         let _a1 = tracing::trace_span!(target: "a", "a/trace").entered();

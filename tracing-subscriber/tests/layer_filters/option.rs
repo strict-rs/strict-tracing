@@ -1,9 +1,9 @@
 use super::*;
 use tracing::Subscriber;
 use tracing_subscriber::{
+    Layer,
     filter::{self, LevelFilter},
     prelude::*,
-    Layer,
 };
 
 fn filter_out_everything<S>() -> filter::DynFilterFn<S> {
@@ -17,7 +17,7 @@ fn option_some() {
     let (layer, handle) = layer::mock().only().run_with_handle();
     let layer = layer.with_filter(Some(filter_out_everything()));
 
-    let _guard = tracing_subscriber::registry().with(layer).set_default();
+    let _guard = tracing::subscriber::set_default(tracing_subscriber::registry().with(layer));
 
     for i in 0..2 {
         tracing::info!(i);
@@ -35,7 +35,7 @@ fn option_none() {
         .run_with_handle();
     let layer = layer.with_filter(None::<filter::DynFilterFn<_>>);
 
-    let _guard = tracing_subscriber::registry().with(layer).set_default();
+    let _guard = tracing::subscriber::set_default(tracing_subscriber::registry().with(layer));
 
     for i in 0..2 {
         tracing::info!(i);
@@ -56,7 +56,7 @@ fn option_mixed() {
         }))
         .with_filter(None::<filter::DynFilterFn<_>>);
 
-    let _guard = tracing_subscriber::registry().with(layer).set_default();
+    let _guard = tracing::subscriber::set_default(tracing_subscriber::registry().with(layer));
 
     tracing::info!(target: "interesting", x="foo");
     tracing::info!(target: "boring", x="bar");
@@ -94,7 +94,7 @@ fn none_max_level_hint() {
     // from the filter fn layer.
     assert!(subscriber.max_level_hint().is_none());
 
-    let _guard = subscriber.set_default();
+    let _guard = tracing::subscriber::set_default(subscriber);
     tracing::info!(target: "interesting", x="foo");
     tracing::debug!(target: "sometimes_interesting", x="bar");
 
@@ -134,7 +134,7 @@ fn some_max_level_hint() {
     // filter fn layer.
     assert_eq!(subscriber.max_level_hint(), Some(LevelFilter::DEBUG));
 
-    let _guard = subscriber.set_default();
+    let _guard = tracing::subscriber::set_default(subscriber);
     tracing::info!(target: "interesting", x="foo");
     tracing::debug!(target: "sometimes_interesting", x="bar");
 

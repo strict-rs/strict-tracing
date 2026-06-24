@@ -7,9 +7,9 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use tracing::{debug, error, info, info_span, trace, warn};
-use tracing_journald::{Layer, Priority, PriorityMappings};
-use tracing_subscriber::layer::SubscriberExt;
+use tracing_journald::{JournalNamespace, Layer, Priority, PriorityMappings};
 use tracing_subscriber::Registry;
+use tracing_subscriber::layer::SubscriberExt;
 
 fn journalctl_version() -> std::io::Result<String> {
     let output = Command::new("journalctl").arg("--version").output()?;
@@ -18,6 +18,7 @@ fn journalctl_version() -> std::io::Result<String> {
 
 fn with_journald(f: impl FnOnce()) {
     with_journald_layer(
+        JournalNamespace::System,
         Layer::new()
             .unwrap()
             .with_field_prefix(None)
@@ -29,15 +30,39 @@ fn with_journald(f: impl FnOnce()) {
     )
 }
 
-fn with_journald_layer(layer: Layer, f: impl FnOnce()) {
+fn with_user_journald(f: impl FnOnce()) {
+    let layer = match Layer::new_user() {
+        Ok(layer) => layer,
+        Err(error) => {
+            eprintln!(
+                "SKIPPING TEST: user journald socket could not be opened: {}",
+                error
+            );
+            return;
+        }
+    };
+
+    with_journald_layer(
+        JournalNamespace::User,
+        layer
+            .with_field_prefix(None)
+            .with_priority_mappings(PriorityMappings {
+                trace: Priority::Informational,
+                ..PriorityMappings::new()
+            }),
+        f,
+    )
+}
+
+fn with_journald_layer(namespace: JournalNamespace, layer: Layer, f: impl FnOnce()) {
     match journalctl_version() {
         Ok(_) => {
             let sub = Registry::default().with(layer);
             tracing::subscriber::with_default(sub, f);
         }
         Err(error) => eprintln!(
-            "SKIPPING TEST: journalctl --version failed with error: {}",
-            error
+            "SKIPPING TEST: journalctl --version failed for {:?} journal with error: {}",
+            namespace, error
         ),
     }
 }
@@ -127,11 +152,16 @@ fn retry<T, E>(f: impl Fn() -> Result<T, E>) -> Result<T, E> {
 /// Additionally filter by the `_PID` field with the PID of this
 /// test process, to make sure this method only reads journal entries
 /// created by this test process.
-fn read_from_journal(test_name: &str) -> Vec<HashMap<String, Field>> {
+fn read_from_journal(namespace: JournalNamespace, test_name: &str) -> Vec<HashMap<String, Field>> {
+    let mut command = Command::new("journalctl");
+    if namespace == JournalNamespace::User {
+        command.arg("--user");
+    }
+
     let stdout = String::from_utf8(
-        Command::new("journalctl")
+        command
             // We pass --all to circumvent journalctl's default limit of 4096 bytes for field values
-            .args(["--user", "--output=json", "--all"])
+            .args(["--output=json", "--all"])
             // Filter by the PID of the current test process
             .arg(format!("_PID={}", std::process::id()))
             .arg(format!("TEST_NAME={}", test_name))
@@ -152,8 +182,19 @@ fn read_from_journal(test_name: &str) -> Vec<HashMap<String, Field>> {
 /// Try to read lines for `testname` from journal, and `retry()` if the wasn't
 /// _exactly_ one matching line.
 fn retry_read_one_line_from_journal(testname: &str) -> HashMap<String, Field> {
+    retry_read_one_line_from_namespace(JournalNamespace::System, testname)
+}
+
+fn retry_read_one_line_from_user_journal(testname: &str) -> HashMap<String, Field> {
+    retry_read_one_line_from_namespace(JournalNamespace::User, testname)
+}
+
+fn retry_read_one_line_from_namespace(
+    namespace: JournalNamespace,
+    testname: &str,
+) -> HashMap<String, Field> {
     retry(|| {
-        let mut messages = read_from_journal(testname);
+        let mut messages = read_from_journal(namespace, testname);
         if messages.len() == 1 {
             Ok(messages.pop().unwrap())
         } else {
@@ -173,6 +214,20 @@ fn simple_message() {
 
         let message = retry_read_one_line_from_journal("simple_message");
         assert_eq!(message["MESSAGE"], "Hello World");
+        assert_eq!(message["PRIORITY"], "5");
+    });
+}
+
+#[test]
+fn simple_message_user_journal() {
+    with_user_journald(|| {
+        info!(
+            test.name = "simple_message_user_journal",
+            "Hello User Journal"
+        );
+
+        let message = retry_read_one_line_from_user_journal("simple_message_user_journal");
+        assert_eq!(message["MESSAGE"], "Hello User Journal");
         assert_eq!(message["PRIORITY"], "5");
     });
 }
@@ -209,7 +264,7 @@ fn custom_priorities() {
         check_message("error", "2");
     };
 
-    with_journald_layer(layer, test);
+    with_journald_layer(JournalNamespace::System, layer, test);
 }
 
 #[test]
@@ -269,7 +324,7 @@ fn simple_metadata() {
         .unwrap()
         .with_field_prefix(None)
         .with_syslog_identifier("test_ident".to_string());
-    with_journald_layer(sub, || {
+    with_journald_layer(JournalNamespace::System, sub, || {
         info!(test.name = "simple_metadata", "Hello World");
 
         let message = retry_read_one_line_from_journal("simple_metadata");
@@ -289,7 +344,7 @@ fn journal_fields() {
         .with_field_prefix(None)
         .with_custom_fields([("SYSLOG_FACILITY", "17")])
         .with_custom_fields([("ABC", "dEf"), ("XYZ", "123")]);
-    with_journald_layer(sub, || {
+    with_journald_layer(JournalNamespace::System, sub, || {
         info!(test.name = "journal_fields", "Hello World");
 
         let message = retry_read_one_line_from_journal("journal_fields");

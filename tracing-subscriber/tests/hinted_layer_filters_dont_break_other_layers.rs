@@ -16,7 +16,7 @@ fn layer_filters() {
         .with(unfiltered)
         .with(filtered.with_filter(filter()));
     assert_eq!(subscriber.max_level_hint(), None);
-    let _subscriber = subscriber.set_default();
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     events();
 
@@ -40,7 +40,7 @@ fn layered_layer_filters() {
         .with(unfiltered)
         .with(filtered);
     assert_eq!(subscriber.max_level_hint(), None);
-    let _subscriber = subscriber.set_default();
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     events();
 
@@ -64,7 +64,7 @@ fn out_of_order() {
         .with(unfiltered2)
         .with(filtered2.with_filter(filter()));
     assert_eq!(subscriber.max_level_hint(), None);
-    let _subscriber = subscriber.set_default();
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     events();
 
@@ -86,7 +86,7 @@ fn mixed_layered() {
 
     let subscriber = tracing_subscriber::registry().with(layered1).with(layered2);
     assert_eq!(subscriber.max_level_hint(), None);
-    let _subscriber = subscriber.set_default();
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     events();
 

@@ -178,10 +178,10 @@ impl StaticDirective {
     pub(in crate::filter) fn cares_about_target(&self, to_check: &str) -> bool {
         // Does this directive have a target filter, and does it match the
         // metadata's target?
-        if let Some(ref target) = self.target {
-            if !to_check.starts_with(&target[..]) {
-                return false;
-            }
+        if let Some(target) = self.target.as_deref()
+            && !to_check.starts_with(target)
+        {
+            return false;
         }
 
         if !self.field_names.is_empty() {
@@ -246,10 +246,10 @@ impl Match for StaticDirective {
     fn cares_about(&self, meta: &Metadata<'_>) -> bool {
         // Does this directive have a target filter, and does it match the
         // metadata's target?
-        if let Some(ref target) = self.target {
-            if !meta.target().starts_with(&target[..]) {
-                return false;
-            }
+        if let Some(target) = self.target.as_deref()
+            && !meta.target().starts_with(target)
+        {
+            return false;
         }
 
         if meta.is_event() && !self.field_names.is_empty() {

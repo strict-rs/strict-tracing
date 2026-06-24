@@ -140,16 +140,16 @@
 use std::{
     collections::{HashMap, VecDeque},
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
     },
     thread,
 };
 use tracing::{
+    Event, Metadata, Subscriber,
     level_filters::LevelFilter,
     span::{self, Attributes, Id},
     subscriber::Interest,
-    Event, Metadata, Subscriber,
 };
 
 use crate::{
@@ -1122,17 +1122,16 @@ where
             self.name, span.name, id, values
         );
         let was_expected = matches!(expected.front(), Some(Expect::Visit(_, _)));
-        if was_expected {
-            if let Expect::Visit(expected_span, mut expected_values) = expected.pop_front().unwrap()
-            {
-                if let Some(name) = expected_span.name() {
-                    assert_eq!(name, span.name);
-                }
-                let context = format!("span {}: ", span.name);
-                let mut checker = expected_values.checker(&context, &self.name);
-                values.record(&mut checker);
-                checker.finish();
+        if was_expected
+            && let Expect::Visit(expected_span, mut expected_values) = expected.pop_front().unwrap()
+        {
+            if let Some(name) = expected_span.name() {
+                assert_eq!(name, span.name);
             }
+            let context = format!("span {}: ", span.name);
+            let mut checker = expected_values.checker(&context, &self.name);
+            values.record(&mut checker);
+            checker.finish();
         }
     }
 
@@ -1171,35 +1170,35 @@ where
 
     fn record_follows_from(&self, consequence_id: &Id, cause_id: &Id) {
         let spans = self.spans.lock().unwrap();
-        if let Some(consequence_span) = spans.get(consequence_id) {
-            if let Some(cause_span) = spans.get(cause_id) {
-                println!(
-                    "[{}] record_follows_from: {} (id={:?}) follows {} (id={:?})",
-                    self.name, consequence_span.name, consequence_id, cause_span.name, cause_id,
-                );
-                match self.expected.lock().unwrap().pop_front() {
-                    None => {}
-                    Some(Expect::FollowsFrom {
-                        consequence: ref expected_consequence,
-                        cause: ref expected_cause,
-                    }) => {
-                        if let Some(name) = expected_consequence.name() {
-                            // TODO(hds): Write proper assertion text.
-                            assert_eq!(name, consequence_span.name);
-                        }
-                        if let Some(name) = expected_cause.name() {
-                            // TODO(hds): Write proper assertion text.
-                            assert_eq!(name, cause_span.name);
-                        }
+        if let Some(consequence_span) = spans.get(consequence_id)
+            && let Some(cause_span) = spans.get(cause_id)
+        {
+            println!(
+                "[{}] record_follows_from: {} (id={:?}) follows {} (id={:?})",
+                self.name, consequence_span.name, consequence_id, cause_span.name, cause_id,
+            );
+            match self.expected.lock().unwrap().pop_front() {
+                None => {}
+                Some(Expect::FollowsFrom {
+                    consequence: ref expected_consequence,
+                    cause: ref expected_cause,
+                }) => {
+                    if let Some(name) = expected_consequence.name() {
+                        // TODO(hds): Write proper assertion text.
+                        assert_eq!(name, consequence_span.name);
                     }
-                    Some(ex) => ex.bad(
-                        &self.name,
-                        format_args!(
-                            "consequence {:?} followed cause {:?}",
-                            consequence_span.name, cause_span.name
-                        ),
-                    ),
+                    if let Some(name) = expected_cause.name() {
+                        // TODO(hds): Write proper assertion text.
+                        assert_eq!(name, cause_span.name);
+                    }
                 }
+                Some(ex) => ex.bad(
+                    &self.name,
+                    format_args!(
+                        "consequence {:?} followed cause {:?}",
+                        consequence_span.name, cause_span.name
+                    ),
+                ),
             }
         };
     }
@@ -1218,24 +1217,22 @@ where
         let mut expected = self.expected.lock().unwrap();
         let was_expected = matches!(expected.front(), Some(Expect::NewSpan(_)));
         let mut spans = self.spans.lock().unwrap();
-        if was_expected {
-            if let Expect::NewSpan(mut expected) = expected.pop_front().unwrap() {
-                if let Some(expected_id) = &expected.span.id {
-                    expected_id.set(id.into_u64()).unwrap();
-                }
-
-                expected.check(
-                    span,
-                    || {
-                        get_ancestry(
-                            span,
-                            || self.lookup_current(),
-                            |span_id| spans.get(span_id).map(|span| span.into()),
-                        )
-                    },
-                    &self.name,
-                );
+        if was_expected && let Expect::NewSpan(mut expected) = expected.pop_front().unwrap() {
+            if let Some(expected_id) = &expected.span.id {
+                expected_id.set(id.into_u64()).unwrap();
             }
+
+            expected.check(
+                span,
+                || {
+                    get_ancestry(
+                        span,
+                        || self.lookup_current(),
+                        |span_id| spans.get(span_id).map(|span| span.into()),
+                    )
+                },
+                &self.name,
+            );
         }
         spans.insert(
             id.clone(),
@@ -1314,7 +1311,7 @@ where
         }
 
         let mut expected = self.expected.lock().unwrap();
-        let was_expected = if let Some(Expect::CloneSpan(ref expected_span)) = expected.front() {
+        let was_expected = if let Some(Expect::CloneSpan(expected_span)) = expected.front() {
             match span {
                 Some(actual_span) => {
                     let actual_span: &_ = actual_span;
@@ -1356,7 +1353,7 @@ where
         }
         if let Ok(mut expected) = self.expected.try_lock() {
             let was_expected = match expected.front() {
-                Some(Expect::DropSpan(ref span)) => {
+                Some(Expect::DropSpan(span)) => {
                     // Don't assert if this function was called while panicking,
                     // as failing the assertion can cause a double panic.
                     if !::std::thread::panicking() {

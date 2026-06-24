@@ -6,10 +6,11 @@ use std::{
 };
 
 use tracing_core::{
+    Dispatch, Event, Kind, Level, Metadata, Subscriber,
     callsite::{Callsite as _, DefaultCallsite},
     dispatcher::set_default,
     field::{FieldSet, Value},
-    span, Dispatch, Event, Kind, Level, Metadata, Subscriber,
+    span,
 };
 
 struct TestSubscriber {

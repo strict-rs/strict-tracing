@@ -44,14 +44,14 @@
 //! });
 //! # }
 //! ```
-use crate::worker::Worker;
 use crate::Msg;
-use crossbeam_channel::{bounded, SendTimeoutError, Sender};
+use crate::worker::Worker;
+use crossbeam_channel::{SendTimeoutError, Sender, bounded};
 use std::io;
 use std::io::Write;
+use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::sync::Arc;
 use std::thread::JoinHandle;
 use std::time::Duration;
 use tracing_subscriber::fmt::MakeWriter;

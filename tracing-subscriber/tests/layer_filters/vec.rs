@@ -25,9 +25,9 @@ fn with_filters_unboxed() {
         .run_with_handle();
     let info_layer = info_layer.with_filter(LevelFilter::INFO);
 
-    let _subscriber = tracing_subscriber::registry()
-        .with(vec![trace_layer, debug_layer, info_layer])
-        .set_default();
+    let subscriber =
+        tracing_subscriber::registry().with(vec![trace_layer, debug_layer, info_layer]);
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::trace!("hello trace");
     tracing::debug!("hello debug");
@@ -63,9 +63,9 @@ fn with_filters_boxed() {
         .with_filter(filter::filter_fn(|meta| meta.target() == "my_target"))
         .boxed();
 
-    let _subscriber = tracing_subscriber::registry()
-        .with(vec![unfiltered_layer, debug_layer, target_layer])
-        .set_default();
+    let subscriber =
+        tracing_subscriber::registry().with(vec![unfiltered_layer, debug_layer, target_layer]);
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::trace!("hello trace");
     tracing::debug!("hello debug");

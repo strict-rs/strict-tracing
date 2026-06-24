@@ -23,8 +23,8 @@ Macro attributes for application-level tracing.
 [docs-v0.2.x-url]: https://tracing.rs/tracing_attributes
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [mit-url]: LICENSE
-[actions-badge]: https://github.com/tokio-rs/tracing/workflows/CI/badge.svg
-[actions-url]:https://github.com/tokio-rs/tracing/actions?query=workflow%3ACI
+[actions-badge]: https://github.com/strict-rs/strict-tracing/workflows/CI/badge.svg
+[actions-url]:https://github.com/strict-rs/strict-tracing/actions?query=workflow%3ACI
 [discord-badge]: https://img.shields.io/discord/500028886025895936?logo=discord&label=discord&logoColor=white
 [discord-url]: https://discord.gg/EeF3cQw
 
@@ -37,7 +37,7 @@ structured, event-based diagnostic information. This crate provides the
 
 Note that this macro is also re-exported by the main `tracing` crate.
 
-*Compiler support: [requires `rustc` 1.65+][msrv]*
+*Compiler support: [requires `rustc` 1.96+][msrv]*
 
 [msrv]: #supported-rust-versions
 
@@ -69,7 +69,7 @@ pub fn my_function(my_arg: usize) {
 ## Supported Rust Versions
 
 Tracing is built against the latest stable release. The minimum supported
-version is 1.65. The current Tracing version is not guaranteed to build on Rust
+version is 1.96. The current Tracing version is not guaranteed to build on Rust
 versions earlier than the minimum supported version.
 
 Tracing follows the same compiler support policies as the rest of the Tokio

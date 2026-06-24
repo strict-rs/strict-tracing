@@ -17,11 +17,12 @@ fn subscriber_on_register_dispatch() {
 #[test]
 fn layer_on_register_dispatch() {
     use tracing_mock::layer;
-    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+    use tracing_subscriber::layer::SubscriberExt;
 
     let (layer, handle) = layer::mock().on_register_dispatch().run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry().with(layer).set_default();
+    let subscriber = tracing_subscriber::registry().with(layer);
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     // The layer's on_register_dispatch is called when the subscriber is set as default
     drop(_subscriber);
@@ -47,14 +48,15 @@ fn subscriber_multiple_expectations() {
 #[test]
 fn layer_multiple_expectations() {
     use tracing_mock::layer;
-    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+    use tracing_subscriber::layer::SubscriberExt;
 
     let (layer, handle) = layer::mock()
         .on_register_dispatch()
         .event(tracing_mock::expect::event())
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry().with(layer).set_default();
+    let subscriber = tracing_subscriber::registry().with(layer);
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::info!("test event");
 
@@ -68,7 +70,7 @@ fn layer_multiple_expectations() {
 fn layer_on_register_dispatch_not_propagated() {
     use tracing::error;
     use tracing_mock::layer;
-    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
+    use tracing_subscriber::{Layer, layer::SubscriberExt};
 
     /// A layer that wraps another layer but does NOT propagate on_register_dispatch
     struct BadLayer<L> {
@@ -98,7 +100,8 @@ fn layer_on_register_dispatch_not_propagated() {
 
     let bad_layer = BadLayer { inner: mock_layer };
 
-    let _subscriber = tracing_subscriber::registry().with(bad_layer).set_default();
+    let subscriber = tracing_subscriber::registry().with(bad_layer);
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     // This event will be sent to the mock layer, which expects on_register_dispatch first
     error!("send an event");

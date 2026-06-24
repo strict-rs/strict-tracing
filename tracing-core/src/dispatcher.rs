@@ -126,9 +126,8 @@
 use core::ptr::addr_of;
 
 use crate::{
-    callsite, span,
+    Event, LevelFilter, Metadata, callsite, span,
     subscriber::{self, NoSubscriber, Subscriber},
-    Event, LevelFilter, Metadata,
 };
 
 use alloc::sync::{Arc, Weak};
@@ -814,7 +813,7 @@ impl Kind<Arc<dyn Subscriber + Send + Sync>> {
     fn downgrade(&self) -> Kind<Weak<dyn Subscriber + Send + Sync>> {
         match self {
             Kind::Global(s) => Kind::Global(*s),
-            Kind::Scoped(ref s) => Kind::Scoped(Arc::downgrade(s)),
+            Kind::Scoped(s) => Kind::Scoped(Arc::downgrade(s)),
         }
     }
 }
@@ -823,7 +822,7 @@ impl Kind<Weak<dyn Subscriber + Send + Sync>> {
     fn upgrade(&self) -> Option<Kind<Arc<dyn Subscriber + Send + Sync>>> {
         match self {
             Kind::Global(s) => Some(Kind::Global(*s)),
-            Kind::Scoped(ref s) => Some(Kind::Scoped(s.upgrade()?)),
+            Kind::Scoped(s) => Some(Kind::Scoped(s.upgrade()?)),
         }
     }
 }

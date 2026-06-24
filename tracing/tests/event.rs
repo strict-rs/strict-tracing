@@ -7,11 +7,11 @@
 #![cfg(feature = "std")]
 
 use tracing::{
-    debug, error,
+    Level, debug, error,
     field::{debug, display},
     info,
     subscriber::with_default,
-    trace, warn, Level,
+    trace, warn,
 };
 use tracing_mock::*;
 

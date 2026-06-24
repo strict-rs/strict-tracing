@@ -3,7 +3,7 @@
 #![deny(rust_2018_idioms)]
 use std::error::Error;
 use std::fmt;
-use tracing_error::{prelude::*, ErrorLayer};
+use tracing_error::{ErrorLayer, prelude::*};
 use tracing_subscriber::prelude::*;
 
 #[derive(Debug)]

@@ -5,8 +5,8 @@
 use core::{fmt, marker::PhantomData};
 pub use tracing_core::field::Visit;
 use tracing_core::{
-    span::{Attributes, Record},
     Event,
+    span::{Attributes, Record},
 };
 pub mod debug;
 pub mod delimited;

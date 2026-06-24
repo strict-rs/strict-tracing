@@ -47,9 +47,8 @@ fn per_layer_event_field_filtering() {
         .only()
         .run_with_handle();
 
-    let _subscriber = tracing_subscriber::registry()
-        .with(expect.with_filter(FilterEvent))
-        .set_default();
+    let subscriber = tracing_subscriber::registry().with(expect.with_filter(FilterEvent));
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     tracing::trace!(enable = true, "hello trace");
     tracing::debug!("hello debug");

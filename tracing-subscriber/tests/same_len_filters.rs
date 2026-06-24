@@ -2,7 +2,7 @@
 // separate file.
 #![cfg(feature = "env-filter")]
 
-use tracing::{self, subscriber::with_default, Level};
+use tracing::{self, Level, subscriber::with_default};
 use tracing_mock::*;
 use tracing_subscriber::{filter::EnvFilter, prelude::*};
 

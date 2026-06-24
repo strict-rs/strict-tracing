@@ -2,9 +2,9 @@ use std::{future::Future, pin::Pin, task};
 
 use futures::FutureExt as _;
 use tracing::Instrument;
-use tracing::{subscriber::with_default, Level};
+use tracing::{Level, subscriber::with_default};
 use tracing_mock::{expect, subscriber};
-use tracing_test::{block_on_future, PollN};
+use tracing_test::{PollN, block_on_future};
 
 #[test]
 fn enter_exit_is_reasonable() {

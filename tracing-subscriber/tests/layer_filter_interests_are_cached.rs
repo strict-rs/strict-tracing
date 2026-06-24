@@ -29,7 +29,7 @@ fn layer_filter_interests_are_cached() {
     let subscriber = tracing_subscriber::registry().with(expect.with_filter(filter));
     assert!(subscriber.max_level_hint().is_none());
 
-    let _subscriber = subscriber.set_default();
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     fn events() {
         tracing::trace!("hello trace");

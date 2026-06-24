@@ -35,7 +35,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
     time::SystemTime,
 };
-use time::{format_description, Date, Duration, OffsetDateTime, PrimitiveDateTime, Time};
+use time::{Date, Duration, OffsetDateTime, PrimitiveDateTime, Time, format_description};
 
 mod builder;
 pub use builder::{Builder, InitError};
@@ -100,13 +100,15 @@ pub struct RollingFileAppender {
 #[derive(Debug)]
 pub struct RollingWriter<'a>(RwLockReadGuard<'a, File>);
 
+type DateFormat = Vec<format_description::BorrowedFormatItem<'static>>;
+
 #[derive(Debug)]
 struct Inner {
     log_directory: PathBuf,
     log_filename_prefix: Option<String>,
     log_filename_suffix: Option<String>,
     log_latest_symlink_name: Option<String>,
-    date_format: Vec<format_description::FormatItem<'static>>,
+    date_format: DateFormat,
     rotation: Rotation,
     next_date: AtomicUsize,
     max_files: Option<usize>,
@@ -188,11 +190,11 @@ impl RollingFileAppender {
 
     fn from_builder(builder: &Builder, directory: impl AsRef<Path>) -> Result<Self, InitError> {
         let Builder {
-            ref rotation,
-            ref prefix,
-            ref suffix,
-            ref latest_symlink,
-            ref max_files,
+            rotation,
+            prefix,
+            suffix,
+            latest_symlink,
+            max_files,
         } = builder;
         let directory = directory.as_ref().to_path_buf();
         let now = OffsetDateTime::now_utc();
@@ -229,7 +231,10 @@ impl io::Write for RollingFileAppender {
         let writer = self.writer.get_mut();
         if let Some(current_time) = self.state.should_rollover(now) {
             let _did_cas = self.state.advance_date(now, current_time);
-            debug_assert!(_did_cas, "if we have &mut access to the appender, no other thread can have advanced the timestamp...");
+            debug_assert!(
+                _did_cas,
+                "if we have &mut access to the appender, no other thread can have advanced the timestamp..."
+            );
             self.state.refresh_writer(now, writer);
         }
         writer.write(buf)
@@ -557,13 +562,17 @@ impl Rotation {
         }
     }
 
-    fn date_format(&self) -> Vec<format_description::FormatItem<'static>> {
+    fn date_format(&self) -> DateFormat {
         match *self {
-            Rotation::MINUTELY => format_description::parse("[year]-[month]-[day]-[hour]-[minute]"),
-            Rotation::HOURLY => format_description::parse("[year]-[month]-[day]-[hour]"),
-            Rotation::DAILY => format_description::parse("[year]-[month]-[day]"),
-            Rotation::WEEKLY => format_description::parse("[year]-[month]-[day]"),
-            Rotation::NEVER => format_description::parse("[year]-[month]-[day]"),
+            Rotation::MINUTELY => {
+                format_description::parse_borrowed::<1>("[year]-[month]-[day]-[hour]-[minute]")
+            }
+            Rotation::HOURLY => {
+                format_description::parse_borrowed::<1>("[year]-[month]-[day]-[hour]")
+            }
+            Rotation::DAILY => format_description::parse_borrowed::<1>("[year]-[month]-[day]"),
+            Rotation::WEEKLY => format_description::parse_borrowed::<1>("[year]-[month]-[day]"),
+            Rotation::NEVER => format_description::parse_borrowed::<1>("[year]-[month]-[day]"),
         }
         .expect("Unable to create a formatter; this is a bug in tracing-appender")
     }
@@ -667,16 +676,16 @@ impl Inner {
                 let filename = entry.file_name();
                 // if the filename is not a UTF-8 string, skip it.
                 let filename = filename.to_str()?;
-                if let Some(prefix) = &self.log_filename_prefix {
-                    if !filename.starts_with(prefix) {
-                        return None;
-                    }
+                if let Some(prefix) = self.log_filename_prefix.as_deref()
+                    && !filename.starts_with(prefix)
+                {
+                    return None;
                 }
 
-                if let Some(suffix) = &self.log_filename_suffix {
-                    if !filename.ends_with(suffix) {
-                        return None;
-                    }
+                if let Some(suffix) = self.log_filename_suffix.as_deref()
+                    && !filename.ends_with(suffix)
+                {
+                    return None;
                 }
 
                 if self.log_filename_prefix.is_none()
@@ -812,7 +821,7 @@ fn create_writer(
 
 fn parse_date_from_filename(
     filename: &str,
-    date_format: &Vec<format_description::FormatItem<'static>>,
+    date_format: &[format_description::BorrowedFormatItem<'_>],
     prefix: Option<&str>,
     suffix: Option<&str>,
 ) -> Option<SystemTime> {
@@ -928,6 +937,14 @@ mod test {
         assert!(next.is_none());
     }
 
+    fn test_datetime_format() -> DateFormat {
+        format_description::parse_borrowed::<1>(
+            "[year]-[month]-[day] [hour]:[minute]:[second] [offset_hour \
+         sign:mandatory]:[offset_minute]:[offset_second]",
+        )
+        .unwrap()
+    }
+
     #[test]
     fn test_join_date() {
         struct TestCase {
@@ -938,11 +955,7 @@ mod test {
             now: OffsetDateTime,
         }
 
-        let format = format_description::parse(
-            "[year]-[month]-[day] [hour]:[minute]:[second] [offset_hour \
-         sign:mandatory]:[offset_minute]:[offset_second]",
-        )
-        .unwrap();
+        let format = test_datetime_format();
         let directory = tempfile::tempdir().expect("failed to create tempdir");
 
         let test_cases = vec![
@@ -1019,11 +1032,7 @@ mod test {
 
     #[test]
     fn test_path_concatenation() {
-        let format = format_description::parse(
-            "[year]-[month]-[day] [hour]:[minute]:[second] [offset_hour \
-         sign:mandatory]:[offset_minute]:[offset_second]",
-        )
-        .unwrap();
+        let format = test_datetime_format();
         let directory = tempfile::tempdir().expect("failed to create tempdir");
 
         let now = OffsetDateTime::parse("2020-02-01 10:01:00 +00:00:00", &format).unwrap();
@@ -1144,13 +1153,8 @@ mod test {
     #[test]
     fn test_make_writer() {
         use std::sync::{Arc, Mutex};
-        use tracing_subscriber::prelude::*;
 
-        let format = format_description::parse(
-            "[year]-[month]-[day] [hour]:[minute]:[second] [offset_hour \
-         sign:mandatory]:[offset_minute]:[offset_second]",
-        )
-        .unwrap();
+        let format = test_datetime_format();
 
         let now = OffsetDateTime::parse("2020-02-01 10:01:00 +00:00:00", &format).unwrap();
         let directory = tempfile::tempdir().expect("failed to create tempdir");
@@ -1171,14 +1175,14 @@ mod test {
             Box::new(move || *clock.lock().unwrap())
         };
         let appender = RollingFileAppender { state, writer, now };
-        let default = tracing_subscriber::fmt()
+        let subscriber = tracing_subscriber::fmt()
             .without_time()
             .with_level(false)
             .with_target(false)
             .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
             .with_writer(appender)
-            .finish()
-            .set_default();
+            .finish();
+        let default = tracing::subscriber::set_default(subscriber);
 
         tracing::info!("file 1");
 
@@ -1227,13 +1231,8 @@ mod test {
     #[test]
     fn test_max_log_files() {
         use std::sync::{Arc, Mutex};
-        use tracing_subscriber::prelude::*;
 
-        let format = format_description::parse(
-            "[year]-[month]-[day] [hour]:[minute]:[second] [offset_hour \
-         sign:mandatory]:[offset_minute]:[offset_second]",
-        )
-        .unwrap();
+        let format = test_datetime_format();
 
         let now = OffsetDateTime::parse("2020-02-01 10:01:00 +00:00:00", &format).unwrap();
         let directory = tempfile::tempdir().expect("failed to create tempdir");
@@ -1254,14 +1253,14 @@ mod test {
             Box::new(move || *clock.lock().unwrap())
         };
         let appender = RollingFileAppender { state, writer, now };
-        let default = tracing_subscriber::fmt()
+        let subscriber = tracing_subscriber::fmt()
             .without_time()
             .with_level(false)
             .with_target(false)
             .with_max_level(tracing_subscriber::filter::LevelFilter::TRACE)
             .with_writer(appender)
-            .finish()
-            .set_default();
+            .finish();
+        let default = tracing::subscriber::set_default(subscriber);
 
         tracing::info!("file 1");
 
@@ -1366,11 +1365,7 @@ mod test {
     fn test_latest_symlink() {
         use std::sync::{Arc, Mutex};
 
-        let format = format_description::parse(
-            "[year]-[month]-[day] [hour]:[minute]:[second] [offset_hour \
-         sign:mandatory]:[offset_minute]:[offset_second]",
-        )
-        .unwrap();
+        let format = test_datetime_format();
 
         let now = OffsetDateTime::parse("2020-02-01 10:01:00 +00:00:00", &format).unwrap();
         let directory = tempfile::tempdir().expect("failed to create tempdir");

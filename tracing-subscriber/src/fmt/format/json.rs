@@ -276,24 +276,24 @@ where
                 serializer.serialize_entry("target", meta.target())?;
             }
 
-            if self.display_filename {
-                if let Some(filename) = meta.file() {
-                    serializer.serialize_entry("filename", filename)?;
-                }
+            if self.display_filename
+                && let Some(filename) = meta.file()
+            {
+                serializer.serialize_entry("filename", filename)?;
             }
 
-            if self.display_line_number {
-                if let Some(line_number) = meta.line() {
-                    serializer.serialize_entry("line_number", &line_number)?;
-                }
+            if self.display_line_number
+                && let Some(line_number) = meta.line()
+            {
+                serializer.serialize_entry("line_number", &line_number)?;
             }
 
-            if self.format.display_current_span {
-                if let Some(ref span) = current_span {
-                    serializer
-                        .serialize_entry("span", &SerializableSpan(span, format_field_marker))
-                        .unwrap_or(());
-                }
+            if self.format.display_current_span
+                && let Some(ref span) = current_span
+            {
+                serializer
+                    .serialize_entry("span", &SerializableSpan(span, format_field_marker))
+                    .unwrap_or(());
             }
 
             if self.format.display_span_list && current_span.is_some() {

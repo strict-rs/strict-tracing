@@ -15,7 +15,7 @@
 //! * [`WithSubscriber`] allows a `tracing` [`Subscriber`] to be attached to a
 //!   future, sink, stream, or executor.
 //!
-//! *Compiler support: [requires `rustc` 1.65+][msrv]*
+//! *Compiler support: [requires `rustc` 1.96+][msrv]*
 //!
 //! [msrv]: #supported-rust-versions
 //!
@@ -24,17 +24,17 @@
 //! This crate provides a number of feature flags that enable compatibility
 //! features with other crates in the asynchronous ecosystem:
 //!
-//! - `tokio`: Enables compatibility with the `tokio` 0.1 crate, including
-//!   [`Instrument`] and [`WithSubscriber`] implementations for
-//!   `tokio::executor::Executor`, `tokio::runtime::Runtime`, and
+//! - `tokio`: Enables compatibility with the `tokio` 0.1 crate. Implies the
+//!   `tokio-executor` feature, and additionally adds [`Instrument`] and
+//!   [`WithSubscriber`] implementations for `tokio::runtime::Runtime` and
 //!   `tokio::runtime::current_thread`. This is not needed for compatibility
 //!   with `tokio` v1.
-//! - `tokio-executor`: Enables compatibility with the `tokio-executor`
-//!   crate, including [`Instrument`] and [`WithSubscriber`]
-//!   implementations for types implementing `tokio_executor::Executor`.
-//!   This is intended primarily for use in crates which depend on
-//!   `tokio-executor` rather than `tokio`; in general the `tokio` feature
-//!   should be used instead.
+//! - `tokio-executor`: Enables compatibility with the `tokio-executor` 0.1
+//!   crate, adding [`Instrument`] and [`WithSubscriber`] implementations for
+//!   types implementing `tokio_executor::Executor` and
+//!   `tokio_executor::TypedExecutor`. Intended for crates that depend on
+//!   `tokio-executor` directly rather than the full `tokio` 0.1 crate; the
+//!   `tokio` feature enables this implicitly.
 //! - `std-future`: Enables compatibility with `std::future::Future`.
 //! - `futures-01`: Enables compatibility with version 0.1.x of the [`futures`]
 //!   crate.
@@ -59,7 +59,7 @@
 //! ## Supported Rust Versions
 //!
 //! Tracing is built against the latest stable release. The minimum supported
-//! version is 1.65. The current Tracing version is not guaranteed to build on
+//! version is 1.96. The current Tracing version is not guaranteed to build on
 //! Rust versions earlier than the minimum supported version.
 //!
 //! Tracing follows the same compiler support policies as the rest of the Tokio
@@ -73,7 +73,7 @@
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
     html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
-    issue_tracker_base_url = "https://github.com/tokio-rs/tracing/issues/"
+    issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
 #![warn(
     missing_debug_implementations,
@@ -112,7 +112,7 @@ use core::{
 };
 
 #[cfg(feature = "std")]
-use tracing::{dispatcher, Dispatch};
+use tracing::{Dispatch, dispatcher};
 
 use tracing::Span;
 
@@ -597,7 +597,7 @@ mod tests {
 
     #[cfg(feature = "futures-01")]
     mod futures_01_tests {
-        use futures_01::{future, stream, task, Async, Future, Stream};
+        use futures_01::{Async, Future, Stream, future, stream, task};
         use tracing::subscriber::with_default;
 
         use super::*;
@@ -744,7 +744,7 @@ mod tests {
 
     #[cfg(all(feature = "futures-03", feature = "std-future"))]
     mod futures_03_tests {
-        use futures::{future, sink, stream, FutureExt, SinkExt, StreamExt};
+        use futures::{FutureExt, SinkExt, StreamExt, future, sink, stream};
         use tracing::subscriber::with_default;
 
         use super::*;
@@ -752,6 +752,8 @@ mod tests {
         #[test]
         fn stream_enter_exit_is_reasonable() {
             let (subscriber, handle) = subscriber::mock()
+                .enter(expect::span().named("foo"))
+                .exit(expect::span().named("foo"))
                 .enter(expect::span().named("foo"))
                 .exit(expect::span().named("foo"))
                 .enter(expect::span().named("foo"))
@@ -774,6 +776,8 @@ mod tests {
         #[test]
         fn sink_enter_exit_is_reasonable() {
             let (subscriber, handle) = subscriber::mock()
+                .enter(expect::span().named("foo"))
+                .exit(expect::span().named("foo"))
                 .enter(expect::span().named("foo"))
                 .exit(expect::span().named("foo"))
                 .enter(expect::span().named("foo"))

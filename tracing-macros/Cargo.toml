@@ -2,8 +2,8 @@
 name = "tracing-macros"
 version = "0.1.0"
 authors = ["Eliza Weisman <eliza@buoyant.io>"]
-edition = "2018"
-repository = "https://github.com/tokio-rs/tracing"
+edition.workspace = true
+repository.workspace = true
 homepage = "https://tokio.rs"
 description = """
 Macros for emitting trace events
@@ -14,14 +14,14 @@ categories = [
     "asynchronous",
 ]
 keywords = ["logging", "tracing"]
-license = "MIT"
-rust-version = "1.65.0"
+license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
-tracing = { path = "../tracing", version = "0.1.35" }
+tracing = { workspace = true, default-features = true }
 
 [dev-dependencies]
-tracing-subscriber = { path = "../tracing-subscriber", version = "0.3.0", features = ["env-filter"] }
+tracing-subscriber = { workspace = true, default-features = true, features = ["env-filter"] }
 
 [badges]
 maintenance = { status = "experimental" }
