@@ -58,17 +58,27 @@
     issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
 #![cfg_attr(docsrs, deny(rustdoc::broken_intra_doc_links))]
-use proc_macro2::TokenStream;
-use quote::TokenStreamExt as _;
-use quote::{ToTokens, quote};
-use syn::parse::{Parse, ParseBuffer, ParseStream};
-use syn::token::Brace;
-use syn::{Attribute, ItemFn, Signature, Visibility};
+use core::marker::PhantomData;
+use std::iter;
 
-/// Parser for `#[instrument]` attribute arguments.
-mod attr;
-/// Code generation for instrumented functions and async-trait rewrites.
-mod expand;
+use proc_macro2::TokenStream;
+use quote::{ToTokens, TokenStreamExt as _, quote, quote_spanned};
+use syn::ext::IdentExt as _;
+use syn::parse::{Parse, ParseBuffer, ParseStream};
+use syn::punctuated::Punctuated;
+use syn::spanned::Spanned as _;
+use syn::token::{Brace, Paren};
+use syn::visit_mut::{VisitMut, visit_expr_mut, visit_type_mut};
+use syn::{
+    Attribute, Expr, ExprAsync, ExprCall, FieldPat, FnArg, Ident, Item, ItemFn, LitInt, LitStr,
+    Pat, PatIdent, PatReference, PatStruct, PatTuple, PatTupleStruct, PatType, Path, ReturnType,
+    Signature, Stmt, Token, Type, TypeInfer, TypePath, TypeReference, Visibility,
+};
+
+// Parser for `#[instrument]` attribute arguments.
+include!("attr.rs");
+// Code generation for instrumented functions and async-trait rewrites.
+include!("expand.rs");
 /// Instruments a function to create and enter a `tracing` [span] every time
 /// the function is called.
 ///
@@ -553,25 +563,34 @@ mod expand;
 /// [`Level::TRACE`]: https://docs.rs/tracing/latest/tracing/struct.Level.html#associatedconstant.TRACE
 /// [`Level::ERROR`]: https://docs.rs/tracing/latest/tracing/struct.Level.html#associatedconstant.ERROR
 #[proc_macro_attribute]
+#[allow(
+    clippy::single_call_fn,
+    reason = "proc-macro entry point must keep the exported attribute function signature"
+)]
 pub fn instrument(
     args: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    let parsed_args = syn::parse_macro_input!(args as attr::InstrumentArgs);
+    let parsed_args = syn::parse_macro_input!(args as InstrumentArgs);
     // Cloning a `TokenStream` is cheap since it's reference counted internally.
     instrument_precise(parsed_args.clone(), item.clone())
         .unwrap_or_else(|_err| instrument_speculative(parsed_args, item))
 }
 
 /// Instrument the function, without parsing the function body (instead using the raw tokens).
+#[allow(
+    clippy::single_call_fn,
+    reason = "speculative parser path is isolated from precise parsing fallback to preserve proc-macro control flow"
+)]
 fn instrument_speculative(
-    args: attr::InstrumentArgs,
+    args: InstrumentArgs,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let parsed_input = syn::parse_macro_input!(item as MaybeItemFn);
     let instrumented_function_name = parsed_input.sig.ident.to_string();
-    expand::gen_function(
-        parsed_input.as_ref(),
+    let parsed_input_ref = parsed_input.as_ref();
+    gen_function(
+        &parsed_input_ref,
         args,
         instrumented_function_name.as_str(),
         None,
@@ -581,8 +600,12 @@ fn instrument_speculative(
 
 /// Instrument the function, by fully parsing the function body,
 /// which allows us to rewrite some statements related to async-like patterns.
+#[allow(
+    clippy::single_call_fn,
+    reason = "precise parser path isolates async-trait detection and const-fn validation before fallback"
+)]
 fn instrument_precise(
-    args: attr::InstrumentArgs,
+    args: InstrumentArgs,
     item: proc_macro::TokenStream,
 ) -> Result<proc_macro::TokenStream, syn::Error> {
     let parsed_input = syn::parse::<ItemFn>(item)?;
@@ -597,14 +620,15 @@ fn instrument_precise(
 
     // check for async_trait-like patterns in the block, and instrument
     // the future instead of the wrapper
-    if let Some(async_like) = expand::AsyncInfo::from_fn(&parsed_input) {
-        return Ok(async_like.gen_async(args, instrumented_function_name.as_str()));
+    if let Some(async_like) = AsyncInfo::from_fn(&parsed_input) {
+        return Ok(async_like.gen_async(&args, instrumented_function_name.as_str()));
     }
 
     let maybe_input = MaybeItemFn::from(parsed_input);
+    let maybe_input_ref = maybe_input.as_ref();
 
-    Ok(expand::gen_function(
-        maybe_input.as_ref(),
+    Ok(gen_function(
+        &maybe_input_ref,
         args,
         instrumented_function_name.as_str(),
         None,

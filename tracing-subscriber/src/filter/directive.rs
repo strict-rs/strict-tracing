@@ -1,13 +1,19 @@
 use crate::filter::level::{self, LevelFilter};
 #[cfg(feature = "std")]
 use alloc::boxed::Box;
+#[cfg(not(feature = "smallvec"))]
+use alloc::vec::IntoIter;
 use alloc::{string::String, vec::Vec};
 
 use core::{cmp::Ordering, fmt, iter::FromIterator, slice, str::FromStr};
+#[cfg(feature = "std")]
+use std::error::Error;
 use tracing_core::{Level, Metadata};
+
 /// Indicates that a string could not be parsed as a filtering directive.
 #[derive(Debug)]
 pub struct ParseError {
+    /// The specific reason directive parsing failed.
     kind: ParseErrorKind,
 }
 
@@ -15,33 +21,48 @@ pub struct ParseError {
 ///
 /// Unlike a dynamic directive, this can be cached by the callsite.
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub(crate) struct StaticDirective {
+pub(in crate::filter) struct StaticDirective {
+    /// The optional target prefix matched by this directive.
     pub(in crate::filter) target: Option<String>,
+    /// Field names that must be present on matching event metadata.
     pub(in crate::filter) field_names: Vec<String>,
+    /// The maximum level enabled by this directive.
     pub(in crate::filter) level: LevelFilter,
 }
 
+/// Storage used for directive lists.
 #[cfg(feature = "smallvec")]
-pub(crate) type FilterVec<T> = smallvec::SmallVec<[T; 8]>;
+pub(in crate::filter) type FilterVec<T> = smallvec::SmallVec<[T; 8]>;
+/// Storage used for directive lists.
 #[cfg(not(feature = "smallvec"))]
-pub(crate) type FilterVec<T> = Vec<T>;
+pub(in crate::filter) type FilterVec<T> = Vec<T>;
 
+/// A sorted set of directives with a precomputed maximum level.
 #[derive(Debug, PartialEq, Clone)]
 pub(in crate::filter) struct DirectiveSet<T> {
+    /// Directives sorted from most-specific to least-specific.
     directives: FilterVec<T>,
+    /// The highest verbosity enabled by any directive in the set.
     pub(in crate::filter) max_level: LevelFilter,
 }
 
+/// Common behavior for directive types that can match metadata.
 pub(in crate::filter) trait Match {
+    /// Returns whether this directive applies to the metadata.
     fn cares_about(&self, meta: &Metadata<'_>) -> bool;
+    /// Returns the maximum level enabled by this directive.
     fn level(&self) -> &LevelFilter;
 }
 
+/// The reason directive parsing failed.
 #[derive(Debug)]
 enum ParseErrorKind {
+    /// A field matcher could not be parsed.
     #[cfg(feature = "std")]
-    Field(Box<dyn std::error::Error + Send + Sync>),
+    Field(Box<dyn Error + Send + Sync>),
+    /// The level component could not be parsed.
     Level(level::ParseError),
+    /// A syntactic error occurred, with an optional message.
     Other(Option<&'static str>),
 }
 
@@ -50,10 +71,12 @@ enum ParseErrorKind {
 impl<T> DirectiveSet<T> {
     // this is only used by `env-filter`.
     #[cfg(all(feature = "std", feature = "env-filter"))]
+    /// Returns whether the set contains no directives.
     pub(crate) fn is_empty(&self) -> bool {
         self.directives.is_empty()
     }
 
+    /// Returns an iterator over all directives in specificity order.
     pub(crate) fn iter(&self) -> slice::Iter<'_, T> {
         self.directives.iter()
     }
@@ -69,17 +92,21 @@ impl<T: Ord> Default for DirectiveSet<T> {
 }
 
 impl<T: Match + Ord> DirectiveSet<T> {
+    /// Returns an iterator over all directives in specificity order.
     pub(crate) fn directives(&self) -> impl Iterator<Item = &T> {
         self.directives.iter()
     }
 
+    /// Returns directives that match the provided metadata.
     pub(crate) fn directives_for<'a>(
         &'a self,
         metadata: &'a Metadata<'a>,
     ) -> impl Iterator<Item = &'a T> + 'a {
-        self.directives().filter(move |d| d.cares_about(metadata))
+        self.directives()
+            .filter(move |directive| directive.cares_about(metadata))
     }
 
+    /// Adds or replaces a directive, preserving specificity order.
     pub(crate) fn add(&mut self, directive: T) {
         // does this directive enable a more verbose level than the current
         // max? if so, update the max level.
@@ -91,13 +118,21 @@ impl<T: Match + Ord> DirectiveSet<T> {
         // specificity (length of target + number of field filters). this
         // ensures that, when finding a directive to match a span or event, we
         // search the directive set in most specific first order.
-        match self.directives.binary_search(&directive) {
-            Ok(i) => self.directives[i] = directive,
-            Err(i) => self.directives.insert(i, directive),
+        if let Ok(index) = self.directives.binary_search(&directive) {
+            if let Some(existing) = self.directives.get_mut(index) {
+                *existing = directive;
+            } else {
+                self.directives.push(directive);
+                self.directives.sort_unstable();
+            }
+        } else {
+            self.directives.push(directive);
+            self.directives.sort_unstable();
         }
     }
 
     #[cfg(test)]
+    /// Returns the directive storage for tests.
     pub(in crate::filter) fn into_vec(self) -> FilterVec<T> {
         self.directives
     }
@@ -113,7 +148,7 @@ impl<T: Match + Ord> FromIterator<T> for DirectiveSet<T> {
 
 impl<T: Match + Ord> Extend<T> for DirectiveSet<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
-        for directive in iter.into_iter() {
+        for directive in iter {
             self.add(directive);
         }
     }
@@ -125,7 +160,7 @@ impl<T> IntoIterator for DirectiveSet<T> {
     #[cfg(feature = "smallvec")]
     type IntoIter = smallvec::IntoIter<[T; 8]>;
     #[cfg(not(feature = "smallvec"))]
-    type IntoIter = alloc::vec::IntoIter<T>;
+    type IntoIter = IntoIter<T>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.directives.into_iter()
@@ -135,35 +170,36 @@ impl<T> IntoIterator for DirectiveSet<T> {
 // === impl Statics ===
 
 impl DirectiveSet<StaticDirective> {
+    /// Returns whether metadata is enabled by the static directive set.
     pub(crate) fn enabled(&self, meta: &Metadata<'_>) -> bool {
         let level = meta.level();
-        match self.directives_for(meta).next() {
-            Some(d) => d.level >= *level,
-            None => false,
-        }
+        self.directives_for(meta)
+            .next()
+            .is_some_and(|directive| directive.level >= *level)
     }
 
     /// Same as `enabled` above, but skips `Directive`'s with fields.
-    pub(crate) fn target_enabled(&self, target: &str, level: &Level) -> bool {
-        match self.directives_for_target(target).next() {
-            Some(d) => d.level >= *level,
-            None => false,
-        }
+    pub(crate) fn target_enabled(&self, target: &str, level: Level) -> bool {
+        self.directives_for_target(target)
+            .next()
+            .is_some_and(|directive| directive.level >= level)
     }
 
+    /// Returns target-only directives that match the provided target.
     pub(crate) fn directives_for_target<'a>(
         &'a self,
         target: &'a str,
     ) -> impl Iterator<Item = &'a StaticDirective> + 'a {
         self.directives()
-            .filter(move |d| d.cares_about_target(target))
+            .filter(move |directive| directive.cares_about_target(target))
     }
 }
 
 // === impl StaticDirective ===
 
 impl StaticDirective {
-    pub(in crate::filter) fn new(
+    /// Constructs a static directive from its parsed components.
+    pub(in crate::filter) const fn new(
         target: Option<String>,
         field_names: Vec<String>,
         level: LevelFilter,
@@ -175,11 +211,12 @@ impl StaticDirective {
         }
     }
 
-    pub(in crate::filter) fn cares_about_target(&self, to_check: &str) -> bool {
+    /// Returns whether this directive applies to the provided target.
+    pub(in crate::filter) fn cares_about_target(&self, target_to_check: &str) -> bool {
         // Does this directive have a target filter, and does it match the
         // metadata's target?
         if let Some(target) = self.target.as_deref()
-            && !to_check.starts_with(target)
+            && !target_to_check.starts_with(target)
         {
             return false;
         }
@@ -193,14 +230,14 @@ impl StaticDirective {
 }
 
 impl Ord for StaticDirective {
-    fn cmp(&self, other: &StaticDirective) -> Ordering {
+    fn cmp(&self, other: &Self) -> Ordering {
         // We attempt to order directives by how "specific" they are. This
         // ensures that we try the most specific directives first when
         // attempting to match a piece of metadata.
 
         // First, we compare based on whether a target is specified, and the
         // lengths of those targets if both have targets.
-        let ordering = self
+        self
             .target
             .as_ref()
             .map(String::len)
@@ -216,23 +253,7 @@ impl Ord for StaticDirective {
                     .cmp(&other.target)
                     .then_with(|| self.field_names[..].cmp(&other.field_names[..]))
             })
-            .reverse();
-
-        #[cfg(debug_assertions)]
-        {
-            if ordering == Ordering::Equal {
-                debug_assert_eq!(
-                    self.target, other.target,
-                    "invariant violated: Ordering::Equal must imply a.target == b.target"
-                );
-                debug_assert_eq!(
-                    self.field_names, other.field_names,
-                    "invariant violated: Ordering::Equal must imply a.field_names == b.field_names"
-                );
-            }
-        }
-
-        ordering
+            .reverse()
     }
 }
 
@@ -271,7 +292,7 @@ impl Match for StaticDirective {
 
 impl Default for StaticDirective {
     fn default() -> Self {
-        StaticDirective {
+        Self {
             target: None,
             field_names: Vec::new(),
             level: LevelFilter::ERROR,
@@ -281,29 +302,32 @@ impl Default for StaticDirective {
 
 impl fmt::Display for StaticDirective {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut wrote_any = false;
-        if let Some(ref target) = self.target {
+        let wrote_target = if let Some(ref target) = self.target {
             fmt::Display::fmt(target, f)?;
-            wrote_any = true;
-        }
+            true
+        } else {
+            false
+        };
 
-        if !self.field_names.is_empty() {
+        let wrote_fields = if self.field_names.is_empty() {
+            false
+        } else {
             f.write_str("[")?;
 
             let mut fields = self.field_names.iter();
             if let Some(field) = fields.next() {
-                write!(f, "{{{}", field)?;
-                for field in fields {
-                    write!(f, ",{}", field)?;
+                write!(f, "{{{field}")?;
+                for field_name in fields {
+                    write!(f, ",{field_name}")?;
                 }
                 f.write_str("}")?;
             }
 
             f.write_str("]")?;
-            wrote_any = true;
-        }
+            true
+        };
 
-        if wrote_any {
+        if wrote_target || wrote_fields {
             f.write_str("=")?;
         }
 
@@ -338,14 +362,14 @@ impl FromStr for StaticDirective {
                 ));
             }
 
-            let mut split = part0.split("[{");
-            let target = split.next().map(String::from);
+            let mut target_and_fields = part0.split("[{");
+            let target = target_and_fields.next().map(String::from);
             let mut field_names = Vec::new();
             // Directive includes fields:
             // * `foo[{bar}]=trace`
             // * `foo[{bar,baz}]=trace`
-            if let Some(maybe_fields) = split.next() {
-                if split.next().is_some() {
+            if let Some(maybe_fields) = target_and_fields.next() {
+                if target_and_fields.next().is_some() {
                     return Err(ParseError::msg(
                         "too many '[{' in filter directive, expected 0 or 1",
                     ));
@@ -358,20 +382,20 @@ impl FromStr for StaticDirective {
                 let fields = maybe_fields
                     .trim_end_matches("}]")
                     .split(',')
-                    .filter_map(|s| {
-                        if s.is_empty() {
+                    .filter_map(|field| {
+                        if field.is_empty() {
                             None
                         } else {
-                            Some(String::from(s))
+                            Some(String::from(field))
                         }
                     });
                 field_names.extend(fields);
-            };
+            }
             let level = part1.parse()?;
             return Ok(Self {
-                level,
-                field_names,
                 target,
+                field_names,
+                level,
             });
         }
 
@@ -379,18 +403,22 @@ impl FromStr for StaticDirective {
         // bare level or a bare target.
         // * `foo`
         // * `info`
-        Ok(match part0.parse::<LevelFilter>() {
-            Ok(level) => Self {
-                level,
-                target: None,
-                field_names: Vec::new(),
+        part0.parse::<LevelFilter>().map_or_else(
+            |_| {
+                Ok(Self {
+                    target: Some(String::from(part0)),
+                    field_names: Vec::new(),
+                    level: LevelFilter::TRACE,
+                })
             },
-            Err(_) => Self {
-                target: Some(String::from(part0)),
-                level: LevelFilter::TRACE,
-                field_names: Vec::new(),
+            |level| {
+                Ok(Self {
+                    target: None,
+                    field_names: Vec::new(),
+                    level,
+                })
             },
-        })
+        )
     }
 }
 
@@ -398,15 +426,17 @@ impl FromStr for StaticDirective {
 
 impl ParseError {
     #[cfg(all(feature = "std", feature = "env-filter"))]
-    pub(crate) fn new() -> Self {
-        ParseError {
+    /// Constructs a generic directive parse error.
+    pub(crate) const fn new() -> Self {
+        Self {
             kind: ParseErrorKind::Other(None),
         }
     }
 
-    pub(crate) fn msg(s: &'static str) -> Self {
-        ParseError {
-            kind: ParseErrorKind::Other(Some(s)),
+    /// Constructs a directive parse error with a static message.
+    pub(crate) const fn msg(message: &'static str) -> Self {
+        Self {
+            kind: ParseErrorKind::Other(Some(message)),
         }
     }
 }
@@ -415,42 +445,44 @@ impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.kind {
             ParseErrorKind::Other(None) => f.pad("invalid filter directive"),
-            ParseErrorKind::Other(Some(msg)) => write!(f, "invalid filter directive: {}", msg),
-            ParseErrorKind::Level(ref l) => l.fmt(f),
+            ParseErrorKind::Other(Some(msg)) => {
+                write!(f, "invalid filter directive: {msg}")
+            }
+            ParseErrorKind::Level(ref level) => level.fmt(f),
             #[cfg(feature = "std")]
-            ParseErrorKind::Field(ref e) => write!(f, "invalid field filter: {}", e),
+            ParseErrorKind::Field(ref error) => write!(f, "invalid field filter: {error}"),
         }
     }
 }
 
 #[cfg(feature = "std")]
-impl std::error::Error for ParseError {
-    fn description(&self) -> &str {
+impl Error for ParseError {
+    fn description(&self) -> &'static str {
         "invalid filter directive"
     }
 
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self.kind {
             ParseErrorKind::Other(_) => None,
-            ParseErrorKind::Level(ref l) => Some(l),
-            ParseErrorKind::Field(ref n) => Some(n.as_ref()),
+            ParseErrorKind::Level(ref level) => Some(level),
+            ParseErrorKind::Field(ref error) => Some(error.as_ref()),
         }
     }
 }
 
 #[cfg(feature = "std")]
-impl From<Box<dyn std::error::Error + Send + Sync>> for ParseError {
-    fn from(e: Box<dyn std::error::Error + Send + Sync>) -> Self {
+impl From<Box<dyn Error + Send + Sync>> for ParseError {
+    fn from(error: Box<dyn Error + Send + Sync>) -> Self {
         Self {
-            kind: ParseErrorKind::Field(e),
+            kind: ParseErrorKind::Field(error),
         }
     }
 }
 
 impl From<level::ParseError> for ParseError {
-    fn from(l: level::ParseError) -> Self {
+    fn from(error: level::ParseError) -> Self {
         Self {
-            kind: ParseErrorKind::Level(l),
+            kind: ParseErrorKind::Level(error),
         }
     }
 }

@@ -1,12 +1,19 @@
 //! Event dispatch benchmarks.
 
 use criterion::{Criterion, criterion_group, criterion_main};
+use tracing::info;
 
-mod shared;
+pub mod shared;
+use shared::BenchmarkMatrix as _;
 
-fn bench(c: &mut Criterion) {
-    shared::for_all_recording(&mut c.benchmark_group("event"), |b| {
-        b.iter(|| tracing::info!("hello world!"))
+/// Benchmarks emitting an event.
+#[allow(
+    clippy::single_call_fn,
+    reason = "Criterion invokes this benchmark entrypoint through criterion_group"
+)]
+fn bench(criterion: &mut Criterion) {
+    shared::Recording.bench(&mut criterion.benchmark_group("event"), |bencher| {
+        bencher.iter(|| info!("hello world!"));
     });
 }
 

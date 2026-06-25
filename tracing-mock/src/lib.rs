@@ -1,23 +1,17 @@
-#![doc = include_str!("../README.md")]
-#![cfg_attr(
-    docsrs,
-    // Allows displaying cfgs/feature flags in the documentation.
-    feature(doc_cfg),
-    // Fail the docs build if any intra-docs links are broken
-    deny(rustdoc::broken_intra_doc_links),
-)]
-#![doc(
-    html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
-    html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
-    issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
-)]
+#![doc = "Testing utilities for `tracing` diagnostics."]
+#![cfg_attr(docsrs, feature(doc_cfg), deny(rustdoc::broken_intra_doc_links))]
 pub mod ancestry;
 pub mod event;
 pub mod expect;
+#[doc(hidden)]
+pub mod failure;
 pub mod field;
-mod metadata;
+/// Shared metadata expectation helpers.
+#[doc(hidden)]
+pub mod metadata;
 pub mod span;
 pub mod subscriber;
 
+/// Layer-based mocks for validating traces inside a `tracing-subscriber` stack.
 #[cfg(feature = "tracing-subscriber")]
 pub mod layer;

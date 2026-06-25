@@ -1,0 +1,10 @@
+error[E0599]: no method named `init` found for struct `SubscriberBuilder<N, E, F, W>` in the current scope
+ --> tests/ui/fail/fmt_builder_init_removed.rs:2:31
+  |
+2 |     tracing_subscriber::fmt().init();
+  |                               ^^^^
+  |
+help: there is a method `try_init` with a similar name
+  |
+2 |     tracing_subscriber::fmt().try_init();
+  |                               ++++

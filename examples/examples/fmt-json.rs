@@ -1,13 +1,15 @@
 //! Example binary for tracing workspace checks.
 #[path = "fmt/yak_shave.rs"]
-mod yak_shave;
+pub mod yak_shave;
 
-fn main() {
+use std::error::Error;
+
+fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     tracing_subscriber::fmt()
         .json()
         .with_max_level(tracing::Level::TRACE)
         .with_current_span(false)
-        .init();
+        .try_init()?;
 
     let number_of_yaks = 3;
     // this creates a new event, outside of any spans.
@@ -18,4 +20,5 @@ fn main() {
         all_yaks_shaved = number_shaved == number_of_yaks,
         "yak shaving completed"
     );
+    Ok(())
 }

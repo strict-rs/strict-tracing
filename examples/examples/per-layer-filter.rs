@@ -15,41 +15,44 @@
 //! JSON-formatted output at WARN level to a temporary log file.
 
 #[path = "fmt/yak_shave.rs"]
-mod yak_shave;
+pub mod yak_shave;
 
-use std::io;
+use std::{
+    error::Error,
+    fs::read_to_string,
+    io::{Write as _, stderr, stdout},
+};
+use tracing_appender::{non_blocking, rolling};
 use tracing_subscriber::{
+    Layer as _,
     filter::{LevelFilter, Targets},
     fmt,
-    layer::SubscriberExt,
-    util::SubscriberInitExt,
-    Layer,
+    layer::SubscriberExt as _,
+    registry,
+    util::SubscriberInitExt as _,
 };
 
-fn main() {
-    let dir = tempfile::tempdir().expect("Failed to create tempdir");
+fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
+    let dir = tempfile::tempdir()?;
     let log_path = dir.path().join("app.log");
 
-    let file_appender = tracing_appender::rolling::never(dir.path(), "app.log");
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+    let file_appender = rolling::never(dir.path(), "app.log")?;
+    let (file_writer, guard) = non_blocking(file_appender);
 
     // A pretty-printed stdout layer that captures DEBUG and above.
     let stdout_layer = fmt::layer()
-        .with_writer(io::stdout)
+        .with_writer(stdout)
         .pretty()
         .with_filter(LevelFilter::DEBUG);
 
     // A JSON file layer that captures WARN and above.
-    let file_layer = fmt::layer().json().with_writer(non_blocking).with_filter(
+    let file_layer = fmt::layer().json().with_writer(file_writer).with_filter(
         Targets::new()
             .with_target("per_layer_filter", LevelFilter::WARN)
             .with_target("yak_shave", LevelFilter::WARN),
     );
 
-    tracing_subscriber::registry()
-        .with(stdout_layer)
-        .with(file_layer)
-        .init();
+    registry().with(stdout_layer).with(file_layer).try_init()?;
 
     let number_of_yaks = 3;
     tracing::info!(number_of_yaks, "preparing to shave yaks");
@@ -63,8 +66,11 @@ fn main() {
     // Print the log file contents so we can see only WARN+ events were captured.
     // Drop the guard first to flush the non-blocking writer.
     drop(guard);
-    eprintln!("\n--- Contents of {} ---", log_path.display());
-    if let Ok(contents) = std::fs::read_to_string(&log_path) {
-        eprint!("{contents}");
+    let mut terminal = stderr();
+    writeln!(terminal, "\n--- Contents of {} ---", log_path.display())?;
+    if let Ok(contents) = read_to_string(&log_path) {
+        write!(terminal, "{contents}")?;
     }
+
+    Ok(())
 }

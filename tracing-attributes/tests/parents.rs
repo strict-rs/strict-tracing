@@ -1,5 +1,7 @@
 //! Example binary for tracing workspace checks.
+#![cfg(test)]
 
+use strict_test_support::{TestFailure, ensure_ok};
 use tracing::{Id, Level, subscriber::with_default};
 use tracing_attributes::instrument;
 use tracing_mock::*;
@@ -8,6 +10,10 @@ use tracing_mock::*;
 fn with_default_parent() {}
 
 #[instrument(parent = parent_span, skip(parent_span))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "explicit-parent fixture remains a named function item so parent metadata can be asserted"
+)]
 fn with_explicit_parent<P>(parent_span: P)
 where
     P: Into<Option<Id>>,
@@ -15,7 +21,7 @@ where
 }
 
 #[test]
-fn default_parent_test() {
+fn default_parent_test() -> Result<(), TestFailure> {
     let contextual_parent = expect::span().named("contextual_parent");
     let child = expect::span().named("with_default_parent");
 
@@ -40,21 +46,22 @@ fn default_parent_test() {
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
-        let contextual_parent = tracing::span!(Level::TRACE, "contextual_parent");
+    with_default(subscriber, || {
+        let runtime_contextual_parent = tracing::span!(Level::TRACE, "contextual_parent");
 
         with_default_parent();
 
-        contextual_parent.in_scope(|| {
+        runtime_contextual_parent.in_scope(|| {
             with_default_parent();
         });
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn explicit_parent_test() {
+fn explicit_parent_test() -> Result<(), TestFailure> {
     let contextual_parent = expect::span().named("contextual_parent");
     let explicit_parent = expect::span().named("explicit_parent");
     let child = expect::span().named("with_explicit_parent");
@@ -78,14 +85,15 @@ fn explicit_parent_test() {
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
-        let contextual_parent = tracing::span!(Level::INFO, "contextual_parent");
-        let explicit_parent = tracing::span!(Level::INFO, "explicit_parent");
+    with_default(subscriber, || {
+        let runtime_contextual_parent = tracing::span!(Level::INFO, "contextual_parent");
+        let runtime_explicit_parent = tracing::span!(Level::INFO, "explicit_parent");
 
-        contextual_parent.in_scope(|| {
-            with_explicit_parent(&explicit_parent);
+        runtime_contextual_parent.in_scope(|| {
+            with_explicit_parent(&runtime_explicit_parent);
         });
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }

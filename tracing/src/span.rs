@@ -228,11 +228,11 @@
 //!
 //! Because spans may be entered and exited multiple times before they close,
 //! [`Subscriber`]s have separate trait methods which are called to notify them
-//! of span exits and when span handles are dropped. When execution exits a
+//! of span exits and when span handles are closed. When execution exits a
 //! span, [`exit`] will always be called with that span's ID to notify the
-//! subscriber that the span has been exited. When span handles are dropped, the
-//! [`drop_span`] method is called with that span's ID. The subscriber may use
-//! this to determine whether or not the span will be entered again.
+//! subscriber that the span has been exited. When span handles are dropped,
+//! [`try_close`] is called with that span's ID. The subscriber may use this to
+//! determine whether or not the span will be entered again.
 //!
 //! If there is only a single handle with the capacity to exit a span, dropping
 //! that handle "closes" the span, since the capacity to enter it no longer
@@ -245,19 +245,19 @@
 //!     }); // --> Subscriber::exit(my_span)
 //!
 //!     // The handle to `my_span` only lives inside of this block; when it is
-//!     // dropped, the subscriber will be informed via `drop_span`.
+//!     // dropped, the subscriber will be informed via `try_close`.
 //!
-//! } // --> Subscriber::drop_span(my_span)
+//! } // --> Subscriber::try_close(my_span) -> true
 //! ```
 //!
 //! However, if multiple handles exist, the span can still be re-entered even if
 //! one or more is dropped. For determining when _all_ handles to a span have
 //! been dropped, `Subscriber`s have a [`clone_span`] method, which is called
-//! every time a span handle is cloned. Combined with `drop_span`, this may be
-//! used to track the number of handles to a given span — if `drop_span` has
+//! every time a span handle is cloned. Combined with [`try_close`], this may be
+//! used to track the number of handles to a given span. When `try_close` has
 //! been called one more time than the number of calls to `clone_span` for a
-//! given ID, then no more handles to the span with that ID exist. The
-//! subscriber may then treat it as closed.
+//! given ID, no more handles to the span with that ID exist, and the subscriber
+//! may return `true` and treat it as closed.
 //!
 //! # When to use spans
 //!
@@ -308,7 +308,7 @@
 //! [`warn_span!`]: super::warn_span!
 //! [`error_span!`]: super::error_span!
 //! [`clone_span`]: super::subscriber::Subscriber::clone_span()
-//! [`drop_span`]: super::subscriber::Subscriber::drop_span()
+//! [`try_close`]: super::subscriber::Subscriber::try_close()
 //! [`exit`]: super::subscriber::Subscriber::exit
 //! [`Subscriber`]: super::subscriber::Subscriber
 //! [`enter`]: Span::enter()
@@ -388,6 +388,7 @@ pub(crate) struct Inner {
 #[derive(Debug)]
 #[must_use = "once a span has been entered, it should be exited"]
 pub struct Entered<'a> {
+    /// The span that was entered.
     span: &'a Span,
 }
 
@@ -402,6 +403,7 @@ pub struct Entered<'a> {
 #[derive(Debug)]
 #[must_use = "once a span has been entered, it should be exited"]
 pub struct EnteredSpan {
+    /// The span that was entered.
     span: Span,
 
     /// ```compile_fail
@@ -436,19 +438,25 @@ impl Span {
     /// [`Subscriber`]: super::subscriber::Subscriber
     /// [field values]: super::field::ValueSet
     /// [`follows_from`]: super::Span::follows_from
-    pub fn new(meta: &'static Metadata<'static>, values: &field::ValueSet<'_>) -> Span {
+    #[must_use]
+    pub fn new(meta: &'static Metadata<'static>, values: &field::ValueSet<'_>) -> Self {
         dispatcher::get_default(|dispatch| Self::new_with(meta, values, dispatch))
     }
 
     #[inline]
     #[doc(hidden)]
+    #[allow(
+        clippy::single_call_fn,
+        reason = "doc-hidden constructor lets macro and manual paths reuse an explicit Dispatch"
+    )]
+    #[must_use]
     pub fn new_with(
         meta: &'static Metadata<'static>,
         values: &field::ValueSet<'_>,
         dispatch: &Dispatch,
-    ) -> Span {
+    ) -> Self {
         let new_span = Attributes::new(meta, values);
-        Self::make_with(meta, new_span, dispatch)
+        Self::make_with(meta, &new_span, dispatch)
     }
 
     /// Constructs a new `Span` as the root of its own trace tree, with the
@@ -460,19 +468,25 @@ impl Span {
     /// [metadata]: super::Metadata
     /// [field values]: super::field::ValueSet
     /// [`follows_from`]: super::Span::follows_from
-    pub fn new_root(meta: &'static Metadata<'static>, values: &field::ValueSet<'_>) -> Span {
+    #[must_use]
+    pub fn new_root(meta: &'static Metadata<'static>, values: &field::ValueSet<'_>) -> Self {
         dispatcher::get_default(|dispatch| Self::new_root_with(meta, values, dispatch))
     }
 
     #[inline]
     #[doc(hidden)]
+    #[allow(
+        clippy::single_call_fn,
+        reason = "doc-hidden root constructor lets macro and manual paths reuse an explicit Dispatch"
+    )]
+    #[must_use]
     pub fn new_root_with(
         meta: &'static Metadata<'static>,
         values: &field::ValueSet<'_>,
         dispatch: &Dispatch,
-    ) -> Span {
+    ) -> Self {
         let new_span = Attributes::new_root(meta, values);
-        Self::make_with(meta, new_span, dispatch)
+        Self::make_with(meta, &new_span, dispatch)
     }
 
     /// Constructs a new `Span` as child of the given parent span, with the
@@ -488,26 +502,30 @@ impl Span {
         parent: impl Into<Option<Id>>,
         meta: &'static Metadata<'static>,
         values: &field::ValueSet<'_>,
-    ) -> Span {
-        let mut parent = parent.into();
+    ) -> Self {
+        let mut parent_id = parent.into();
         dispatcher::get_default(move |dispatch| {
-            Self::child_of_with(Option::take(&mut parent), meta, values, dispatch)
+            Self::child_of_with(Option::take(&mut parent_id), meta, values, dispatch)
         })
     }
 
     #[inline]
     #[doc(hidden)]
+    #[allow(
+        clippy::single_call_fn,
+        reason = "doc-hidden explicit-parent constructor lets macro paths pass a prepared Dispatch"
+    )]
     pub fn child_of_with(
         parent: impl Into<Option<Id>>,
         meta: &'static Metadata<'static>,
         values: &field::ValueSet<'_>,
         dispatch: &Dispatch,
-    ) -> Span {
-        let new_span = match parent.into() {
-            Some(parent) => Attributes::child_of(parent, meta, values),
-            None => Attributes::new_root(meta, values),
-        };
-        Self::make_with(meta, new_span, dispatch)
+    ) -> Self {
+        let new_span = parent.into().map_or_else(
+            || Attributes::new_root(meta, values),
+            |parent_id| Attributes::child_of(parent_id, meta, values),
+        );
+        Self::make_with(meta, &new_span, dispatch)
     }
 
     /// Constructs a new disabled span with the given `Metadata`.
@@ -518,8 +536,12 @@ impl Span {
     /// Entering, exiting, and recording values on this span will not notify the
     /// `Subscriber` but _may_ record log messages if the `log` feature flag is
     /// enabled.
-    #[inline(always)]
-    pub fn new_disabled(meta: &'static Metadata<'static>) -> Span {
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public disabled-span constructor represents subscriber-disabled callsites"
+    )]
+    #[must_use]
+    pub const fn new_disabled(meta: &'static Metadata<'static>) -> Self {
         Self {
             inner: None,
             meta: Some(meta),
@@ -532,8 +554,8 @@ impl Span {
     /// span is not present.
     ///
     /// Entering, exiting, and recording values on this span will do nothing.
-    #[inline(always)]
-    pub const fn none() -> Span {
+    #[must_use]
+    pub const fn none() -> Self {
         Self {
             inner: None,
             meta: None,
@@ -549,27 +571,36 @@ impl Span {
     ///
     /// [considered by the `Subscriber`]:
     ///     super::subscriber::Subscriber::current_span
-    pub fn current() -> Span {
+    #[must_use]
+    pub fn current() -> Self {
         dispatcher::get_default(|dispatch| {
-            if let Some((id, meta)) = dispatch.current_span().into_inner() {
-                let id = dispatch.clone_span(id);
-                Self {
-                    inner: Some(Inner::new(id, dispatch)),
-                    meta: Some(meta),
-                }
-            } else {
-                Self::none()
+            let current = match dispatch.current_span() {
+                Ok(current) => current,
+                Err(_error) => return Self::none(),
+            };
+            let Some((id, meta)) = current.into_inner() else {
+                return Self::none();
+            };
+            let cloned_id = match dispatch.clone_span(id) {
+                Ok(cloned_id) => cloned_id,
+                Err(_error) => return Self::none(),
+            };
+            Self {
+                inner: Some(Inner::new(cloned_id, dispatch)),
+                meta: Some(meta),
             }
         })
     }
 
+    /// Construct a span from subscriber-provided attributes.
     fn make_with(
         meta: &'static Metadata<'static>,
-        new_span: Attributes<'_>,
+        attrs: &Attributes<'_>,
         dispatch: &Dispatch,
-    ) -> Span {
-        let attrs = &new_span;
-        let id = dispatch.new_span(attrs);
+    ) -> Self {
+        let Ok(id) = dispatch.new_span(attrs) else {
+            return Self::new_disabled(meta);
+        };
         let inner = Some(Inner::new(id, dispatch));
 
         let span = Self {
@@ -798,7 +829,7 @@ impl Span {
     /// [`Subscriber::enter`]: super::subscriber::Subscriber::enter()
     /// [`Subscriber::exit`]: super::subscriber::Subscriber::exit()
     /// [`Id`]: super::Id
-    #[inline(always)]
+    #[inline]
     pub fn enter(&self) -> Entered<'_> {
         self.do_enter();
         Entered { span: self }
@@ -908,12 +939,12 @@ impl Span {
     /// [`Subscriber::enter`]: super::subscriber::Subscriber::enter()
     /// [`Subscriber::exit`]: super::subscriber::Subscriber::exit()
     /// [`Id`]: super::Id
-    #[inline(always)]
+    #[inline]
     pub fn entered(self) -> EnteredSpan {
         self.do_enter();
         EnteredSpan {
             span: self,
-            _not_send: PhantomNotSend,
+            _not_send: PHANTOM_NOT_SEND,
         }
     }
 
@@ -1048,15 +1079,15 @@ impl Span {
         self
     }
 
-    #[inline(always)]
+    /// Enter this span and notify log subscribers when configured.
     fn do_enter(&self) {
         if let Some(inner) = self.inner.as_ref() {
-            inner.subscriber.enter(inner.id);
+            let _ignored = inner.subscriber.enter(inner.id);
         }
 
         if_log_enabled! { crate::Level::TRACE, {
-            if let Some(_meta) = self.meta {
-                self.log(ACTIVITY_LOG_TARGET, log::Level::Trace, format_args!("-> {};", _meta.name()));
+            if let Some(meta) = self.meta {
+                self.log(ACTIVITY_LOG_TARGET, log::Level::Trace, format_args!("-> {};", meta.name()));
             }
         }}
     }
@@ -1065,15 +1096,15 @@ impl Span {
     //
     // Running this behaviour on drop rather than with an explicit function
     // call means that spans may still be exited when unwinding.
-    #[inline(always)]
+    /// Exit this span and notify log subscribers when configured.
     fn do_exit(&self) {
         if let Some(inner) = self.inner.as_ref() {
-            inner.subscriber.exit(inner.id);
+            let _ignored = inner.subscriber.exit(inner.id);
         }
 
         if_log_enabled! { crate::Level::TRACE, {
-            if let Some(_meta) = self.meta {
-                self.log(ACTIVITY_LOG_TARGET, log::Level::Trace, format_args!("<- {};", _meta.name()));
+            if let Some(meta) = self.meta {
+                self.log(ACTIVITY_LOG_TARGET, log::Level::Trace, format_args!("<- {};", meta.name()));
             }
         }}
     }
@@ -1209,11 +1240,11 @@ impl Span {
     /// [`Metadata`]: super::Metadata
     pub fn record<Q: field::AsField + ?Sized, V: field::Value>(
         &self,
-        field: &Q,
+        field_name: &Q,
         value: V,
     ) -> &Self {
         if let Some(meta) = self.meta
-            && let Some(field) = field.as_field(meta)
+            && let Some(field) = field_name.as_field(meta)
         {
             let value_ref: &dyn field::Value = &value;
             let values = [(&field, Some(value_ref))];
@@ -1226,23 +1257,25 @@ impl Span {
 
     /// Records all the fields in the provided `ValueSet`.
     #[doc(hidden)]
+    #[must_use]
     pub fn record_all(&self, values: &field::ValueSet<'_>) -> &Self {
         let record = Record::new(values);
         if let Some(ref inner) = self.inner {
             inner.record(&record);
         }
 
-        if let Some(_meta) = self.meta {
-            if_log_enabled! { *_meta.level(), {
+        #[cfg(feature = "log")]
+        if let Some(meta) = self.meta {
+            if_log_enabled! { *meta.level(), {
                 let target = if record.is_empty() {
                     LIFECYCLE_LOG_TARGET
                 } else {
-                    _meta.target()
+                    meta.target()
                 };
                 self.log(
                     target,
-                    level_to_log!(*_meta.level()),
-                    format_args!("{};{}", _meta.name(), crate::log::LogValueSet { values, is_first: false }),
+                    level_to_log!(*meta.level()),
+                    format_args!("{};{}", meta.name(), crate::log::LogValueSet { values, is_first: false }),
                 );
             }}
         }
@@ -1257,7 +1290,8 @@ impl Span {
     ///
     /// [`is_none`]: Span::is_none()
     #[inline]
-    pub fn is_disabled(&self) -> bool {
+    #[must_use]
+    pub const fn is_disabled(&self) -> bool {
         self.inner.is_none()
     }
 
@@ -1272,7 +1306,8 @@ impl Span {
     /// [`Span::none`]: Span::none()
     /// [`is_disabled`]: Span::is_disabled()
     #[inline]
-    pub fn is_none(&self) -> bool {
+    #[must_use]
+    pub const fn is_none(&self) -> bool {
         self.is_disabled() && self.meta.is_none()
     }
 
@@ -1323,25 +1358,28 @@ impl Span {
     /// let id = span.id();
     /// span.follows_from(id);
     /// ```
-    pub fn follows_from(&self, from: impl Into<Option<Id>>) -> &Self {
+    pub fn follows_from(&self, from_id: impl Into<Option<Id>>) -> &Self {
         if let Some(inner) = self.inner.as_ref()
-            && let Some(from) = from.into()
+            && let Some(precedent) = from_id.into()
         {
-            inner.follows_from(&from);
+            inner.follows_from(precedent);
         }
         self
     }
 
     /// Returns this span's `Id`, if it is enabled.
+    #[must_use]
     pub fn id(&self) -> Option<Id> {
         self.inner.as_ref().map(Inner::id)
     }
 
     /// Returns this span's `Metadata`, if it is enabled.
-    pub fn metadata(&self) -> Option<&'static Metadata<'static>> {
+    #[must_use]
+    pub const fn metadata(&self) -> Option<&'static Metadata<'static>> {
         self.meta
     }
 
+    /// Emit a `log` record for this span when `log` support is enabled.
     #[cfg(feature = "log")]
     #[inline]
     fn log(&self, target: &str, level: log::Level, message: fmt::Arguments<'_>) {
@@ -1390,7 +1428,7 @@ impl Span {
 
 impl PartialEq for Span {
     fn eq(&self, other: &Self) -> bool {
-        match (&self.meta, &other.meta) {
+        match (self.meta, other.meta) {
             (Some(this), Some(that)) => {
                 this.callsite() == that.callsite() && self.inner == other.inner
             }
@@ -1409,30 +1447,32 @@ impl fmt::Debug for Span {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut span = f.debug_struct("Span");
         if let Some(meta) = self.meta {
-            let _builder = span
+            let _span_base_fields: &mut fmt::DebugStruct<'_, '_> = span
                 .field("name", &meta.name())
                 .field("level", &meta.level())
                 .field("target", &meta.target());
 
             if let Some(ref inner) = self.inner {
-                let _builder = span.field("id", &inner.id());
+                let _span_id_field: &mut fmt::DebugStruct<'_, '_> = span.field("id", &inner.id());
             } else {
-                let _builder = span.field("disabled", &true);
+                let _span_disabled_field: &mut fmt::DebugStruct<'_, '_> =
+                    span.field("disabled", &true);
             }
 
             if let Some(ref path) = meta.module_path() {
-                let _builder = span.field("module_path", &path);
+                let _span_module_path_field: &mut fmt::DebugStruct<'_, '_> =
+                    span.field("module_path", &path);
             }
 
             if let Some(ref line) = meta.line() {
-                let _builder = span.field("line", &line);
+                let _span_line_field: &mut fmt::DebugStruct<'_, '_> = span.field("line", &line);
             }
 
             if let Some(ref file) = meta.file() {
-                let _builder = span.field("file", &file);
+                let _span_file_field: &mut fmt::DebugStruct<'_, '_> = span.field("file", &file);
             }
         } else {
-            let _builder = span.field("none", &true);
+            let _span_none_field: &mut fmt::DebugStruct<'_, '_> = span.field("none", &true);
         }
 
         span.finish()
@@ -1470,14 +1510,9 @@ impl<'a> From<&'a EnteredSpan> for Option<Id> {
 }
 
 impl Drop for Span {
-    #[inline(always)]
     fn drop(&mut self) {
-        if let Some(Inner {
-            ref id,
-            ref subscriber,
-        }) = self.inner
-        {
-            let _closed = subscriber.try_close(id.clone());
+        if let Some(inner) = self.inner.as_ref() {
+            let _ignored = inner.subscriber.try_close(inner.id);
         }
 
         if_log_enabled! { crate::Level::TRACE, {
@@ -1510,21 +1545,23 @@ impl Inner {
     /// If this span is disabled, this function will do nothing. Otherwise, it
     /// returns `Ok(())` if the other span was added as a precedent of this
     /// span, or an error if this was not possible.
-    fn follows_from(&self, from: &Id) {
-        self.subscriber.record_follows_from(self.id, *from);
+    fn follows_from(&self, from: Id) {
+        let _ignored = self.subscriber.record_follows_from(self.id, from);
     }
 
     /// Returns the span's ID.
-    fn id(&self) -> Id {
+    const fn id(&self) -> Id {
         self.id
     }
 
+    /// Records values on this span.
     fn record(&self, values: &Record<'_>) {
-        self.subscriber.record(self.id, values);
+        let _ignored = self.subscriber.record(self.id, values);
     }
 
+    /// Construct an enabled span inner handle.
     fn new(id: Id, subscriber: &Dispatch) -> Self {
-        Inner {
+        Self {
             id,
             subscriber: subscriber.clone(),
         }
@@ -1545,8 +1582,12 @@ impl Hash for Inner {
 
 impl Clone for Inner {
     fn clone(&self) -> Self {
-        Inner {
-            id: self.subscriber.clone_span(self.id),
+        let id = match self.subscriber.clone_span(self.id) {
+            Ok(id) => id,
+            Err(_error) => self.id,
+        };
+        Self {
+            id,
             subscriber: self.subscriber.clone(),
         }
     }
@@ -1556,12 +1597,14 @@ impl Clone for Inner {
 
 impl EnteredSpan {
     /// Returns this span's `Id`, if it is enabled.
+    #[must_use]
     pub fn id(&self) -> Option<Id> {
         self.inner.as_ref().map(Inner::id)
     }
 
     /// Exits this span, returning the underlying [`Span`].
     #[inline]
+    #[must_use]
     pub fn exit(mut self) -> Span {
         // One does not simply move out of a struct with `Drop`.
         let span = mem::replace(&mut self.span, Span::none());
@@ -1574,22 +1617,20 @@ impl Deref for EnteredSpan {
     type Target = Span;
 
     #[inline]
-    fn deref(&self) -> &Span {
+    fn deref(&self) -> &Self::Target {
         &self.span
     }
 }
 
 impl Drop for Entered<'_> {
-    #[inline(always)]
     fn drop(&mut self) {
-        self.span.do_exit()
+        self.span.do_exit();
     }
 }
 
 impl Drop for EnteredSpan {
-    #[inline(always)]
     fn drop(&mut self) {
-        self.span.do_exit()
+        self.span.do_exit();
     }
 }
 
@@ -1610,10 +1651,12 @@ impl Drop for EnteredSpan {
 /// `Send` without requiring an unsafe impl.
 #[derive(Debug)]
 struct PhantomNotSend {
+    /// Marker that keeps `EnteredSpan` from implementing `Send`.
     ghost: PhantomData<dyn Sync>,
 }
 
-const PhantomNotSend: PhantomNotSend = PhantomNotSend { ghost: PhantomData };
+/// Shared marker value for `EnteredSpan` guards.
+const PHANTOM_NOT_SEND: PhantomNotSend = PhantomNotSend { ghost: PhantomData };
 
 #[cfg(test)]
 mod test {
@@ -1621,7 +1664,7 @@ mod test {
 
     #[test]
     fn test_record_backwards_compat() {
-        let _span = Span::current().record("some-key", "some text");
-        let _span = Span::current().record("some-key", false);
+        let _text_recorded_span = Span::current().record("some-key", "some text");
+        let _bool_recorded_span = Span::current().record("some-key", false);
     }
 }

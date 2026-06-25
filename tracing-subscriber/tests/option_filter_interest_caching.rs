@@ -3,53 +3,60 @@
 // A separate test crate for `Option<Filter>` for isolation from other tests
 // that may influence the interest cache.
 
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
-use tracing_mock::{expect, layer};
-use tracing_subscriber::{Layer, filter, prelude::*};
+#[cfg(test)]
+mod tests {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
 
-/// A `None` filter should always be interested in events, and it should not
-/// needlessly degrade the caching of other filters.
-#[test]
-fn none_interest_cache() {
-    let (layer_none, handle_none) = layer::mock()
-        .event(expect::event())
-        .event(expect::event())
-        .only()
-        .run_with_handle();
-    let layer_none = layer_none.with_filter(None::<filter::DynFilterFn<_>>);
+    use strict_test_support::{TestFailure, ensure_eq, ensure_ok};
+    use tracing::subscriber::set_default;
+    use tracing_mock::{expect, layer};
+    use tracing_subscriber::{Layer as _, filter, prelude::*};
 
-    let times_filtered = Arc::new(AtomicUsize::new(0));
-    let (layer_filter_fn, handle_filter_fn) = layer::mock()
-        .event(expect::event())
-        .event(expect::event())
-        .only()
-        .run_with_handle();
-    let layer_filter_fn = layer_filter_fn.with_filter(filter::filter_fn({
-        let times_filtered = Arc::clone(&times_filtered);
-        move |_| {
-            let _previous = times_filtered.fetch_add(1, Ordering::Relaxed);
+    /// A `None` filter should always be interested in events, and it should not
+    /// needlessly degrade the caching of other filters.
+    #[test]
+    fn none_interest_cache() -> Result<(), TestFailure> {
+        let (raw_none_layer, handle_none) = layer::mock()
+            .event(expect::event())
+            .event(expect::event())
+            .only()
+            .run_with_handle();
+        let none_layer = raw_none_layer.with_filter(None::<filter::DynFilterFn<_>>);
+
+        let times_filtered = Arc::new(AtomicUsize::new(0));
+        let (raw_filter_fn_layer, handle_filter_fn) = layer::mock()
+            .event(expect::event())
+            .event(expect::event())
+            .only()
+            .run_with_handle();
+        let filter_counter = Arc::clone(&times_filtered);
+        let filter_fn_layer = raw_filter_fn_layer.with_filter(filter::filter_fn(move |_| {
+            let _previous_count = filter_counter.fetch_add(1, Ordering::Relaxed);
             true
+        }));
+
+        let subscriber = tracing_subscriber::registry()
+            .with(none_layer)
+            .with(filter_fn_layer);
+
+        let _guard = set_default(subscriber);
+        for _ in 0..2 {
+            tracing::debug!(target: "always_interesting", x="bar");
         }
-    }));
 
-    let subscriber = tracing_subscriber::registry()
-        .with(layer_none)
-        .with(layer_filter_fn);
-
-    let _guard = tracing::subscriber::set_default(subscriber);
-    for _ in 0..2 {
-        tracing::debug!(target: "always_interesting", x="bar");
+        ensure_eq(
+            &times_filtered.load(Ordering::Relaxed),
+            &1,
+            "cached filter function is called once",
+        )?;
+        ensure_ok(handle_none.finished(), "mock expectations should finish")?;
+        ensure_ok(
+            handle_filter_fn.finished(),
+            "mock expectations should finish",
+        )?;
+        Ok(())
     }
-
-    // The `None` filter is unchanging and performs no filtering, so it should
-    // be cacheable and always be interested in events. The filter fn is a
-    // non-dynamic filter fn, which means the result can be cached per callsite.
-    // The filter fn should only need to be called once, and the `Option` filter
-    // should not interfere in the caching of that result.
-    assert_eq!(times_filtered.load(Ordering::Relaxed), 1);
-    handle_none.assert_finished();
-    handle_filter_fn.assert_finished();
 }

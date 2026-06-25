@@ -59,15 +59,16 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 ```
 
-Then create and install a `Subscriber`, for example using [`init()`]:
+Then create and install a `Subscriber`, for example using [`try_init()`]:
 
 ```rust
+use std::error::Error;
 use tracing::info;
 use tracing_subscriber;
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // install global subscriber configured based on RUST_LOG envvar.
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::fmt().try_init()?;
 
     let number_of_yaks = 3;
     // this creates a new event, outside of any spans.
@@ -78,12 +79,15 @@ fn main() {
         all_yaks_shaved = number_shaved == number_of_yaks,
         "yak shaving completed."
     );
+
+    Ok(())
 }
 ```
 
-Using `init()` calls [`set_global_default()`] so this subscriber will be used
-as the default in all threads for the remainder of the duration of the
-program, similar to how loggers work in the `log` crate.
+Using `try_init()` calls [`set_global_default()`] and returns an error if a
+global subscriber has already been installed. Once installed successfully, this
+subscriber will be used as the default in all threads for the remainder of the
+duration of the program, similar to how loggers work in the `log` crate.
 
 [tracing-subscriber-docs]: https://docs.rs/tracing-subscriber/
 [fmt]: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/index.html
@@ -122,7 +126,7 @@ executable using the `tracing` crate's macros.
 
 [`tracing-subscriber`]: https://docs.rs/tracing-subscriber/
 [fmt]: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/index.html
-[`init()`]: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/fn.init.html
+[`try_init()`]: https://docs.rs/tracing-subscriber/latest/tracing_subscriber/fmt/fn.try_init.html
 [`set_global_default()`]: https://docs.rs/tracing/latest/tracing/subscriber/fn.set_global_default.html
 
 ### In Libraries

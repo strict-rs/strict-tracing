@@ -1,3 +1,5 @@
+//! Error wrappers and extension traits for carrying captured span traces.
+
 use crate::SpanTrace;
 use std::error::Error;
 use std::fmt::{self, Debug, Display};
@@ -56,7 +58,9 @@ use std::marker::PhantomData;
 /// ```
 #[cfg_attr(docsrs, doc(cfg(feature = "traced-error")))]
 pub struct TracedError<E> {
+    /// Erased error storage and the `SpanTrace` captured for it.
     inner: TracedErrorInner,
+    /// Marker preserving the public source error type.
     _error: PhantomData<E>,
 }
 
@@ -75,8 +79,12 @@ where
     }
 }
 
+/// Erased error storage used as the stable downcast target for span trace
+/// extraction.
 struct TracedErrorInner {
+    /// The wrapped source error.
     error: Box<dyn Error + Send + Sync + 'static>,
+    /// The span trace captured when the error was instrumented.
     span_trace: SpanTrace,
 }
 
@@ -127,13 +135,13 @@ impl Display for TracedErrorInner {
     }
 }
 
-/// Extension trait for instrumenting errors with `SpanTrace`s
+/// Extension trait for instrumenting errors with `SpanTrace`s.
 #[cfg_attr(docsrs, doc(cfg(feature = "traced-error")))]
 pub trait InstrumentError {
-    /// The type of the wrapped error after instrumentation
+    /// The type of the wrapped error after instrumentation.
     type Instrumented;
 
-    /// Instrument an Error by bundling it with a SpanTrace
+    /// Instrument an `Error` by bundling it with a `SpanTrace`.
     ///
     /// # Examples
     ///
@@ -150,13 +158,18 @@ pub trait InstrumentError {
     fn in_current_span(self) -> Self::Instrumented;
 }
 
-/// Extension trait for instrumenting errors in `Result`s with `SpanTrace`s
+/// Extension trait for instrumenting errors in `Result`s with `SpanTrace`s.
 #[cfg_attr(docsrs, doc(cfg(feature = "traced-error")))]
 pub trait InstrumentResult<T> {
-    /// The type of the wrapped error after instrumentation
+    /// The type of the wrapped error after instrumentation.
     type Instrumented;
 
-    /// Instrument an Error by bundling it with a SpanTrace
+    /// Instrument an `Error` by bundling it with a `SpanTrace`.
+    ///
+    /// # Errors
+    ///
+    /// Returns the original `Err` variant after wrapping its error in the current
+    /// span.
     ///
     /// # Examples
     ///
@@ -184,12 +197,12 @@ where
     }
 }
 
-/// A trait for extracting SpanTraces created by `in_current_span()` from `dyn
-/// Error` trait objects
+/// A trait for extracting `SpanTrace`s created by `in_current_span()` from
+/// `dyn Error` trait objects.
 #[cfg_attr(docsrs, doc(cfg(feature = "traced-error")))]
 pub trait ExtractSpanTrace {
     /// Attempts to downcast to a `TracedError` and return a reference to its
-    /// SpanTrace
+    /// `SpanTrace`.
     ///
     /// # Examples
     ///

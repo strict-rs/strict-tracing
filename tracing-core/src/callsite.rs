@@ -106,12 +106,14 @@ use core::{
     sync::atomic::{AtomicU8, Ordering},
 };
 
-use self::dispatchers::Dispatchers;
+#[path = "sync.rs"]
+mod sync;
+
+use self::{dispatchers::Dispatchers, sync::Mutex};
 use crate::{
     dispatcher::Dispatch,
     metadata::{LevelFilter, Metadata},
     subscriber::Interest,
-    sync::{self, Mutex},
 };
 
 /// Trait implemented by callsites.
@@ -240,6 +242,13 @@ pub fn register(callsite: &'static dyn Callsite) {
 }
 
 /// Global registry of every callsite observed in this process.
+#[cfg(feature = "std")]
+static CALLSITES: Callsites = Callsites {
+    registry: parking_lot::const_mutex(Vec::new()),
+};
+
+/// Global registry of every callsite observed in this process.
+#[cfg(not(feature = "std"))]
 static CALLSITES: Callsites = Callsites {
     registry: sync::mutex(Vec::new()),
 };
@@ -438,9 +447,13 @@ impl Callsites {
 }
 
 /// Registers a dispatcher and rebuilds callsite interest for its subscriber.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keep dispatcher construction from reaching into global callsite registries"
+)]
 pub(crate) fn register_dispatch(dispatch: &Dispatch) {
     let dispatchers = DISPATCHERS.register_dispatch(dispatch);
-    dispatch.subscriber().on_register_dispatch(dispatch);
+    let _ignored = dispatch.subscriber().on_register_dispatch(dispatch);
     CALLSITES.rebuild_interest(&dispatchers);
 }
 
@@ -453,7 +466,10 @@ fn rebuild_callsite_interest(
 
     let mut combined_interest: Option<Interest> = None;
     dispatchers.for_each(|dispatch| {
-        let this_interest = dispatch.register_callsite(meta);
+        let this_interest = match dispatch.register_callsite(meta) {
+            Ok(interest) => interest,
+            Err(_error) => Interest::never(),
+        };
         combined_interest = combined_interest
             .take()
             .map_or(Some(this_interest), |that_interest| {
@@ -468,6 +484,7 @@ fn rebuild_callsite_interest(
 /// Private constructors for sealed callsite APIs.
 mod private {
     /// Wrapper that prevents downstream code from naming hidden callsite APIs.
+    #[derive(Debug)]
     pub struct Private<T>(pub(crate) T);
 }
 
@@ -478,7 +495,8 @@ mod dispatchers {
     use core::sync::atomic::{AtomicBool, Ordering};
 
     use crate::dispatcher;
-    use crate::sync::{self, RwLockReadGuard, RwLockWriteGuard};
+
+    use super::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 
     /// Tracks whether one or many dispatchers must be consulted.
     pub(super) struct Dispatchers {
@@ -487,7 +505,8 @@ mod dispatchers {
     }
 
     /// Dispatchers that may need callsite interest rebuilt.
-    static LOCKED_DISPATCHERS: sync::RwLock<Vec<dispatcher::Registrar>> = sync::rwlock(Vec::new());
+    static LOCKED_DISPATCHERS: RwLock<Vec<dispatcher::Registrar>> =
+        parking_lot::const_rwlock(Vec::new());
 
     /// Borrowed dispatcher registry used during interest rebuilds.
     pub(super) enum Rebuilder<'a> {
@@ -501,6 +520,10 @@ mod dispatchers {
 
     impl Dispatchers {
         /// Returns a dispatcher registry initialized for the fast path.
+        #[allow(
+            clippy::single_call_fn,
+            reason = "const constructor keeps the interior-mutable dispatcher registry initialized inside this cfg module"
+        )]
         pub(super) const fn new() -> Self {
             Self {
                 has_just_one: AtomicBool::new(true),

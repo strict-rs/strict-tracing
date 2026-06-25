@@ -1,102 +1,102 @@
 error[E0308]: mismatched types
- --> tests/ui/fail/async_instrument.rs:5:5
+ --> tests/ui/fail/async_instrument.rs:4:5
   |
-5 |     ""
+4 |     ""
   |     ^^ expected `()`, found `&str`
   |
 note: return type inferred to be `()` here
- --> tests/ui/fail/async_instrument.rs:4:10
+ --> tests/ui/fail/async_instrument.rs:3:10
   |
-4 | async fn unit() {
+3 | async fn unit() {
   |          ^^^^
 
 error[E0308]: mismatched types
-  --> tests/ui/fail/async_instrument.rs:10:5
-   |
-10 |     ""
-   |     ^^ expected `String`, found `&str`
-   |
+ --> tests/ui/fail/async_instrument.rs:9:5
+  |
+9 |     ""
+  |     ^^ expected `String`, found `&str`
+  |
 note: return type inferred to be `String` here
-  --> tests/ui/fail/async_instrument.rs:9:31
-   |
- 9 | async fn simple_mismatch() -> String {
-   |                               ^^^^^^
+ --> tests/ui/fail/async_instrument.rs:8:31
+  |
+8 | async fn simple_mismatch() -> String {
+  |                               ^^^^^^
 help: try using a conversion method
-   |
-10 |     "".to_string()
-   |       ++++++++++++
+  |
+9 |     "".to_string()
+  |       ++++++++++++
 
 error[E0277]: `(&str,)` doesn't implement `std::fmt::Display`
-  --> tests/ui/fail/async_instrument.rs:14:57
+  --> tests/ui/fail/async_instrument.rs:13:57
    |
-14 |   async fn opaque_unsatisfied() -> impl std::fmt::Display {
+13 |   async fn opaque_unsatisfied() -> impl std::fmt::Display {
    |  _________________________________________________________^
-15 | |     ("",)
-16 | | }
+14 | |     ("",)
+15 | | }
    | | ^
    | | |
    | |_the trait `std::fmt::Display` is not implemented for `(&str,)`
    |   return type was inferred to be `(&str,)` here
 
 error[E0277]: `(&str,)` doesn't implement `std::fmt::Display`
-  --> tests/ui/fail/async_instrument.rs:14:34
+  --> tests/ui/fail/async_instrument.rs:13:34
    |
-14 | async fn opaque_unsatisfied() -> impl std::fmt::Display {
+13 | async fn opaque_unsatisfied() -> impl std::fmt::Display {
    |                                  ^^^^^^^^^^^^^^^^^^^^^^ the trait `std::fmt::Display` is not implemented for `(&str,)`
 
 error[E0308]: mismatched types
-  --> tests/ui/fail/async_instrument.rs:22:5
+  --> tests/ui/fail/async_instrument.rs:21:5
    |
-22 |     ""
+21 |     ""
    |     ^^ expected `Wrapper<_>`, found `&str`
    |
    = note: expected struct `Wrapper<_>`
            found reference `&'static str`
 note: return type inferred to be `Wrapper<_>` here
-  --> tests/ui/fail/async_instrument.rs:21:36
+  --> tests/ui/fail/async_instrument.rs:20:36
    |
-21 | async fn mismatch_with_opaque() -> Wrapper<impl std::fmt::Display> {
+20 | async fn mismatch_with_opaque() -> Wrapper<impl std::fmt::Display> {
    |                                    ^^^^^^^
 help: try wrapping the expression in `Wrapper`
    |
-22 |     Wrapper("")
+21 |     Wrapper("")
    |     ++++++++  +
 
 error[E0308]: mismatched types
-  --> tests/ui/fail/async_instrument.rs:28:16
+  --> tests/ui/fail/async_instrument.rs:27:16
    |
-28 |         return "";
+27 |         return "";
    |                ^^ expected `()`, found `&str`
    |
 note: return type inferred to be `()` here
-  --> tests/ui/fail/async_instrument.rs:26:10
+  --> tests/ui/fail/async_instrument.rs:25:10
    |
-26 | async fn early_return_unit() {
+25 | async fn early_return_unit() {
    |          ^^^^^^^^^^^^^^^^^
 
 error[E0308]: mismatched types
-  --> tests/ui/fail/async_instrument.rs:35:16
+  --> tests/ui/fail/async_instrument.rs:34:16
    |
-35 |         return "";
+34 |         return "";
    |                ^^ expected `String`, found `&str`
    |
 note: return type inferred to be `String` here
-  --> tests/ui/fail/async_instrument.rs:33:28
+  --> tests/ui/fail/async_instrument.rs:32:28
    |
-33 | async fn early_return() -> String {
+32 | async fn early_return() -> String {
    |                            ^^^^^^
 help: try using a conversion method
    |
-35 |         return "".to_string();
+34 |         return "".to_string();
    |                  ++++++++++++
 
 error[E0308]: mismatched types
-  --> tests/ui/fail/async_instrument.rs:40:1
+  --> tests/ui/fail/async_instrument.rs:39:1
    |
-40 | #[tracing::instrument]
+39 | #[tracing::instrument]
    | ^^^^^^^^^^^^^^^^^^^^^^ expected `i32`, found `()`
-41 | async fn extra_semicolon() -> i32 {
-42 |     1;
+40 | async fn extra_semicolon() -> i32 {
+41 |     1;
    |      - help: remove this semicolon to return this value
    |
    = note: this error originates in the attribute macro `tracing::instrument` (in Nightly builds, run with -Z macro-backtrace for more info)

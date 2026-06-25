@@ -23,6 +23,7 @@ tracing-subscriber = { workspace = true, features = ["registry"] }
 [dev-dependencies]
 serde_json = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+strict-test-support = { workspace = true }
 tracing = { workspace = true, default-features = true }
 
 [lints]

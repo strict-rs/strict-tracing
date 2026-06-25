@@ -11,11 +11,15 @@
 /// ```
 ///
 use argh::FromArgs;
+use std::error::Error;
 use tracing::info;
-use tracing_subscriber::{prelude::__tracing_subscriber_SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::{
+    fmt, prelude::__tracing_subscriber_SubscriberExt as _, util::SubscriberInitExt as _,
+};
 
+/// Shared yak-shaving helper used by this example.
 #[path = "fmt/yak_shave.rs"]
-mod yak_shave;
+pub mod yak_shave;
 
 #[derive(FromArgs)]
 /// Subscriber toggling example.
@@ -25,16 +29,19 @@ struct Args {
     json: bool,
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     let args: Args = argh::from_env();
 
     let (json, plain) = if args.json {
-        (Some(tracing_subscriber::fmt::layer().json()), None)
+        (Some(fmt::layer().json()), None)
     } else {
-        (None, Some(tracing_subscriber::fmt::layer()))
+        (None, Some(fmt::layer()))
     };
 
-    tracing_subscriber::registry().with(json).with(plain).init();
+    tracing_subscriber::registry()
+        .with(json)
+        .with(plain)
+        .try_init()?;
 
     let number_of_yaks = 3;
     // this creates a new event, outside of any spans.
@@ -45,4 +52,6 @@ fn main() {
         all_yaks_shaved = number_shaved == number_of_yaks,
         "yak shaving completed."
     );
+
+    Ok(())
 }

@@ -1,9 +1,10 @@
 //! Example binary for tracing workspace checks.
 #![deny(rust_2018_idioms)]
 
-use tracing::{debug, info};
+use tracing::{debug, info, subscriber::with_default};
 use tracing_attributes::instrument;
 
+/// Return the `n`th Fibonacci number while emitting recursive trace spans.
 #[instrument]
 fn nth_fibonacci(n: u64) -> u64 {
     if n == 0 || n == 1 {
@@ -11,10 +12,18 @@ fn nth_fibonacci(n: u64) -> u64 {
         1
     } else {
         debug!("Recursing");
-        nth_fibonacci(n - 1) + nth_fibonacci(n - 2)
+        let previous = n.saturating_sub(1);
+        let before_previous = n.saturating_sub(2);
+
+        nth_fibonacci(previous).saturating_add(nth_fibonacci(before_previous))
     }
 }
 
+/// Build the Fibonacci sequence from zero through the requested index.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps the sequence-building span visible alongside the recursive spans"
+)]
 #[instrument]
 fn fibonacci_seq(to: u64) -> Vec<u64> {
     let mut sequence = vec![];
@@ -32,9 +41,9 @@ fn main() {
         .with_env_filter("attrs_args=trace")
         .finish();
 
-    tracing::subscriber::with_default(subscriber, || {
+    with_default(subscriber, || {
         let n = 5;
         let sequence = fibonacci_seq(n);
         info!("The first {} fibonacci numbers are {:?}", n, sequence);
-    })
+    });
 }

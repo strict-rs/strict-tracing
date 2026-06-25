@@ -25,13 +25,70 @@ Each member crate has its own `AGENTS.md` with crate-specific architecture, feat
 
 The source of truth for commands is `.github/workflows/CI.yml`. The workspace uses **nextest** for tests and **cargo-hack** for feature-combination checks; install both (`cargo install cargo-nextest cargo-hack`) if missing.
 
+Full workspace verification is the following command set:
+
 ```bash
-cargo check --all --tests --benches                              # fast compile gate (CI's first job)
-cargo +nightly fmt --all                                         # format — edition 2024 rules need nightly
-cargo fmt --all -- --check                                       # CI's format gate
-cargo clippy --all --examples --tests --benches -- -D warnings   # lint — warnings are hard errors
-cargo nextest run --profile ci --workspace                       # unit + integration tests
-cargo test --doc --workspace                                     # doctests (nextest cannot run these)
+cargo +nightly fmt --all
+cargo check --workspace --all-targets --all-features
+cargo check --workspace --all-targets --no-default-features
+cargo clippy --workspace --all-targets --all-features
+cargo clippy --workspace --all-targets --no-default-features
+cargo test --workspace --all-targets --all-features
+cargo test --workspace --all-targets --no-default-features
+cargo nextest run --profile ci --workspace --all-targets --all-features
+cargo nextest run --profile ci --workspace --all-targets --no-default-features
+cargo test --doc --workspace --all-features
+cargo test --doc --workspace --no-default-features
+cargo check --workspace --all-targets --all-features -p tracing-core
+cargo check --workspace --all-targets --no-default-features -p tracing-core
+cargo clippy --workspace --all-targets --all-features -p tracing-core
+cargo clippy --workspace --all-targets --no-default-features -p tracing-core
+cargo test --workspace --all-targets --all-features -p tracing-core
+cargo test --workspace --all-targets --no-default-features -p tracing-core
+cargo nextest run --profile ci --workspace --all-targets --all-features -p tracing-core
+cargo nextest run --profile ci --workspace --all-targets --no-default-features -p tracing-core
+cargo check --workspace --all-targets --all-features -p tracing
+cargo check --workspace --all-targets --no-default-features -p tracing
+cargo clippy --workspace --all-targets --all-features -p tracing
+cargo clippy --workspace --all-targets --no-default-features -p tracing
+cargo test --workspace --all-targets --all-features -p tracing
+cargo test --workspace --all-targets --no-default-features -p tracing
+cargo nextest run --profile ci --workspace --all-targets --all-features -p tracing
+cargo nextest run --profile ci --workspace --all-targets --no-default-features -p tracing
+cargo check --workspace --all-targets --all-features -p tracing-subscriber
+cargo check --workspace --all-targets --no-default-features -p tracing-subscriber
+cargo clippy --workspace --all-targets --all-features -p tracing-subscriber
+cargo clippy --workspace --all-targets --no-default-features -p tracing-subscriber
+cargo test --workspace --all-targets --all-features -p tracing-subscriber
+cargo test --workspace --all-targets --no-default-features -p tracing-subscriber
+cargo nextest run --profile ci --workspace --all-targets --all-features -p tracing-subscriber
+cargo nextest run --profile ci --workspace --all-targets --no-default-features -p tracing-subscriber
+cargo check --workspace --all-targets --all-features -p tracing-mock
+cargo check --workspace --all-targets --no-default-features -p tracing-mock
+cargo clippy --workspace --all-targets --all-features -p tracing-mock
+cargo clippy --workspace --all-targets --no-default-features -p tracing-mock
+cargo test --workspace --all-targets --all-features -p tracing-mock
+cargo test --workspace --all-targets --no-default-features -p tracing-mock
+cargo nextest run --profile ci --workspace --all-targets --all-features -p tracing-mock
+cargo nextest run --profile ci --workspace --all-targets --no-default-features -p tracing-mock
+cargo test --all-targets --no-default-features -p tracing-core
+cargo test --all-targets --no-default-features -p tracing
+cargo nextest run --profile ci --all-targets  --all-features -p tracing-subscriber
+cargo test --doc --all-features -p tracing-subscriber
+cargo test --all-features -p tracing-mock
+(cd tracing/test-log-support && cargo test)
+(cd tracing/test_static_max_level_features && cargo test)
+(cd tracing/test_static_max_level_features && cargo test --release)
+```
+
+Keep these CI-shaped default-feature gates handy as quick parity checks. They
+are close to, but not identical with, the full matrix above: they exercise the
+workspace's default feature selection and keep the explicit `-D warnings`
+command-line lint hardening visible.
+
+```bash
+cargo check --all --tests --benches
+cargo clippy --all --examples --tests --benches -- -D warnings
 ```
 
 Running a focused test:
@@ -71,7 +128,7 @@ Features are the trickiest part of editing this workspace — internalize these 
 
 ## Fork-specific conventions
 
-- **Edition 2024, `rust-version = "1.96"`, `resolver = "3"`** — declared once in the root `[workspace.package]` / `[workspace]` and inherited via `field.workspace = true`. The README's "1.65" and CI's `check-msrv` 1.65.0 matrix predate the migration (edition 2024 itself requires Rust ≥ 1.85); `Cargo.toml`'s `rust-version = 1.96` is authoritative.
+- **Edition 2024, `rust-version = "1.96"`, `resolver = "3"`** — declared once in the root `[workspace.package]` / `[workspace]` and inherited via `field.workspace = true`. Root manifests, README files, and CI target Rust `1.96`; keep nested non-workspace manifests aligned with the same edition, Rust version, and lint policy unless a crate-specific `AGENTS.md` explicitly says otherwise.
 - **Dependency versions are pinned centrally** in `[workspace.dependencies]` — both the internal path crates and external deps. Bump a version there, not in member manifests.
 - **UI / compile-fail tests use a forked `trybuild`** pulled as a git dependency (`ssh://git@github.com/strict-rs/strict-trybuild.git`, branch `strict`). Editing `tracing-attributes/tests/ui.rs` or any `*.stderr` fixture requires that git dep to resolve.
 - **Releases go through `bin/publish <crate> <version>`** (`-d`/`--dry-run` to verify only). It enforces the cargo-hack feature-powerset gate before publishing; see `CONTRIBUTING.md` for the path-dependency release ordering.

@@ -16,7 +16,7 @@ mod tests {
     use core::num::NonZeroU64;
     use strict_test_support::{TestFailure, ensure, ensure_some};
     use tracing_core::{
-        Dispatch, Event, Kind, Level, Metadata, Subscriber,
+        Dispatch, Event, Kind, Level, Metadata, Subscriber, SubscriberResult,
         callsite::{Callsite as _, DefaultCallsite, Identifier},
         dispatcher::set_default,
         field::{FieldSet, Value},
@@ -29,21 +29,11 @@ mod tests {
         callsite_mismatch: Arc<AtomicBool>,
     }
 
-    impl TestSubscriber {
-        const fn new(sleep_micros: u64, callsite_mismatch: Arc<AtomicBool>) -> Self {
-            Self {
-                sleep: Duration::from_micros(sleep_micros),
-                callsite: AtomicPtr::new(ptr::null_mut()),
-                callsite_mismatch,
-            }
-        }
-    }
-
     impl Subscriber for TestSubscriber {
         fn register_callsite(
             &self,
             metadata: &'static Metadata<'static>,
-        ) -> tracing_core::Interest {
+        ) -> SubscriberResult<tracing_core::Interest> {
             if !self.sleep.is_zero() {
                 thread::sleep(self.sleep);
             }
@@ -51,28 +41,37 @@ mod tests {
             let metadata_ptr = ptr::from_ref(metadata).cast::<()>().cast_mut();
             self.callsite.store(metadata_ptr, Ordering::SeqCst);
 
-            tracing_core::Interest::always()
+            Ok(tracing_core::Interest::always())
         }
 
-        fn event(&self, event: &Event<'_>) {
+        fn event(&self, event: &Event<'_>) -> SubscriberResult {
             let stored_callsite = self.callsite.load(Ordering::SeqCst);
             let event_callsite = ptr::from_ref(event.metadata()).cast::<()>().cast_mut();
 
             // This signal is the actual test; the owning thread reports it as a `TestFailure`.
             self.callsite_mismatch
                 .store(stored_callsite != event_callsite, Ordering::SeqCst);
+            Ok(())
         }
 
-        fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
-            true
+        fn enabled(&self, _metadata: &Metadata<'_>) -> SubscriberResult<bool> {
+            Ok(true)
         }
-        fn new_span(&self, _span: &span::Attributes<'_>) -> span::Id {
-            span::Id::from_non_zero_u64(NonZeroU64::MIN)
+        fn new_span(&self, _span: &span::Attributes<'_>) -> SubscriberResult<span::Id> {
+            Ok(span::Id::from_non_zero_u64(NonZeroU64::MIN))
         }
-        fn record(&self, _span: span::Id, _values: &span::Record<'_>) {}
-        fn record_follows_from(&self, _span: span::Id, _follows: span::Id) {}
-        fn enter(&self, _span: span::Id) {}
-        fn exit(&self, _span: span::Id) {}
+        fn record(&self, _span: span::Id, _values: &span::Record<'_>) -> SubscriberResult {
+            Ok(())
+        }
+        fn record_follows_from(&self, _span: span::Id, _follows: span::Id) -> SubscriberResult {
+            Ok(())
+        }
+        fn enter(&self, _span: span::Id) -> SubscriberResult {
+            Ok(())
+        }
+        fn exit(&self, _span: span::Id) -> SubscriberResult {
+            Ok(())
+        }
     }
 
     fn subscriber_thread(
@@ -99,8 +98,11 @@ mod tests {
                 };
 
                 // We use a sleep to ensure the starting order of the 2 threads.
-                let subscriber =
-                    TestSubscriber::new(register_sleep_micros, Arc::clone(&callsite_mismatch));
+                let subscriber = TestSubscriber {
+                    sleep: Duration::from_micros(register_sleep_micros),
+                    callsite: AtomicPtr::new(ptr::null_mut()),
+                    callsite_mismatch: Arc::clone(&callsite_mismatch),
+                };
                 let _dispatch_guard = set_default(&Dispatch::new(subscriber));
                 let _interest = CALLSITE.interest();
 

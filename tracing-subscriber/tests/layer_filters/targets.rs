@@ -1,6 +1,9 @@
 use super::*;
+use strict_test_support::{TestFailure, ensure_ok};
+use tracing::subscriber::set_default;
 use tracing_subscriber::{
     filter::{Targets, filter_fn},
+    layer::Identity,
     prelude::*,
 };
 
@@ -12,6 +15,10 @@ fn log_events() {
         pub(super) const MODULE_PATH: &str = module_path!();
 
         #[tracing::instrument]
+        #[allow(
+            clippy::single_call_fn,
+            reason = "target-filter test keeps the instrumented function in a nested module to exercise module paths"
+        )]
         pub(super) fn logs() {
             log::debug!("inner");
         }
@@ -21,17 +28,16 @@ fn log_events() {
         .with_default(LevelFilter::DEBUG)
         .with_target(inner::MODULE_PATH, LevelFilter::WARN);
 
-    let layer =
-        tracing_subscriber::layer::Identity::new().with_filter(filter_fn(move |_meta| true));
+    let layer = Identity::new().with_filter(filter_fn(move |_meta| true));
 
     let subscriber = tracing_subscriber::registry().with(filter).with(layer);
-    let _guard = tracing::subscriber::set_default(subscriber);
+    let _guard = set_default(subscriber);
 
     inner::logs();
 }
 
 #[test]
-fn inner_layer_short_circuits() {
+fn inner_layer_short_circuits() -> Result<(), TestFailure> {
     // This test ensures that when a global filter short-circuits `Interest`
     // evaluation, we aren't left with a "dirty" per-layer filter state.
 
@@ -48,10 +54,11 @@ fn inner_layer_short_circuits() {
         // `register_callsite` calls that would trigger the bug never happens...
         .with(filter_fn(|meta| meta.level() <= &Level::INFO))
         .with(layer.with_filter(filter));
-    let _guard = tracing::subscriber::set_default(subscriber);
+    let _guard = set_default(subscriber);
 
     tracing::debug!("skip me please!");
     tracing::info!(target: "magic_target", "hello world");
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }

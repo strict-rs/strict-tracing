@@ -3,7 +3,7 @@ use crate::layer::{Context, Filter};
 use std::{cmp, fmt, marker::PhantomData};
 use tracing_core::{
     span::{Attributes, Id, Record},
-    subscriber::Interest,
+    subscriber::{Interest, SubscriberResult},
     LevelFilter, Metadata,
 };
 
@@ -16,9 +16,12 @@ use tracing_core::{
 /// [`Filter`]: crate::layer::Filter
 /// [`FilterExt::and`]: crate::filter::FilterExt::and
 pub struct And<A, B, S> {
-    a: A,
-    b: B,
-    _s: PhantomData<fn(S)>,
+    /// The first filter in the conjunction.
+    left: A,
+    /// The second filter in the conjunction.
+    right: B,
+    /// Connects the combinator to the subscriber type observed by its filters.
+    _subscriber: PhantomData<fn(S)>,
 }
 
 /// Combines two [`Filter`]s so that spans and events are enabled if *either* filter
@@ -30,9 +33,12 @@ pub struct And<A, B, S> {
 /// [`Filter`]: crate::layer::Filter
 /// [`FilterExt::or`]: crate::filter::FilterExt::or
 pub struct Or<A, B, S> {
-    a: A,
-    b: B,
-    _s: PhantomData<fn(S)>,
+    /// The first filter in the disjunction.
+    left: A,
+    /// The second filter in the disjunction.
+    right: B,
+    /// Connects the combinator to the subscriber type observed by its filters.
+    _subscriber: PhantomData<fn(S)>,
 }
 
 /// Inverts the result of a [`Filter`].
@@ -46,8 +52,10 @@ pub struct Or<A, B, S> {
 /// [`Filter`]: crate::layer::Filter
 /// [`FilterExt::not`]: crate::filter::FilterExt::not
 pub struct Not<A, S> {
-    a: A,
-    _s: PhantomData<fn(S)>,
+    /// The filter whose decision is inverted.
+    inner: A,
+    /// Connects the combinator to the subscriber type observed by its filter.
+    _subscriber: PhantomData<fn(S)>,
 }
 
 // === impl And ===
@@ -85,7 +93,7 @@ where
     ///
     /// tracing_subscriber::registry()
     ///     .with(tracing_subscriber::fmt::layer().with_filter(filter))
-    ///     .init();
+    ///     .try_init()?;
     ///
     /// // This event will *not* be enabled:
     /// tracing::info!("an event with an uninteresting target");
@@ -98,11 +106,15 @@ where
     /// ```
     ///
     /// [`Filter`]: crate::layer::Filter
-    pub(crate) fn new(a: A, b: B) -> Self {
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public combinator constructor is part of the layer-filter API"
+    )]
+    pub const fn new(left: A, right: B) -> Self {
         Self {
-            a,
-            b,
-            _s: PhantomData,
+            left,
+            right,
+            _subscriber: PhantomData,
         }
     }
 }
@@ -113,63 +125,75 @@ where
     B: Filter<S>,
 {
     #[inline]
-    fn enabled(&self, meta: &Metadata<'_>, cx: &Context<'_, S>) -> bool {
-        self.a.enabled(meta, cx) && self.b.enabled(meta, cx)
+    fn enabled(&self, meta: &Metadata<'_>, cx: &Context<'_, S>) -> SubscriberResult<bool> {
+        Ok(self.left.enabled(meta, cx)? && self.right.enabled(meta, cx)?)
     }
 
-    fn callsite_enabled(&self, meta: &'static Metadata<'static>) -> Interest {
-        let a = self.a.callsite_enabled(meta);
-        if a.is_never() {
-            return a;
+    fn callsite_enabled(&self, meta: &'static Metadata<'static>) -> SubscriberResult<Interest> {
+        let left_interest = self.left.callsite_enabled(meta)?;
+        if left_interest.is_never() {
+            return Ok(left_interest);
         }
 
-        let b = self.b.callsite_enabled(meta);
+        let right_interest = self.right.callsite_enabled(meta)?;
 
-        if !b.is_always() {
-            return b;
+        if !right_interest.is_always() {
+            return Ok(right_interest);
         }
 
-        a
+        Ok(left_interest)
     }
 
-    fn max_level_hint(&self) -> Option<LevelFilter> {
+    fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
         // If either hint is `None`, return `None`. Otherwise, return the most restrictive.
-        cmp::min(self.a.max_level_hint(), self.b.max_level_hint())
+        Ok(cmp::min(
+            self.left.max_level_hint()?,
+            self.right.max_level_hint()?,
+        ))
     }
 
     #[inline]
-    fn event_enabled(&self, event: &tracing_core::Event<'_>, cx: &Context<'_, S>) -> bool {
-        self.a.event_enabled(event, cx) && self.b.event_enabled(event, cx)
+    fn event_enabled(
+        &self,
+        event: &tracing_core::Event<'_>,
+        cx: &Context<'_, S>,
+    ) -> SubscriberResult<bool> {
+        Ok(self.left.event_enabled(event, cx)? && self.right.event_enabled(event, cx)?)
     }
 
     #[inline]
-    fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
-        self.a.on_new_span(attrs, id, ctx.clone());
-        self.b.on_new_span(attrs, id, ctx)
+    fn on_new_span(
+        &self,
+        attrs: &Attributes<'_>,
+        id: Id,
+        ctx: Context<'_, S>,
+    ) -> SubscriberResult<()> {
+        self.left.on_new_span(attrs, id, ctx.clone())?;
+        self.right.on_new_span(attrs, id, ctx)
     }
 
     #[inline]
-    fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
-        self.a.on_record(id, values, ctx.clone());
-        self.b.on_record(id, values, ctx);
+    fn on_record(&self, id: Id, values: &Record<'_>, ctx: Context<'_, S>) -> SubscriberResult<()> {
+        self.left.on_record(id, values, ctx.clone())?;
+        self.right.on_record(id, values, ctx)
     }
 
     #[inline]
-    fn on_enter(&self, id: &Id, ctx: Context<'_, S>) {
-        self.a.on_enter(id, ctx.clone());
-        self.b.on_enter(id, ctx);
+    fn on_enter(&self, id: Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
+        self.left.on_enter(id, ctx.clone())?;
+        self.right.on_enter(id, ctx)
     }
 
     #[inline]
-    fn on_exit(&self, id: &Id, ctx: Context<'_, S>) {
-        self.a.on_exit(id, ctx.clone());
-        self.b.on_exit(id, ctx);
+    fn on_exit(&self, id: Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
+        self.left.on_exit(id, ctx.clone())?;
+        self.right.on_exit(id, ctx)
     }
 
     #[inline]
-    fn on_close(&self, id: Id, ctx: Context<'_, S>) {
-        self.a.on_close(id.clone(), ctx.clone());
-        self.b.on_close(id, ctx);
+    fn on_close(&self, id: Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
+        self.left.on_close(id, ctx.clone())?;
+        self.right.on_close(id, ctx)
     }
 }
 
@@ -180,9 +204,9 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            a: self.a.clone(),
-            b: self.b.clone(),
-            _s: PhantomData,
+            left: self.left.clone(),
+            right: self.right.clone(),
+            _subscriber: PhantomData,
         }
     }
 }
@@ -194,8 +218,8 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("And")
-            .field("a", &self.a)
-            .field("b", &self.b)
+            .field("left", &self.left)
+            .field("right", &self.right)
             .finish()
     }
 }
@@ -236,7 +260,7 @@ where
     ///
     /// tracing_subscriber::registry()
     ///     .with(tracing_subscriber::fmt::layer().with_filter(filter))
-    ///     .init();
+    ///     .try_init()?;
     ///
     /// // This event will *not* be enabled:
     /// tracing::debug!("an uninteresting event");
@@ -277,15 +301,19 @@ where
     ///
     /// tracing_subscriber::registry()
     ///     .with(tracing_subscriber::fmt::layer().with_filter(filter))
-    ///     .init();
+    ///     .try_init()?;
     /// ```
     ///
     /// [`Filter`]: crate::layer::Filter
-    pub(crate) fn new(a: A, b: B) -> Self {
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public combinator constructor is part of the layer-filter API"
+    )]
+    pub const fn new(left: A, right: B) -> Self {
         Self {
-            a,
-            b,
-            _s: PhantomData,
+            left,
+            right,
+            _subscriber: PhantomData,
         }
     }
 }
@@ -296,72 +324,81 @@ where
     B: Filter<S>,
 {
     #[inline]
-    fn enabled(&self, meta: &Metadata<'_>, cx: &Context<'_, S>) -> bool {
-        self.a.enabled(meta, cx) || self.b.enabled(meta, cx)
+    fn enabled(&self, meta: &Metadata<'_>, cx: &Context<'_, S>) -> SubscriberResult<bool> {
+        Ok(self.left.enabled(meta, cx)? || self.right.enabled(meta, cx)?)
     }
 
-    fn callsite_enabled(&self, meta: &'static Metadata<'static>) -> Interest {
-        let a = self.a.callsite_enabled(meta);
-        let b = self.b.callsite_enabled(meta);
+    fn callsite_enabled(&self, meta: &'static Metadata<'static>) -> SubscriberResult<Interest> {
+        let left_interest = self.left.callsite_enabled(meta)?;
+        let right_interest = self.right.callsite_enabled(meta)?;
 
         // If either filter will always enable the span or event, return `always`.
-        if a.is_always() || b.is_always() {
-            return Interest::always();
+        if left_interest.is_always() || right_interest.is_always() {
+            return Ok(Interest::always());
         }
 
         // Okay, if either filter will sometimes enable the span or event,
         // return `sometimes`.
-        if a.is_sometimes() || b.is_sometimes() {
-            return Interest::sometimes();
+        if left_interest.is_sometimes() || right_interest.is_sometimes() {
+            return Ok(Interest::sometimes());
         }
 
-        debug_assert!(
-            a.is_never() && b.is_never(),
-            "if neither filter was `always` or `sometimes`, both must be `never` (a={:?}; b={:?})",
-            a,
-            b,
-        );
-        Interest::never()
+        Ok(Interest::never())
     }
 
-    fn max_level_hint(&self) -> Option<LevelFilter> {
+    fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
         // If either hint is `None`, return `None`. Otherwise, return the less restrictive.
-        Some(cmp::max(self.a.max_level_hint()?, self.b.max_level_hint()?))
+        let Some(left) = self.left.max_level_hint()? else {
+            return Ok(None);
+        };
+        let Some(right) = self.right.max_level_hint()? else {
+            return Ok(None);
+        };
+        Ok(Some(cmp::max(left, right)))
     }
 
     #[inline]
-    fn event_enabled(&self, event: &tracing_core::Event<'_>, cx: &Context<'_, S>) -> bool {
-        self.a.event_enabled(event, cx) || self.b.event_enabled(event, cx)
+    fn event_enabled(
+        &self,
+        event: &tracing_core::Event<'_>,
+        cx: &Context<'_, S>,
+    ) -> SubscriberResult<bool> {
+        Ok(self.left.event_enabled(event, cx)? || self.right.event_enabled(event, cx)?)
     }
 
     #[inline]
-    fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
-        self.a.on_new_span(attrs, id, ctx.clone());
-        self.b.on_new_span(attrs, id, ctx)
+    fn on_new_span(
+        &self,
+        attrs: &Attributes<'_>,
+        id: Id,
+        ctx: Context<'_, S>,
+    ) -> SubscriberResult<()> {
+        self.left.on_new_span(attrs, id, ctx.clone())?;
+        self.right.on_new_span(attrs, id, ctx)
     }
 
     #[inline]
-    fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
-        self.a.on_record(id, values, ctx.clone());
-        self.b.on_record(id, values, ctx);
+    fn on_record(&self, id: Id, values: &Record<'_>, ctx: Context<'_, S>) -> SubscriberResult<()> {
+        self.left.on_record(id, values, ctx.clone())?;
+        self.right.on_record(id, values, ctx)
     }
 
     #[inline]
-    fn on_enter(&self, id: &Id, ctx: Context<'_, S>) {
-        self.a.on_enter(id, ctx.clone());
-        self.b.on_enter(id, ctx);
+    fn on_enter(&self, id: Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
+        self.left.on_enter(id, ctx.clone())?;
+        self.right.on_enter(id, ctx)
     }
 
     #[inline]
-    fn on_exit(&self, id: &Id, ctx: Context<'_, S>) {
-        self.a.on_exit(id, ctx.clone());
-        self.b.on_exit(id, ctx);
+    fn on_exit(&self, id: Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
+        self.left.on_exit(id, ctx.clone())?;
+        self.right.on_exit(id, ctx)
     }
 
     #[inline]
-    fn on_close(&self, id: Id, ctx: Context<'_, S>) {
-        self.a.on_close(id.clone(), ctx.clone());
-        self.b.on_close(id, ctx);
+    fn on_close(&self, id: Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
+        self.left.on_close(id, ctx.clone())?;
+        self.right.on_close(id, ctx)
     }
 }
 
@@ -372,9 +409,9 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            a: self.a.clone(),
-            b: self.b.clone(),
-            _s: PhantomData,
+            left: self.left.clone(),
+            right: self.right.clone(),
+            _subscriber: PhantomData,
         }
     }
 }
@@ -386,8 +423,8 @@ where
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Or")
-            .field("a", &self.a)
-            .field("b", &self.b)
+            .field("left", &self.left)
+            .field("right", &self.right)
             .finish()
     }
 }
@@ -459,8 +496,15 @@ where
     /// [`enabled`]: crate::layer::Filter::enabled
     /// [`event_enabled`]: crate::layer::Filter::event_enabled
     /// [`callsite_enabled`]: crate::layer::Filter::callsite_enabled
-    pub(crate) fn new(a: A) -> Self {
-        Self { a, _s: PhantomData }
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public combinator constructor is part of the layer-filter API"
+    )]
+    pub const fn new(inner: A) -> Self {
+        Self {
+            inner,
+            _subscriber: PhantomData,
+        }
     }
 }
 
@@ -469,54 +513,62 @@ where
     A: Filter<S>,
 {
     #[inline]
-    fn enabled(&self, meta: &Metadata<'_>, cx: &Context<'_, S>) -> bool {
-        !self.a.enabled(meta, cx)
+    fn enabled(&self, meta: &Metadata<'_>, cx: &Context<'_, S>) -> SubscriberResult<bool> {
+        Ok(!self.inner.enabled(meta, cx)?)
     }
 
-    fn callsite_enabled(&self, meta: &'static Metadata<'static>) -> Interest {
-        match self.a.callsite_enabled(meta) {
-            i if i.is_always() => Interest::never(),
-            i if i.is_never() => Interest::always(),
+    fn callsite_enabled(&self, meta: &'static Metadata<'static>) -> SubscriberResult<Interest> {
+        Ok(match self.inner.callsite_enabled(meta)? {
+            interest if interest.is_always() => Interest::never(),
+            interest if interest.is_never() => Interest::always(),
             _ => Interest::sometimes(),
-        }
+        })
     }
 
-    fn max_level_hint(&self) -> Option<LevelFilter> {
+    fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
         // TODO(eliza): figure this out???
-        None
+        Ok(None)
     }
 
     #[inline]
-    fn event_enabled(&self, event: &tracing_core::Event<'_>, cx: &Context<'_, S>) -> bool {
+    fn event_enabled(
+        &self,
+        _event: &tracing_core::Event<'_>,
+        _cx: &Context<'_, S>,
+    ) -> SubscriberResult<bool> {
         // Never disable based on event_enabled; we "disabled" it in `enabled`,
         // so the `not` has already been applied and filtered this not out.
-        let _ = (event, cx);
-        true
+        Ok(true)
     }
 
     #[inline]
-    fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
-        self.a.on_new_span(attrs, id, ctx);
+    fn on_new_span(
+        &self,
+        attrs: &Attributes<'_>,
+        id: Id,
+        ctx: Context<'_, S>,
+    ) -> SubscriberResult<()> {
+        self.inner.on_new_span(attrs, id, ctx)
     }
 
     #[inline]
-    fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
-        self.a.on_record(id, values, ctx.clone());
+    fn on_record(&self, id: Id, values: &Record<'_>, ctx: Context<'_, S>) -> SubscriberResult<()> {
+        self.inner.on_record(id, values, ctx)
     }
 
     #[inline]
-    fn on_enter(&self, id: &Id, ctx: Context<'_, S>) {
-        self.a.on_enter(id, ctx);
+    fn on_enter(&self, id: Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
+        self.inner.on_enter(id, ctx)
     }
 
     #[inline]
-    fn on_exit(&self, id: &Id, ctx: Context<'_, S>) {
-        self.a.on_exit(id, ctx);
+    fn on_exit(&self, id: Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
+        self.inner.on_exit(id, ctx)
     }
 
     #[inline]
-    fn on_close(&self, id: Id, ctx: Context<'_, S>) {
-        self.a.on_close(id, ctx);
+    fn on_close(&self, id: Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
+        self.inner.on_close(id, ctx)
     }
 }
 
@@ -526,8 +578,8 @@ where
 {
     fn clone(&self) -> Self {
         Self {
-            a: self.a.clone(),
-            _s: PhantomData,
+            inner: self.inner.clone(),
+            _subscriber: PhantomData,
         }
     }
 }
@@ -537,6 +589,6 @@ where
     A: fmt::Debug,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_tuple("Not").field(&self.a).finish()
+        f.debug_tuple("Not").field(&self.inner).finish()
     }
 }

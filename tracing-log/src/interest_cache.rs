@@ -181,12 +181,20 @@ thread_local! {
 }
 
 /// Configure the per-thread interest cache.
+#[allow(
+    clippy::single_call_fn,
+    reason = "interest-cache reconfiguration remains a narrow crate-local boundary while cache state stays private"
+)]
 pub(super) fn configure(new_config: Option<InterestCacheConfig>) {
     *CONFIG.lock() = new_config.unwrap_or_else(InterestCacheConfig::disabled);
     let _previous_epoch = INTEREST_CACHE_EPOCH.fetch_add(1, Ordering::SeqCst);
 }
 
 /// Return cached interest for a log metadata key, recomputing it with `callback` on miss.
+#[allow(
+    clippy::single_call_fn,
+    reason = "interest-cache lookup remains a narrow crate-local boundary while cache state stays private"
+)]
 pub(super) fn try_cache(metadata: &Metadata<'_>, callback: impl FnOnce() -> bool) -> bool {
     STATE.with(|state_cell| {
         let Ok(mut state) = state_cell.try_borrow_mut() else {
@@ -261,6 +269,10 @@ pub(super) fn try_cache(metadata: &Metadata<'_>, callback: impl FnOnce() -> bool
 }
 
 /// Encode a `log` level into the low bits of an interest-cache key.
+#[allow(
+    clippy::single_call_fn,
+    reason = "level bit encoding stays separate from pointer and length key assembly"
+)]
 const fn level_key(level: Level) -> usize {
     match level {
         Level::Error => 1,
@@ -275,6 +287,8 @@ const fn level_key(level: Level) -> usize {
 mod tests {
 
     use super::*;
+    use std::str::from_utf8;
+    use std::thread;
     use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_ok, ensure_some};
 
     /// Increment a test counter without using unchecked arithmetic.
@@ -289,33 +303,49 @@ mod tests {
         LOCK.lock()
     }
 
+    fn run_in_worker(
+        callback: impl FnOnce() -> Result<(), TestFailure> + Send + 'static,
+    ) -> Result<(), TestFailure> {
+        thread::spawn(callback)
+            .join()
+            .map_err(|_panic| TestFailure::Condition {
+                context: "worker thread must not panic",
+            })?
+    }
+
+    fn observe_cache(callback: impl FnOnce() -> bool, metadata: &Metadata<'_>) {
+        let _cached = try_cache(metadata, callback);
+    }
+
     #[test]
     fn test_when_disabled_the_callback_is_always_called() -> Result<(), TestFailure> {
         let _lock = lock_for_test();
 
         *CONFIG.lock() = InterestCacheConfig::disabled();
 
-        std::thread::spawn(|| -> Result<(), TestFailure> {
+        run_in_worker(|| {
             let metadata = log::MetadataBuilder::new()
                 .level(Level::Trace)
                 .target("dummy")
                 .build();
             let mut count = 0;
-            let _cached = try_cache(&metadata, || {
-                increment(&mut count);
-                true
-            });
+            observe_cache(
+                || {
+                    increment(&mut count);
+                    true
+                },
+                &metadata,
+            );
             ensure_eq(&count, &1, "disabled cache calls callback once")?;
-            let _cached = try_cache(&metadata, || {
-                increment(&mut count);
-                true
-            });
+            observe_cache(
+                || {
+                    increment(&mut count);
+                    true
+                },
+                &metadata,
+            );
             ensure_eq(&count, &2, "disabled cache calls callback every time")
         })
-        .join()
-        .map_err(|_panic| TestFailure::Condition {
-            context: "worker thread must not panic",
-        })?
     }
 
     #[test]
@@ -325,31 +355,33 @@ mod tests {
 
         *CONFIG.lock() = InterestCacheConfig::default().with_min_verbosity(Level::Debug);
 
-        std::thread::spawn(|| -> Result<(), TestFailure> {
+        run_in_worker(|| {
             let metadata = log::MetadataBuilder::new()
                 .level(Level::Debug)
                 .target("dummy")
                 .build();
             let mut count = 0;
-            let _cached = try_cache(&metadata, || {
-                increment(&mut count);
-                true
-            });
+            observe_cache(
+                || {
+                    increment(&mut count);
+                    true
+                },
+                &metadata,
+            );
             ensure_eq(
                 &count,
                 &1,
                 "enabled cache calls callback before storing hit",
             )?;
-            let _cached = try_cache(&metadata, || {
-                increment(&mut count);
-                true
-            });
+            observe_cache(
+                || {
+                    increment(&mut count);
+                    true
+                },
+                &metadata,
+            );
             ensure_eq(&count, &1, "enabled cache reuses stored interest")
         })
-        .join()
-        .map_err(|_panic| TestFailure::Condition {
-            context: "worker thread must not panic",
-        })?
     }
 
     #[test]
@@ -359,42 +391,50 @@ mod tests {
 
         *CONFIG.lock() = InterestCacheConfig::default().with_min_verbosity(Level::Debug);
 
-        std::thread::spawn(|| -> Result<(), TestFailure> {
+        run_in_worker(|| {
             let metadata = log::MetadataBuilder::new()
                 .level(Level::Debug)
                 .target("dummy")
                 .build();
-            {
+            ({
                 let mut count = 0;
-                let _cached = try_cache(&metadata, || {
-                    increment(&mut count);
-                    true
-                });
-                let _cached = try_cache(&metadata, || {
-                    increment(&mut count);
-                    true
-                });
+                observe_cache(
+                    || {
+                        increment(&mut count);
+                        true
+                    },
+                    &metadata,
+                );
+                observe_cache(
+                    || {
+                        increment(&mut count);
+                        true
+                    },
+                    &metadata,
+                );
                 ensure_eq(&count, &1, "cache serves repeated metadata before rebuild")?;
-            }
+            });
             callsite::rebuild_interest_cache();
-            {
+            ({
                 let mut count = 0;
-                let _cached = try_cache(&metadata, || {
-                    increment(&mut count);
-                    true
-                });
-                let _cached = try_cache(&metadata, || {
-                    increment(&mut count);
-                    true
-                });
+                observe_cache(
+                    || {
+                        increment(&mut count);
+                        true
+                    },
+                    &metadata,
+                );
+                observe_cache(
+                    || {
+                        increment(&mut count);
+                        true
+                    },
+                    &metadata,
+                );
                 ensure_eq(&count, &1, "cache serves repeated metadata after rebuild")?;
-            }
+            });
             Ok(())
         })
-        .join()
-        .map_err(|_panic| TestFailure::Condition {
-            context: "worker thread must not panic",
-        })?
     }
 
     #[test]
@@ -404,27 +444,29 @@ mod tests {
 
         *CONFIG.lock() = InterestCacheConfig::default().with_min_verbosity(Level::Debug);
 
-        std::thread::spawn(|| -> Result<(), TestFailure> {
+        run_in_worker(|| {
             let metadata = log::MetadataBuilder::new()
                 .level(Level::Info)
                 .target("dummy")
                 .build();
             let mut count = 0;
-            let _cached = try_cache(&metadata, || {
-                increment(&mut count);
-                true
-            });
+            observe_cache(
+                || {
+                    increment(&mut count);
+                    true
+                },
+                &metadata,
+            );
             ensure_eq(&count, &1, "below-threshold metadata calls callback once")?;
-            let _cached = try_cache(&metadata, || {
-                increment(&mut count);
-                true
-            });
+            observe_cache(
+                || {
+                    increment(&mut count);
+                    true
+                },
+                &metadata,
+            );
             ensure_eq(&count, &2, "below-threshold metadata is not cached")
         })
-        .join()
-        .map_err(|_panic| TestFailure::Condition {
-            context: "worker thread must not panic",
-        })?
     }
 
     #[test]
@@ -433,7 +475,7 @@ mod tests {
 
         *CONFIG.lock() = InterestCacheConfig::default().with_min_verbosity(Level::Debug);
 
-        std::thread::spawn(|| -> Result<(), TestFailure> {
+        run_in_worker(|| {
             let metadata_debug = log::MetadataBuilder::new()
                 .level(Level::Debug)
                 .target("dummy")
@@ -444,29 +486,37 @@ mod tests {
                 .build();
             let mut count_debug = 0;
             let mut count_trace = 0;
-            let _cached = try_cache(&metadata_debug, || {
-                increment(&mut count_debug);
-                true
-            });
-            let _cached = try_cache(&metadata_trace, || {
-                increment(&mut count_trace);
-                true
-            });
-            let _cached = try_cache(&metadata_debug, || {
-                increment(&mut count_debug);
-                true
-            });
-            let _cached = try_cache(&metadata_trace, || {
-                increment(&mut count_trace);
-                true
-            });
+            observe_cache(
+                || {
+                    increment(&mut count_debug);
+                    true
+                },
+                &metadata_debug,
+            );
+            observe_cache(
+                || {
+                    increment(&mut count_trace);
+                    true
+                },
+                &metadata_trace,
+            );
+            observe_cache(
+                || {
+                    increment(&mut count_debug);
+                    true
+                },
+                &metadata_debug,
+            );
+            observe_cache(
+                || {
+                    increment(&mut count_trace);
+                    true
+                },
+                &metadata_trace,
+            );
             ensure_eq(&count_debug, &1, "debug metadata callback count")?;
             ensure_eq(&count_trace, &1, "trace metadata callback count")
         })
-        .join()
-        .map_err(|_panic| TestFailure::Condition {
-            context: "worker thread must not panic",
-        })?
     }
 
     #[test]
@@ -475,7 +525,7 @@ mod tests {
 
         *CONFIG.lock() = InterestCacheConfig::default().with_min_verbosity(Level::Debug);
 
-        std::thread::spawn(|| -> Result<(), TestFailure> {
+        run_in_worker(|| {
             let metadata_1 = log::MetadataBuilder::new()
                 .level(Level::Trace)
                 .target("dummy_1")
@@ -486,29 +536,37 @@ mod tests {
                 .build();
             let mut count_1 = 0;
             let mut count_2 = 0;
-            let _cached = try_cache(&metadata_1, || {
-                increment(&mut count_1);
-                true
-            });
-            let _cached = try_cache(&metadata_2, || {
-                increment(&mut count_2);
-                true
-            });
-            let _cached = try_cache(&metadata_1, || {
-                increment(&mut count_1);
-                true
-            });
-            let _cached = try_cache(&metadata_2, || {
-                increment(&mut count_2);
-                true
-            });
+            observe_cache(
+                || {
+                    increment(&mut count_1);
+                    true
+                },
+                &metadata_1,
+            );
+            observe_cache(
+                || {
+                    increment(&mut count_2);
+                    true
+                },
+                &metadata_2,
+            );
+            observe_cache(
+                || {
+                    increment(&mut count_1);
+                    true
+                },
+                &metadata_1,
+            );
+            observe_cache(
+                || {
+                    increment(&mut count_2);
+                    true
+                },
+                &metadata_2,
+            );
             ensure_eq(&count_1, &1, "first target callback count")?;
             ensure_eq(&count_2, &1, "second target callback count")
         })
-        .join()
-        .map_err(|_panic| TestFailure::Condition {
-            context: "worker thread must not panic",
-        })?
     }
 
     #[test]
@@ -519,7 +577,7 @@ mod tests {
             .with_min_verbosity(Level::Debug)
             .with_lru_cache_size(1);
 
-        std::thread::spawn(|| -> Result<(), TestFailure> {
+        run_in_worker(|| {
             let metadata_1 = log::MetadataBuilder::new()
                 .level(Level::Trace)
                 .target("dummy_1")
@@ -529,26 +587,31 @@ mod tests {
                 .target("dummy_2")
                 .build();
             let mut count = 0;
-            let _cached = try_cache(&metadata_1, || {
-                increment(&mut count);
-                true
-            });
-            let _cached = try_cache(&metadata_1, || {
-                increment(&mut count);
-                true
-            });
+            observe_cache(
+                || {
+                    increment(&mut count);
+                    true
+                },
+                &metadata_1,
+            );
+            observe_cache(
+                || {
+                    increment(&mut count);
+                    true
+                },
+                &metadata_1,
+            );
             ensure_eq(&count, &1, "first target cache hit count")?;
-            let _cached = try_cache(&metadata_2, || true);
-            let _cached = try_cache(&metadata_1, || {
-                increment(&mut count);
-                true
-            });
+            observe_cache(|| true, &metadata_2);
+            observe_cache(
+                || {
+                    increment(&mut count);
+                    true
+                },
+                &metadata_1,
+            );
             ensure_eq(&count, &2, "evicted target calls callback again")
         })
-        .join()
-        .map_err(|_panic| TestFailure::Condition {
-            context: "worker thread must not panic",
-        })?
     }
 
     #[test]
@@ -557,7 +620,7 @@ mod tests {
 
         *CONFIG.lock() = InterestCacheConfig::default().with_min_verbosity(Level::Debug);
 
-        std::thread::spawn(|| -> Result<(), TestFailure> {
+        run_in_worker(|| {
             let metadata_1 = log::MetadataBuilder::new()
                 .level(Level::Trace)
                 .target("dummy_1")
@@ -566,7 +629,7 @@ mod tests {
                 .level(Level::Trace)
                 .target("dummy_2")
                 .build();
-            let _cached = try_cache(&metadata_1, || true);
+            observe_cache(|| true, &metadata_1);
             let mut first_unexpected_callback = false;
             let first_cached = try_cache(&metadata_1, || {
                 first_unexpected_callback = true;
@@ -577,7 +640,7 @@ mod tests {
                 !first_unexpected_callback,
                 "cache hit should not invoke callback for first metadata",
             )?;
-            let _cached = try_cache(&metadata_2, || false);
+            observe_cache(|| false, &metadata_2);
             let mut second_unexpected_callback = false;
             let second_cached = try_cache(&metadata_2, || {
                 second_unexpected_callback = true;
@@ -589,10 +652,6 @@ mod tests {
                 "cache hit should not invoke callback for second metadata",
             )
         })
-        .join()
-        .map_err(|_panic| TestFailure::Condition {
-            context: "worker thread must not panic",
-        })?
     }
 
     #[test]
@@ -601,17 +660,17 @@ mod tests {
 
         *CONFIG.lock() = InterestCacheConfig::default().with_min_verbosity(Level::Debug);
 
-        std::thread::spawn(|| -> Result<(), TestFailure> {
+        run_in_worker(|| {
             let mut target = *b"dummy_1";
             let metadata_1 = log::MetadataBuilder::new()
                 .level(Level::Trace)
                 .target(ensure_ok(
-                    std::str::from_utf8(&target),
+                    from_utf8(&target),
                     "mutable target remains valid UTF-8",
                 )?)
                 .build();
 
-            let _cached = try_cache(&metadata_1, || true);
+            observe_cache(|| true, &metadata_1);
             let mut first_unexpected_callback = false;
             let first_cached = try_cache(&metadata_1, || {
                 first_unexpected_callback = true;
@@ -627,12 +686,12 @@ mod tests {
             let metadata_2 = log::MetadataBuilder::new()
                 .level(Level::Trace)
                 .target(ensure_ok(
-                    std::str::from_utf8(&target),
+                    from_utf8(&target),
                     "mutated target remains valid UTF-8",
                 )?)
                 .build();
 
-            let _cached = try_cache(&metadata_2, || false);
+            observe_cache(|| false, &metadata_2);
             let mut second_unexpected_callback = false;
             let second_cached = try_cache(&metadata_2, || {
                 second_unexpected_callback = true;
@@ -644,9 +703,5 @@ mod tests {
                 "cache hit should not invoke callback for second target",
             )
         })
-        .join()
-        .map_err(|_panic| TestFailure::Condition {
-            context: "worker thread must not panic",
-        })?
     }
 }

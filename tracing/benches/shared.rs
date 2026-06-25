@@ -1,61 +1,79 @@
 //! Shared helpers for `tracing` benchmarks.
 
-use criterion::{Bencher, measurement::WallTime};
-use std::hint::black_box;
-use tracing::{Event, Id, Metadata, field, span};
-
+use core::num::NonZeroU64;
+use criterion::{Bencher, BenchmarkGroup, measurement::WallTime};
+use log::{LevelFilter, set_logger, set_max_level};
 use std::{
     fmt::{self, Write},
-    sync::{Mutex, MutexGuard},
+    hint::black_box,
+    sync::atomic::{AtomicUsize, Ordering},
+};
+use tracing::{
+    Event, Id, Metadata, Subscriber, field, span,
+    subscriber::{SubscriberResult, set_global_default, with_default},
 };
 
-pub(crate) fn for_all_recording(
-    group: &mut criterion::BenchmarkGroup<'_, WallTime>,
-    mut iter: impl FnMut(&mut Bencher<'_, WallTime>),
-) {
-    // first, run benchmarks with no subscriber
-    let _benchmark = group.bench_function("none", &mut iter);
-
-    // then, run benchmarks with a scoped default subscriber
-    tracing::subscriber::with_default(EnabledSubscriber, || {
-        let _benchmark = group.bench_function("scoped", &mut iter);
-    });
-
-    let subscriber = VisitingSubscriber(Mutex::new(String::from("")));
-    tracing::subscriber::with_default(subscriber, || {
-        let _benchmark = group.bench_function("scoped_recording", &mut iter);
-    });
-
-    // finally, set a global default subscriber, and run the benchmarks again.
-    tracing::subscriber::set_global_default(EnabledSubscriber)
-        .expect("global default should not have already been set!");
-    let _ = log::set_logger(&NOP_LOGGER);
-    log::set_max_level(log::LevelFilter::Trace);
-    let _benchmark = group.bench_function("global", &mut iter);
+/// Subscriber matrix used by a benchmark group.
+pub trait BenchmarkMatrix {
+    /// Runs one benchmark body across this matrix's subscriber configurations.
+    fn bench<I>(&self, group: &mut BenchmarkGroup<'_, WallTime>, iter: I)
+    where
+        I: FnMut(&mut Bencher<'_, WallTime>);
 }
 
-pub(crate) fn for_all_dispatches(
-    group: &mut criterion::BenchmarkGroup<'_, WallTime>,
-    mut iter: impl FnMut(&mut Bencher<'_, WallTime>),
-) {
-    // first, run benchmarks with no subscriber
-    let _benchmark = group.bench_function("none", &mut iter);
+/// Matrix for benchmarks that should visit recorded fields.
+#[derive(Clone, Copy, Debug)]
+pub struct Recording;
 
-    // then, run benchmarks with a scoped default subscriber
-    tracing::subscriber::with_default(EnabledSubscriber, || {
-        let _benchmark = group.bench_function("scoped", &mut iter);
-    });
+impl BenchmarkMatrix for Recording {
+    fn bench<I>(&self, group: &mut BenchmarkGroup<'_, WallTime>, mut iter: I)
+    where
+        I: FnMut(&mut Bencher<'_, WallTime>),
+    {
+        let _none_benchmark = group.bench_function("none", &mut iter);
 
-    // finally, set a global default subscriber, and run the benchmarks again.
-    tracing::subscriber::set_global_default(EnabledSubscriber)
-        .expect("global default should not have already been set!");
-    let _ = log::set_logger(&NOP_LOGGER);
-    log::set_max_level(log::LevelFilter::Trace);
-    let _benchmark = group.bench_function("global", &mut iter);
+        with_default(EnabledSubscriber, || {
+            let _scoped_benchmark = group.bench_function("scoped", &mut iter);
+        });
+
+        let subscriber = VisitingSubscriber::default();
+        with_default(subscriber, || {
+            let _scoped_recording_benchmark = group.bench_function("scoped_recording", &mut iter);
+        });
+
+        let _global_default_already_set = set_global_default(EnabledSubscriber).is_err();
+        let _logger_already_set = set_logger(&NOP_LOGGER).is_err();
+        set_max_level(LevelFilter::Trace);
+        let _global_benchmark = group.bench_function("global", &mut iter);
+    }
 }
 
+/// Matrix for benchmarks that exercise default dispatch lookup.
+#[derive(Clone, Copy, Debug)]
+pub struct Dispatches;
+
+impl BenchmarkMatrix for Dispatches {
+    fn bench<I>(&self, group: &mut BenchmarkGroup<'_, WallTime>, mut iter: I)
+    where
+        I: FnMut(&mut Bencher<'_, WallTime>),
+    {
+        let _none_benchmark = group.bench_function("none", &mut iter);
+
+        with_default(EnabledSubscriber, || {
+            let _scoped_benchmark = group.bench_function("scoped", &mut iter);
+        });
+
+        let _global_default_already_set = set_global_default(EnabledSubscriber).is_err();
+        let _logger_already_set = set_logger(&NOP_LOGGER).is_err();
+        set_max_level(LevelFilter::Trace);
+        let _global_benchmark = group.bench_function("global", &mut iter);
+    }
+}
+
+/// Logger used when benchmarks install a global default subscriber.
 const NOP_LOGGER: NopLogger = NopLogger;
 
+/// Logger implementation that formats records into `black_box`.
 struct NopLogger;
 
 impl log::Log for NopLogger {
@@ -66,7 +84,7 @@ impl log::Log for NopLogger {
     fn log(&self, record: &log::Record<'_>) {
         if self.enabled(record.metadata()) {
             let mut this = self;
-            let _ = write!(this, "{}", record.args());
+            let _write_failed = write!(this, "{}", record.args()).is_err();
         }
     }
 
@@ -81,82 +99,116 @@ impl Write for &NopLogger {
 }
 
 /// Simulates a subscriber that records span data.
-struct VisitingSubscriber(Mutex<String>);
+#[derive(Default)]
+struct VisitingSubscriber {
+    /// Total number of debug fields visited.
+    recorded_fields: AtomicUsize,
+}
 
-struct Visitor<'a>(MutexGuard<'a, String>);
-
-impl field::Visit for Visitor<'_> {
-    fn record_debug(&mut self, _field: &field::Field, value: &dyn fmt::Debug) {
-        let _ = write!(&mut *self.0, "{:?}", value);
+impl VisitingSubscriber {
+    /// Creates a visitor for one span or event recording pass.
+    const fn visitor(&self) -> Visitor<'_> {
+        Visitor {
+            recorded_fields: &self.recorded_fields,
+            local_fields: 0,
+        }
     }
 }
 
-impl tracing::Subscriber for VisitingSubscriber {
-    fn new_span(&self, span: &span::Attributes<'_>) -> Id {
-        let mut visitor = Visitor(self.0.lock().unwrap());
+/// Field visitor that counts values observed by the subscriber.
+struct Visitor<'a> {
+    /// Shared field counter updated after a visit finishes.
+    recorded_fields: &'a AtomicUsize,
+
+    /// Fields observed during this visit.
+    local_fields: usize,
+}
+
+impl Drop for Visitor<'_> {
+    fn drop(&mut self) {
+        let _previous_fields = self
+            .recorded_fields
+            .fetch_add(self.local_fields, Ordering::Relaxed);
+    }
+}
+
+impl field::Visit for Visitor<'_> {
+    fn record_debug(&mut self, _field: &field::Field, value: &dyn fmt::Debug) {
+        let _value = black_box(value);
+        self.local_fields = self.local_fields.saturating_add(1);
+    }
+}
+
+impl Subscriber for VisitingSubscriber {
+    fn new_span(&self, span: &span::Attributes<'_>) -> SubscriberResult<Id> {
+        let mut visitor = self.visitor();
         span.record(&mut visitor);
-        Id::from_u64(0xDEAD_FACE)
+        Ok(benchmark_span_id())
     }
 
-    fn record(&self, _span: &Id, values: &span::Record<'_>) {
-        let mut visitor = Visitor(self.0.lock().unwrap());
+    fn record(&self, _span: Id, values: &span::Record<'_>) -> SubscriberResult {
+        let mut visitor = self.visitor();
         values.record(&mut visitor);
+        Ok(())
     }
 
-    fn event(&self, event: &Event<'_>) {
-        let mut visitor = Visitor(self.0.lock().unwrap());
+    fn event(&self, event: &Event<'_>) -> SubscriberResult {
+        let mut visitor = self.visitor();
         event.record(&mut visitor);
+        Ok(())
     }
 
-    fn record_follows_from(&self, span: &Id, follows: &Id) {
-        let _ = (span, follows);
+    fn record_follows_from(&self, _span: Id, _follows: Id) -> SubscriberResult {
+        Ok(())
     }
 
-    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        let _ = metadata;
-        true
+    fn enabled(&self, _metadata: &Metadata<'_>) -> SubscriberResult<bool> {
+        Ok(true)
     }
 
-    fn enter(&self, span: &Id) {
-        let _ = span;
+    fn enter(&self, _span: Id) -> SubscriberResult {
+        Ok(())
     }
 
-    fn exit(&self, span: &Id) {
-        let _ = span;
+    fn exit(&self, _span: Id) -> SubscriberResult {
+        Ok(())
     }
 }
 
 /// A subscriber that is enabled but otherwise does nothing.
 struct EnabledSubscriber;
 
-impl tracing::Subscriber for EnabledSubscriber {
-    fn new_span(&self, span: &span::Attributes<'_>) -> Id {
-        let _ = span;
-        Id::from_u64(0xDEAD_FACE)
+impl Subscriber for EnabledSubscriber {
+    fn new_span(&self, _span: &span::Attributes<'_>) -> SubscriberResult<Id> {
+        Ok(benchmark_span_id())
     }
 
-    fn event(&self, event: &Event<'_>) {
-        let _ = event;
+    fn event(&self, _event: &Event<'_>) -> SubscriberResult {
+        Ok(())
     }
 
-    fn record(&self, span: &Id, values: &span::Record<'_>) {
-        let _ = (span, values);
+    fn record(&self, _span: Id, _values: &span::Record<'_>) -> SubscriberResult {
+        Ok(())
     }
 
-    fn record_follows_from(&self, span: &Id, follows: &Id) {
-        let _ = (span, follows);
+    fn record_follows_from(&self, _span: Id, _follows: Id) -> SubscriberResult {
+        Ok(())
     }
 
-    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        let _ = metadata;
-        true
+    fn enabled(&self, _metadata: &Metadata<'_>) -> SubscriberResult<bool> {
+        Ok(true)
     }
 
-    fn enter(&self, span: &Id) {
-        let _ = span;
+    fn enter(&self, _span: Id) -> SubscriberResult {
+        Ok(())
     }
 
-    fn exit(&self, span: &Id) {
-        let _ = span;
+    fn exit(&self, _span: Id) -> SubscriberResult {
+        Ok(())
     }
+}
+
+/// Returns the stable span ID used by the synthetic benchmark subscribers.
+fn benchmark_span_id() -> Id {
+    Id::try_from_u64(0xDEAD_FACE).unwrap_or_else(|| Id::from_non_zero_u64(NonZeroU64::MIN))
 }

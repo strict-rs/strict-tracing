@@ -1,10 +1,13 @@
 //! Example binary for tracing workspace checks.
+#![cfg(test)]
+
+use strict_test_support::{TestFailure, ensure_ok};
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
 use tracing_mock::*;
 
 #[test]
-fn destructure_tuples() {
+fn destructure_tuples() -> Result<(), TestFailure> {
     #[instrument]
     fn my_fn((arg1, arg2): (usize, usize)) {}
 
@@ -21,19 +24,20 @@ fn destructure_tuples() {
         )
         .enter(span.clone())
         .exit(span.clone())
-        .drop_span(span)
+        .close_span(span)
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
+    with_default(subscriber, || {
         my_fn((1, 2));
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn destructure_nested_tuples() {
+fn destructure_nested_tuples() -> Result<(), TestFailure> {
     #[instrument]
     fn my_fn(((arg1, arg2), (arg3, arg4)): ((usize, usize), (usize, usize))) {}
 
@@ -52,44 +56,49 @@ fn destructure_nested_tuples() {
         )
         .enter(span.clone())
         .exit(span.clone())
-        .drop_span(span)
+        .close_span(span)
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
+    with_default(subscriber, || {
         my_fn(((1, 2), (3, 4)));
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn destructure_refs() {
+fn destructure_refs() -> Result<(), TestFailure> {
     #[instrument]
-    fn my_fn(&arg1: &usize) {}
+    fn my_fn(&arg1: &[usize; 3]) {}
 
     let span = expect::span().named("my_fn");
 
     let (subscriber, handle) = subscriber::mock()
         .new_span(
-            span.clone()
-                .with_fields(expect::field("arg1").with_value(&1_usize).only()),
+            span.clone().with_fields(
+                expect::field("arg1")
+                    .with_value(&format_args!("[1, 2, 3]"))
+                    .only(),
+            ),
         )
         .enter(span.clone())
         .exit(span.clone())
-        .drop_span(span)
+        .close_span(span)
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
-        my_fn(&1);
+    with_default(subscriber, || {
+        my_fn(&[1, 2, 3]);
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn destructure_tuple_structs() {
+fn destructure_tuple_structs() -> Result<(), TestFailure> {
     struct Foo(usize, usize);
 
     #[instrument]
@@ -108,19 +117,20 @@ fn destructure_tuple_structs() {
         )
         .enter(span.clone())
         .exit(span.clone())
-        .drop_span(span)
+        .close_span(span)
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
+    with_default(subscriber, || {
         my_fn(Foo(1, 2));
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn destructure_structs() {
+fn destructure_structs() -> Result<(), TestFailure> {
     struct Foo {
         bar: usize,
         baz: usize,
@@ -133,7 +143,8 @@ fn destructure_structs() {
             baz: arg2,
         }: Foo,
     ) {
-        let _ = (arg1, arg2);
+        let observed_args = format!("{arg1}{arg2}");
+        drop(observed_args);
     }
 
     let span = expect::span().named("my_fn");
@@ -149,19 +160,20 @@ fn destructure_structs() {
         )
         .enter(span.clone())
         .exit(span.clone())
-        .drop_span(span)
+        .close_span(span)
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
+    with_default(subscriber, || {
         my_fn(Foo { bar: 1, baz: 2 });
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn destructure_everything() {
+fn destructure_everything() -> Result<(), TestFailure> {
     struct Foo {
         bar: Bar,
         baz: (usize, usize),
@@ -178,7 +190,8 @@ fn destructure_everything() {
             ..
         }: &Foo,
     ) {
-        let _ = (arg1, arg2, arg3, arg4);
+        let observed_args = format!("{arg1}{arg2}{arg3}{arg4}");
+        drop(observed_args);
     }
 
     let span = expect::span().named("my_fn");
@@ -196,19 +209,21 @@ fn destructure_everything() {
         )
         .enter(span.clone())
         .exit(span.clone())
-        .drop_span(span)
+        .close_span(span)
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
+    with_default(subscriber, || {
         let foo = Foo {
             bar: Bar((1, 2)),
             baz: (3, 4),
             qux: NoDebug,
         };
-        let _ = foo.qux; // to eliminate unused field warning
+        let observed_qux = format!("{:p}", &foo.qux); // to eliminate unused field warning
+        drop(observed_qux);
         my_fn(&foo);
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }

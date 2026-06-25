@@ -1,4 +1,6 @@
 use super::*;
+use strict_test_support::{TestFailure, ensure_ok};
+use tracing::subscriber::set_default;
 use tracing_mock::layer::MockLayer;
 use tracing_subscriber::{Layer, filter, prelude::*};
 
@@ -12,32 +14,35 @@ fn filter<S>() -> filter::DynFilterFn<S> {
     filter::dynamic_filter_fn(|_, _| false)
 }
 
-/// reproduces https://github.com/tokio-rs/tracing/issues/1563#issuecomment-921363629
+/// reproduces <https://github.com/tokio-rs/tracing/issues/1563#issuecomment-921363629>
 #[test]
-fn box_works() {
-    let (layer, handle) = layer();
-    let layer = Box::new(layer.with_filter(filter()));
+fn box_works() -> Result<(), TestFailure> {
+    let (mock_layer, handle) = layer();
+    let filtered_layer = Box::new(mock_layer.with_filter(filter()));
 
-    let _guard = tracing::subscriber::set_default(tracing_subscriber::registry().with(layer));
+    let _guard = set_default(tracing_subscriber::registry().with(filtered_layer));
 
     for i in 0..2 {
         tracing::info!(i);
     }
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 /// the same as `box_works` but with a type-erased `Box`.
 #[test]
-fn dyn_box_works() {
-    let (layer, handle) = layer();
-    let layer: Box<dyn Layer<_> + Send + Sync + 'static> = Box::new(layer.with_filter(filter()));
+fn dyn_box_works() -> Result<(), TestFailure> {
+    let (mock_layer, handle) = layer();
+    let filtered_layer: Box<dyn Layer<_> + Send + Sync + 'static> =
+        Box::new(mock_layer.with_filter(filter()));
 
-    let _guard = tracing::subscriber::set_default(tracing_subscriber::registry().with(layer));
+    let _guard = set_default(tracing_subscriber::registry().with(filtered_layer));
 
     for i in 0..2 {
         tracing::info!(i);
     }
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }

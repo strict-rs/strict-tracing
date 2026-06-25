@@ -8,6 +8,7 @@
 //! # Examples
 //!
 //! ```
+//! # fn main() -> Result<(), strict_test_support::TestFailure> {
 //! use tracing_mock::{expect, subscriber, field};
 //!
 //! let (subscriber, handle) = subscriber::mock()
@@ -23,15 +24,18 @@
 //!     tracing::info!("droids");
 //! });
 //!
-//! // Use the handle to check the assertions. This line will panic if an
-//! // assertion is not met.
-//! handle.assert_finished();
+//! // Use the handle to check the expectations. This line returns an error if
+//! // an expectation is not met.
+//! strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! A more complex example may consider multiple spans and events with
 //! their respective fields:
 //!
 //! ```
+//! # fn main() -> Result<(), strict_test_support::TestFailure> {
 //! use tracing_mock::{expect, subscriber, field};
 //!
 //! let span = expect::span()
@@ -66,15 +70,18 @@
 //!     span.record("parting", &parting);
 //! });
 //!
-//! // Use the handle to check the assertions. This line will panic if an
-//! // assertion is not met.
-//! handle.assert_finished();
+//! // Use the handle to check the expectations. This line returns an error if
+//! // an expectation is not met.
+//! strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! If we modify the previous example so that we **don't** enter the
 //! span before recording an event, the test will fail:
 //!
-//! ```should_panic
+//! ```
+//! # fn main() -> Result<(), strict_test_support::TestFailure> {
 //! use tracing_mock::{expect, subscriber, field};
 //!
 //! let span = expect::span()
@@ -104,15 +111,16 @@
 //!     span.record("parting", &parting);
 //! });
 //!
-//! // Use the handle to check the assertions. This line will panic if an
-//! // assertion is not met.
-//! handle.assert_finished();
+//! // Use the handle to check the expectations. This line returns an error if
+//! // an expectation is not met.
+//! strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+//! # Ok(())
+//! # }
 //! ```
 //!
-//! This will result in an error message such as the following:
+//! This will return an error message such as the following:
 //!
 //! ```text
-//! thread 'main' panicked at '
 //! [main] expected to enter a span named `my_span`
 //! [main] but instead observed event Event {
 //!     fields: ValueSet {
@@ -140,6 +148,8 @@
 use parking_lot::Mutex;
 use std::{
     collections::{HashMap, VecDeque},
+    fmt,
+    num::NonZeroU64,
     sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
@@ -152,35 +162,53 @@ use tracing::{
     span::{self, Attributes, Id},
     subscriber::Interest,
 };
+use tracing_core::{span::Current, subscriber::SubscriberResult};
 
 use crate::{
     ancestry::get_ancestry,
     event::ExpectedEvent,
     expect::Expect,
+    failure::{ExpectationError, ExpectationResult, SharedFailures},
     field::ExpectedFields,
     span::{ActualSpan, ExpectedSpan, NewSpan},
 };
 
+/// Runtime state tracked for a span observed by the mock subscriber.
 pub(crate) struct SpanState {
+    /// The span ID assigned by the mock subscriber.
     id: Id,
+    /// The span name from static metadata.
     name: &'static str,
+    /// Outstanding references to the span.
     refs: usize,
+    /// Static span metadata.
     meta: &'static Metadata<'static>,
 }
 
 impl From<&SpanState> for ActualSpan {
     fn from(span_state: &SpanState) -> Self {
-        Self::new(span_state.id.clone(), Some(span_state.meta))
+        Self::new(span_state.id, Some(span_state.meta))
     }
 }
 
+/// Active subscriber implementation returned by
+/// [`MockSubscriber::run_with_handle`].
 struct Running<F: Fn(&Metadata<'_>) -> bool> {
+    /// Known spans by ID.
     spans: Mutex<HashMap<Id, SpanState>>,
+    /// Pending expectations.
     expected: Arc<Mutex<VecDeque<Expect>>>,
+    /// First expectation failure observed while the subscriber is running.
+    failures: SharedFailures,
+    /// Current entered span stack.
     current: Mutex<Vec<Id>>,
+    /// Next span ID allocator.
     ids: AtomicUsize,
+    /// Max level hint reported by this subscriber.
     max_level: Option<LevelFilter>,
+    /// Metadata filter for observed traces.
     filter: F,
+    /// Name used in failure messages.
     name: String,
 }
 
@@ -192,15 +220,19 @@ struct Running<F: Fn(&Metadata<'_>) -> bool> {
 /// [`subscriber`]: mod@crate::subscriber
 #[derive(Debug)]
 pub struct MockSubscriber<F: Fn(&Metadata<'_>) -> bool> {
+    /// Pending expectations to install in the running subscriber.
     expected: VecDeque<Expect>,
+    /// Max level hint reported by the running subscriber.
     max_level: Option<LevelFilter>,
+    /// Metadata filter applied before expectation matching.
     filter: F,
+    /// Name used in failure messages.
     name: String,
 }
 
 /// A handle which is used to invoke validation of expectations.
 ///
-/// The handle is currently only used to assert that all the expected
+/// The handle is currently only used to validate that all the expected
 /// events and spans were seen.
 ///
 /// For additional information and examples, see the [`subscriber`]
@@ -208,7 +240,14 @@ pub struct MockSubscriber<F: Fn(&Metadata<'_>) -> bool> {
 ///
 /// [`subscriber`]: mod@crate::subscriber
 #[derive(Debug)]
-pub struct MockHandle(Arc<Mutex<VecDeque<Expect>>>, String);
+pub struct MockHandle {
+    /// Pending expectations shared with the running mock.
+    expected: Arc<Mutex<VecDeque<Expect>>>,
+    /// First expectation failure recorded by the running mock.
+    failures: SharedFailures,
+    /// Name used in failure messages.
+    name: String,
+}
 
 /// Create a new [`MockSubscriber`].
 ///
@@ -219,6 +258,7 @@ pub struct MockHandle(Arc<Mutex<VecDeque<Expect>>>, String);
 ///
 ///
 /// ```
+/// # fn main() -> Result<(), strict_test_support::TestFailure> {
 /// use tracing_mock::{expect, subscriber, field};
 ///
 /// let span = expect::span()
@@ -253,15 +293,21 @@ pub struct MockHandle(Arc<Mutex<VecDeque<Expect>>>, String);
 ///     span.record("parting", &parting);
 /// });
 ///
-/// // Use the handle to check the assertions. This line will panic if an
-/// // assertion is not met.
-/// handle.assert_finished();
+/// // Use the handle to check the expectations. This line returns an error if
+/// // an expectation is not met.
+/// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// [`subscriber`]: mod@crate::subscriber
 #[must_use]
+#[allow(
+    clippy::single_call_fn,
+    reason = "public DSL constructor is the documented entry point for mock subscribers"
+)]
 pub fn mock() -> MockSubscriber<fn(&Metadata<'_>) -> bool> {
-    fn allow_all(_: &Metadata<'_>) -> bool {
+    const fn allow_all(_: &Metadata<'_>) -> bool {
         true
     }
 
@@ -272,7 +318,7 @@ pub fn mock() -> MockSubscriber<fn(&Metadata<'_>) -> bool> {
         name: thread::current()
             .name()
             .unwrap_or("mock_subscriber")
-            .to_string(),
+            .to_owned(),
     }
 }
 
@@ -282,7 +328,7 @@ where
 {
     /// Overrides the name printed by the mock subscriber's debugging output.
     ///
-    /// The debugging output is displayed if the test panics, or if the test is
+    /// The debugging output is displayed if the test fails, or if the test is
     /// run with `--nocapture`.
     ///
     /// By default, the mock subscriber's name is the  name of the test
@@ -300,7 +346,8 @@ where
     /// expecting to receive an event. As we only record a single
     /// event, the test will fail:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let (subscriber_1, handle_1) = subscriber::mock()
@@ -319,8 +366,11 @@ where
     ///     tracing::info!("a");
     /// });
     ///
-    /// handle_1.assert_finished();
-    /// handle_2.assert_finished();
+    /// let handle_1_result = handle_1.finished();
+    /// let handle_2_result = handle_2.finished();
+    /// strict_test_support::ensure(handle_1_result.is_err() || handle_2_result.is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// In the test output, we see that the subscriber which didn't
@@ -335,9 +385,10 @@ where
     ///     ),
     /// ]', tracing-mock/src/subscriber.rs:1276:13
     /// ```
-    pub fn named(self, name: impl ToString) -> Self {
+    #[must_use]
+    pub fn named(self, name: impl Into<String>) -> Self {
         Self {
-            name: name.to_string(),
+            name: name.into(),
             ..self
         }
     }
@@ -356,6 +407,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let (subscriber, handle) = subscriber::mock()
@@ -366,12 +418,15 @@ where
     ///     tracing::info!("a");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// A span is entered before the event, causing the test to fail:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let (subscriber, handle) = subscriber::mock()
@@ -384,8 +439,11 @@ where
     ///     tracing::info!("a");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
+    #[must_use]
     pub fn event(mut self, event: ExpectedEvent) -> Self {
         self.expected.push_back(Expect::Event(event));
         self
@@ -410,6 +468,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let span = expect::span()
@@ -424,13 +483,16 @@ where
     ///     _ = tracing::info_span!("the span we're testing", testing = "yes");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// An event is recorded before the span is created, causing the
     /// test to fail:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let span = expect::span()
@@ -446,8 +508,11 @@ where
     ///     _ = tracing::info_span!("the span we're testing", testing = "yes");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
+    #[must_use]
     pub fn new_span<I>(mut self, new_span: I) -> Self
     where
         I: Into<NewSpan>,
@@ -470,6 +535,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let span = expect::span()
@@ -486,13 +552,16 @@ where
     ///     let _entered = span.enter();
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// An event is recorded before the span is entered, causing the
     /// test to fail:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let span = expect::span()
@@ -510,11 +579,14 @@ where
     ///     let _entered = span.enter();
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`exit`]: fn@Self::exit
     /// [`only`]: fn@Self::only
+    #[must_use]
     pub fn enter<S>(mut self, span: S) -> Self
     where
         S: Into<ExpectedSpan>,
@@ -537,6 +609,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let span = expect::span()
@@ -552,13 +625,16 @@ where
     ///     let _entered = span.enter();
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// An event is recorded before the span is exited, causing the
     /// test to fail:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let span = expect::span()
@@ -575,10 +651,13 @@ where
     ///     tracing::info!("an event");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`enter`]: fn@Self::enter
+    #[must_use]
     pub fn exit<S>(mut self, span: S) -> Self
     where
         S: Into<ExpectedSpan>,
@@ -599,6 +678,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let span = expect::span()
@@ -613,13 +693,16 @@ where
     ///     _ = span.clone();
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// An event is recorded before the span is cloned, causing the
     /// test to fail:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let span = expect::span()
@@ -635,8 +718,11 @@ where
     ///     _ = span.clone();
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
+    #[must_use]
     pub fn clone_span<S>(mut self, span: S) -> Self
     where
         S: Into<ExpectedSpan>,
@@ -645,22 +731,20 @@ where
         self
     }
 
-    /// **This method is deprecated.**
-    ///
     /// Adds an expectation that a span matching the [`ExpectedSpan`]
-    /// getting dropped via the deprecated function
-    /// [`Subscriber::drop_span`] will be recorded next.
+    /// being finally closed by [`Subscriber::try_close`] will be recorded next.
     ///
-    /// Instead [`Subscriber::try_close`] should be used on the subscriber
-    /// and should be asserted with `close_span` (which hasn't been
-    /// implemented yet, but will be done as part of #539).
+    /// `try_close` is called every time a span handle is dropped. The mock
+    /// subscriber tracks span reference counts and only matches this
+    /// expectation when the final handle has closed the span.
     ///
-    /// [`Subscriber::drop_span`]: fn@tracing::Subscriber::drop_span
-    pub fn drop_span<S>(mut self, span: S) -> Self
+    /// [`Subscriber::try_close`]: fn@tracing::Subscriber::try_close
+    #[must_use]
+    pub fn close_span<S>(mut self, span: S) -> Self
     where
         S: Into<ExpectedSpan>,
     {
-        self.expected.push_back(Expect::DropSpan(span.into()));
+        self.expected.push_back(Expect::CloseSpan(span.into()));
         self
     }
 
@@ -681,6 +765,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let cause = expect::span().named("cause");
@@ -697,14 +782,17 @@ where
     ///     consequence.follows_from(&cause);
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// The `cause` span doesn't match, it is actually recorded at
     /// `Level::WARN` instead of the expected `Level::INFO`, causing
     /// this test to fail:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let cause = expect::span().named("cause");
@@ -721,10 +809,13 @@ where
     ///     consequence.follows_from(&cause);
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`Span::follows_from`]: fn@tracing::Span::follows_from
+    #[must_use]
     pub fn follows_from<S1, S2>(mut self, consequence: S1, cause: S2) -> Self
     where
         S1: Into<ExpectedSpan>,
@@ -751,6 +842,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let span = expect::span()
@@ -768,13 +860,16 @@ where
     ///     span.record("parting", "goodbye world!");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// The value of the recorded field doesn't match the expectation,
     /// causing the test to fail:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let span = expect::span()
@@ -792,10 +887,13 @@ where
     ///     span.record("parting", "goodbye universe!");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`field`]: mod@crate::field
+    #[must_use]
     pub fn record<S, I>(mut self, span: S, fields: I) -> Self
     where
         S: Into<ExpectedSpan>,
@@ -818,6 +916,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let (subscriber, handle) = subscriber::mock()
@@ -828,11 +927,14 @@ where
     ///     // The subscriber's on_register_dispatch was called when it was set as default
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{subscriber};
     ///
     /// struct WrapSubscriber<S: tracing::Subscriber> {
@@ -840,36 +942,50 @@ where
     /// }
     ///
     /// impl<S: tracing::Subscriber> tracing::Subscriber for WrapSubscriber<S> {
-    /// #     fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+    /// #     fn enabled(
+    /// #         &self,
+    /// #         metadata: &tracing::Metadata<'_>,
+    /// #     ) -> tracing::subscriber::SubscriberResult<bool> {
     /// #         self.inner.enabled(metadata)
     /// #     }
-    /// #     fn new_span(&self, span: &tracing_core::span::Attributes<'_>) -> tracing_core::span::Id {
+    /// #     fn new_span(
+    /// #         &self,
+    /// #         span: &tracing_core::span::Attributes<'_>,
+    /// #     ) -> tracing::subscriber::SubscriberResult<tracing_core::span::Id> {
     /// #         self.inner.new_span(span)
     /// #     }
-    /// #     fn record(&self, span: &tracing_core::span::Id, values: &tracing_core::span::Record<'_>) {
+    /// #     fn record(
+    /// #         &self,
+    /// #         span: tracing_core::span::Id,
+    /// #         values: &tracing_core::span::Record<'_>,
+    /// #     ) -> tracing::subscriber::SubscriberResult {
     /// #         self.inner.record(span, values)
     /// #     }
     /// #     fn record_follows_from(
     /// #         &self,
-    /// #         span: &tracing_core::span::Id,
-    /// #         follows: &tracing_core::span::Id,
-    /// #     ) {
+    /// #         span: tracing_core::span::Id,
+    /// #         follows: tracing_core::span::Id,
+    /// #     ) -> tracing::subscriber::SubscriberResult {
     /// #         self.inner.record_follows_from(span, follows)
     /// #     }
-    /// #     fn event(&self, event: &tracing::Event<'_>) {
+    /// #     fn event(&self, event: &tracing::Event<'_>) -> tracing::subscriber::SubscriberResult {
     /// #         self.inner.event(event)
     /// #     }
-    /// #     fn enter(&self, span: &tracing_core::span::Id) {
+    /// #     fn enter(&self, span: tracing_core::span::Id) -> tracing::subscriber::SubscriberResult {
     /// #         self.inner.enter(span)
     /// #     }
-    /// #     fn exit(&self, span: &tracing_core::span::Id) {
+    /// #     fn exit(&self, span: tracing_core::span::Id) -> tracing::subscriber::SubscriberResult {
     /// #         self.inner.exit(span)
     /// #     }
     ///     // All other Subscriber methods implemented to forward correctly.
     ///
-    ///     fn on_register_dispatch(&self, subscriber: &tracing::Dispatch) {
+    ///     fn on_register_dispatch(
+    ///         &self,
+    ///         subscriber: &tracing::Dispatch,
+    ///     ) -> tracing::subscriber::SubscriberResult {
     ///         // Doesn't forward to `self.inner`
     ///         let _ = subscriber;
+    ///         Ok(())
     ///     }
     /// }
     ///
@@ -880,10 +996,13 @@ where
     ///     // The subscriber's on_register_dispatch is called when set as default
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`Subscriber::on_register_dispatch`]: tracing::Subscriber::on_register_dispatch
+    #[must_use]
     pub fn on_register_dispatch(mut self) -> Self {
         self.expected.push_back(Expect::OnRegisterDispatch);
         self
@@ -899,6 +1018,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let (subscriber, handle) = subscriber::mock()
@@ -912,8 +1032,11 @@ where
     ///     tracing::warn!("b");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
+    #[must_use]
     pub fn with_filter<G>(self, filter: G) -> MockSubscriber<G>
     where
         G: Fn(&Metadata<'_>) -> bool + 'static,
@@ -942,6 +1065,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let (subscriber, handle) = subscriber::mock()
@@ -955,10 +1079,13 @@ where
     ///     tracing::info!("a message we want to validate");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`with_filter`]: fn@Self::with_filter
+    #[must_use]
     pub fn with_max_level_hint(self, hint: impl Into<LevelFilter>) -> Self {
         Self {
             max_level: Some(hint.into()),
@@ -978,6 +1105,7 @@ where
     /// expect a single event, but receive three:
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let (subscriber, handle) = subscriber::mock()
@@ -990,12 +1118,15 @@ where
     ///     tracing::info!("c");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// After including `only`, the test will fail:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let (subscriber, handle) = subscriber::mock()
@@ -1009,8 +1140,11 @@ where
     ///     tracing::info!("c");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
+    #[must_use]
     pub fn only(mut self) -> Self {
         self.expected.push_back(Expect::Nothing);
         self
@@ -1021,7 +1155,7 @@ where
     ///
     /// This function is similar to [`run_with_handle`], but it doesn't
     /// return a [`MockHandle`]. This is useful if the desired
-    /// assertions can be checked externally to the subscriber.
+    /// expectations can be checked externally to the subscriber.
     ///
     /// # Examples
     ///
@@ -1029,18 +1163,22 @@ where
     /// codebase:
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::subscriber;
     ///
-    /// tracing::subscriber::with_default(subscriber::mock().run(), || {
+    /// let spans_are_equal = tracing::subscriber::with_default(subscriber::mock().run(), || {
     ///     let foo1 = tracing::span!(tracing::Level::TRACE, "foo");
     ///     let foo2 = foo1.clone();
-    ///     // Two handles that point to the same span are equal.
-    ///     assert_eq!(foo1, foo2);
+    ///     foo1 == foo2
     /// });
+    /// strict_test_support::ensure(spans_are_equal, "cloned spans compare equal")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`Subscriber`]: tracing::Subscriber
     /// [`run_with_handle`]: fn@Self::run_with_handle
+    #[must_use]
     pub fn run(self) -> impl Subscriber {
         let (subscriber, _) = self.run_with_handle();
         subscriber
@@ -1053,6 +1191,7 @@ where
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// // subscriber and handle are returned from `run_with_handle()`
@@ -1064,16 +1203,21 @@ where
     ///     tracing::info!("a");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`Subscriber`]: tracing::Subscriber
+    #[must_use]
     pub fn run_with_handle(self) -> (impl Subscriber, MockHandle) {
         let expected = Arc::new(Mutex::new(self.expected));
-        let handle = MockHandle(expected.clone(), self.name.clone());
+        let failures = SharedFailures::default();
+        let handle = MockHandle::new(Arc::clone(&expected), failures.clone(), self.name.clone());
         let subscriber = Running {
             spans: Mutex::new(HashMap::new()),
             expected,
+            failures,
             current: Mutex::new(Vec::new()),
             ids: AtomicUsize::new(1),
             filter: self.filter,
@@ -1088,301 +1232,431 @@ impl<F> Subscriber for Running<F>
 where
     F: Fn(&Metadata<'_>) -> bool + 'static,
 {
-    fn on_register_dispatch(&self, _subscriber: &tracing::Dispatch) {
-        println!("[{}] on_register_dispatch", self.name);
-        let mut expected = self.expected.lock();
-        if matches!(expected.front(), Some(Expect::OnRegisterDispatch)) {
-            let _matched = expected.pop_front();
+    fn on_register_dispatch(&self, _subscriber: &tracing::Dispatch) -> SubscriberResult {
+        {
+            let mut expected = self.expected.lock();
+            if matches!(expected.front(), Some(Expect::OnRegisterDispatch)) {
+                let _matched = expected.pop_front();
+            }
         }
+        Ok(())
     }
 
-    fn enabled(&self, meta: &Metadata<'_>) -> bool {
-        println!("[{}] enabled: {:#?}", self.name, meta);
-        let enabled = (self.filter)(meta);
-        println!("[{}] enabled -> {}", self.name, enabled);
-        enabled
+    fn enabled(&self, meta: &Metadata<'_>) -> SubscriberResult<bool> {
+        Ok((self.filter)(meta))
     }
 
-    fn register_callsite(&self, meta: &'static Metadata<'static>) -> Interest {
-        println!("[{}] register_callsite: {:#?}", self.name, meta);
-        if self.enabled(meta) {
+    fn register_callsite(&self, meta: &'static Metadata<'static>) -> SubscriberResult<Interest> {
+        Ok(if (self.filter)(meta) {
             Interest::always()
         } else {
             Interest::never()
-        }
+        })
     }
     fn max_level_hint(&self) -> Option<LevelFilter> {
         self.max_level
     }
 
-    fn record(&self, id: &Id, values: &span::Record<'_>) {
-        let spans = self.spans.lock();
-        let mut expected = self.expected.lock();
-        let span = spans
-            .get(id)
-            .unwrap_or_else(|| panic!("[{}] no span for ID {:?}", self.name, id));
-        println!(
-            "[{}] record: {}; id={:?}; values={:?};",
-            self.name, span.name, id, values
-        );
-        let was_expected = matches!(expected.front(), Some(Expect::Visit(_, _)));
-        if was_expected
-            && let Expect::Visit(expected_span, mut expected_values) = expected.pop_front().unwrap()
-        {
-            if let Some(name) = expected_span.name() {
-                assert_eq!(name, span.name);
+    fn record(&self, id: Id, values: &span::Record<'_>) -> SubscriberResult {
+        let span_name = {
+            let spans = self.spans.lock();
+            let Some(span) = spans.get(&id) else {
+                self.record_failure(format_args!(
+                    "[{}] no span for ID `{}`",
+                    self.name,
+                    id.into_u64()
+                ));
+                return Ok(());
+            };
+            let span_name = span.name;
+            drop(spans);
+            span_name
+        };
+        let next_visit = {
+            let mut expected = self.expected.lock();
+            if matches!(expected.front(), Some(Expect::Visit(_, _))) {
+                expected.pop_front()
+            } else {
+                None
             }
-            let context = format!("span {}: ", span.name);
-            let mut checker = expected_values.checker(&context, &self.name);
-            values.record(&mut checker);
-            checker.finish();
+        };
+        let Some(Expect::Visit(expected_span, mut expected_values)) = next_visit else {
+            return Ok(());
+        };
+        if let Some(name) = expected_span.name()
+            && name != span_name
+        {
+            self.record_failure(format_args!(
+                "[{}] expected to record span named `{}`, but got `{}`",
+                self.name, name, span_name
+            ));
+            return Ok(());
         }
+        let context = format!("span {span_name}: ");
+        let mut checker = expected_values.checker(&context, &self.name);
+        values.record(&mut checker);
+        let _result = self.record_result(checker.finish());
+        Ok(())
     }
 
-    fn event(&self, event: &Event<'_>) {
+    fn event(&self, event: &Event<'_>) -> SubscriberResult {
         let name = event.metadata().name();
-        println!("[{}] event: {};", self.name, name);
-        match self.expected.lock().pop_front() {
+        let next = {
+            let mut expected = self.expected.lock();
+            expected.pop_front()
+        };
+        match next {
             None => {}
             Some(Expect::Event(mut expected)) => {
                 #[cfg(feature = "tracing-subscriber")]
                 {
                     if expected.scope_mut().is_some() {
-                        unimplemented!(
+                        self.record_failure(format_args!(
                             "Expected scope for events is not supported with `MockSubscriber`."
-                        )
+                        ));
+                        return Ok(());
                     }
                 }
                 let event_get_ancestry = || {
                     get_ancestry(
-                        event,
+                        &event,
                         || self.lookup_current(),
-                        |span_id| self.spans.lock().get(span_id).map(|span| span.into()),
+                        |span_id| self.spans.lock().get(span_id).map(Into::into),
                     )
                 };
-                expected.check(event, event_get_ancestry, &self.name);
+                let _result =
+                    self.record_result(expected.check(event, event_get_ancestry, &self.name));
             }
-            Some(ex) => ex.bad(&self.name, format_args!("observed event {:#?}", event)),
+            Some(ex) => {
+                let _result =
+                    self.record_result(ex.bad(&self.name, format_args!("observed event `{name}`")));
+            }
         }
+        Ok(())
     }
 
-    fn record_follows_from(&self, consequence_id: &Id, cause_id: &Id) {
-        let spans = self.spans.lock();
-        if let Some(consequence_span) = spans.get(consequence_id)
-            && let Some(cause_span) = spans.get(cause_id)
-        {
-            println!(
-                "[{}] record_follows_from: {} (id={:?}) follows {} (id={:?})",
-                self.name, consequence_span.name, consequence_id, cause_span.name, cause_id,
-            );
-            match self.expected.lock().pop_front() {
+    fn record_follows_from(&self, consequence_id: Id, cause_id: Id) -> SubscriberResult {
+        let span_names = {
+            let spans = self.spans.lock();
+            spans.get(&consequence_id).and_then(|consequence_span| {
+                spans
+                    .get(&cause_id)
+                    .map(|cause_span| (consequence_span.name, cause_span.name))
+            })
+        };
+        if let Some((consequence_name, cause_name)) = span_names {
+            let next = {
+                let mut expected = self.expected.lock();
+                expected.pop_front()
+            };
+            match next {
                 None => {}
                 Some(Expect::FollowsFrom {
                     consequence: ref expected_consequence,
                     cause: ref expected_cause,
                 }) => {
-                    if let Some(name) = expected_consequence.name() {
-                        // TODO(hds): Write proper assertion text.
-                        assert_eq!(name, consequence_span.name);
+                    if let Some(name) = expected_consequence.name()
+                        && name != consequence_name
+                    {
+                        self.record_failure(format_args!(
+                            "[{}] expected consequence span named `{}`, but got `{}`",
+                            self.name, name, consequence_name
+                        ));
+                        return Ok(());
                     }
-                    if let Some(name) = expected_cause.name() {
-                        // TODO(hds): Write proper assertion text.
-                        assert_eq!(name, cause_span.name);
+                    if let Some(name) = expected_cause.name()
+                        && name != cause_name
+                    {
+                        self.record_failure(format_args!(
+                            "[{}] expected cause span named `{}`, but got `{}`",
+                            self.name, name, cause_name
+                        ));
                     }
                 }
-                Some(ex) => ex.bad(
-                    &self.name,
-                    format_args!(
-                        "consequence {:?} followed cause {:?}",
-                        consequence_span.name, cause_span.name
-                    ),
-                ),
+                Some(ex) => {
+                    let _result = self.record_result(ex.bad(
+                        &self.name,
+                        format_args!(
+                            "consequence `{consequence_name}` followed cause `{cause_name}`"
+                        ),
+                    ));
+                }
             }
-        };
+        }
+        Ok(())
     }
 
-    fn new_span(&self, span: &Attributes<'_>) -> Id {
+    fn new_span(&self, span: &Attributes<'_>) -> SubscriberResult<Id> {
         let meta = span.metadata();
-        let id = self.ids.fetch_add(1, Ordering::SeqCst);
-        let id = Id::from_u64(id as u64);
-        println!(
-            "[{}] new_span: name={:?}; target={:?}; id={:?};",
-            self.name,
-            meta.name(),
-            meta.target(),
-            id
-        );
-        let mut expected = self.expected.lock();
-        let was_expected = matches!(expected.front(), Some(Expect::NewSpan(_)));
-        let mut spans = self.spans.lock();
-        if was_expected && let Expect::NewSpan(mut expected) = expected.pop_front().unwrap() {
-            if let Some(expected_id) = &expected.span.id {
-                expected_id.set(id.into_u64()).unwrap();
+        let allocated_slot = match self
+            .ids
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |id| id.checked_add(1))
+        {
+            Ok(id) => id,
+            Err(id) => {
+                self.record_failure(format_args!(
+                    "[{}] span ID allocator exhausted at {}",
+                    self.name, id
+                ));
+                return Ok(Self::fallback_span_id());
+            }
+        };
+        let span_id_u64 = match u64::try_from(allocated_slot) {
+            Ok(id) => id,
+            Err(error) => {
+                self.record_failure(format_args!(
+                    "[{}] span ID allocator could not convert {} to u64: {}",
+                    self.name, allocated_slot, error
+                ));
+                return Ok(Self::fallback_span_id());
+            }
+        };
+        let Some(id) = Id::try_from_u64(span_id_u64) else {
+            self.record_failure(format_args!(
+                "[{}] span ID allocator produced zero",
+                self.name
+            ));
+            return Ok(Self::fallback_span_id());
+        };
+        let next_new_span = {
+            let mut expected = self.expected.lock();
+            if matches!(expected.front(), Some(Expect::NewSpan(_))) {
+                expected.pop_front()
+            } else {
+                None
+            }
+        };
+        if let Some(Expect::NewSpan(mut expected_span)) = next_new_span {
+            if let Some(ref expected_id) = expected_span.span.id
+                && let Err(error) = expected_id.set(id.into_u64())
+            {
+                self.record_failure(format_args!(
+                    "[{}] could not set expected span ID: {}",
+                    self.name, error
+                ));
             }
 
-            expected.check(
+            let _result = self.record_result(expected_span.check(
                 span,
                 || {
+                    let spans = self.spans.lock();
                     get_ancestry(
-                        span,
+                        &span,
                         || self.lookup_current(),
-                        |span_id| spans.get(span_id).map(|span| span.into()),
+                        |span_id| spans.get(span_id).map(Into::into),
                     )
                 },
                 &self.name,
+            ));
+        }
+        {
+            let mut spans = self.spans.lock();
+            let _previous = spans.insert(
+                id,
+                SpanState {
+                    id,
+                    name: meta.name(),
+                    refs: 1,
+                    meta,
+                },
             );
         }
-        let _previous = spans.insert(
-            id.clone(),
-            SpanState {
-                id: id.clone(),
-                name: meta.name(),
-                refs: 1,
-                meta,
-            },
-        );
-        id
+        Ok(id)
     }
 
-    fn enter(&self, id: &Id) {
-        let spans = self.spans.lock();
-        if let Some(span) = spans.get(id) {
-            println!("[{}] enter: {}; id={:?};", self.name, span.name, id);
-            match self.expected.lock().pop_front() {
-                None => {}
-                Some(Expect::Enter(ref expected_span)) => {
-                    expected_span.check(&span.into(), "to enter a span", &self.name);
-                }
-                Some(ex) => ex.bad(&self.name, format_args!("entered span {:?}", span.name)),
-            }
+    fn enter(&self, id: Id) -> SubscriberResult {
+        let span_state = {
+            let spans = self.spans.lock();
+            spans
+                .get(&id)
+                .map(|span| (span.name, ActualSpan::from(span)))
         };
-        self.current.lock().push(id.clone());
+        let Some((span_name, actual_span)) = span_state else {
+            self.current.lock().push(id);
+            return Ok(());
+        };
+        let next = {
+            let mut expected = self.expected.lock();
+            expected.pop_front()
+        };
+        match next {
+            None => {}
+            Some(Expect::Enter(ref expected_span)) => {
+                let _result = self.record_result(expected_span.check(
+                    &actual_span,
+                    "to enter a span",
+                    &self.name,
+                ));
+            }
+            Some(ex) => {
+                let _result = self
+                    .record_result(ex.bad(&self.name, format_args!("entered span `{span_name}`")));
+            }
+        }
+        self.current.lock().push(id);
+        Ok(())
     }
 
-    fn exit(&self, id: &Id) {
-        if thread::panicking() {
-            // `exit()` can be called in `drop` impls, so we must guard against
-            // double panics.
-            println!("[{}] exit {:?} while panicking", self.name, id);
-            return;
-        }
-        let spans = self.spans.lock();
-        let span = spans
-            .get(id)
-            .unwrap_or_else(|| panic!("[{}] no span for ID {:?}", self.name, id));
-        println!("[{}] exit: {}; id={:?};", self.name, span.name, id);
-        match self.expected.lock().pop_front() {
+    fn exit(&self, id: Id) -> SubscriberResult {
+        let (span_name, actual_span) = {
+            let spans = self.spans.lock();
+            let Some(span) = spans.get(&id) else {
+                self.record_failure(format_args!(
+                    "[{}] no span for ID `{}`",
+                    self.name,
+                    id.into_u64()
+                ));
+                return Ok(());
+            };
+            let span_state = (span.name, ActualSpan::from(span));
+            drop(spans);
+            span_state
+        };
+        let next = {
+            let mut expected = self.expected.lock();
+            expected.pop_front()
+        };
+        match next {
             None => {}
             Some(Expect::Exit(ref expected_span)) => {
-                expected_span.check(&span.into(), "to exit a span", &self.name);
+                let _result = self.record_result(expected_span.check(
+                    &actual_span,
+                    "to exit a span",
+                    &self.name,
+                ));
                 let curr = self.current.lock().pop();
-                assert_eq!(
-                    Some(id),
-                    curr.as_ref(),
-                    "[{}] exited span {:?}, but the current span was {:?}",
+                if curr.as_ref() != Some(&id) {
+                    let current_name = curr.map_or("<unknown>", |current_id| {
+                        let spans = self.spans.lock();
+                        spans
+                            .get(&current_id)
+                            .map_or("<unknown>", |state| state.name)
+                    });
+                    self.record_failure(format_args!(
+                        "[{}] exited span `{}`, but the current span was `{}`",
+                        self.name, span_name, current_name
+                    ));
+                }
+            }
+            Some(ex) => {
+                let _result = self
+                    .record_result(ex.bad(&self.name, format_args!("exited span `{span_name}`")));
+            }
+        }
+        Ok(())
+    }
+
+    fn clone_span(&self, id: Id) -> SubscriberResult<Id> {
+        let mut spans = self.spans.lock();
+        let actual_span = match spans.get_mut(&id) {
+            Some(span) => {
+                if let Some(refs) = span.refs.checked_add(1) {
+                    span.refs = refs;
+                } else {
+                    self.record_failure(format_args!(
+                        "[{}] clone_span reference count overflowed for `{}`",
+                        self.name, span.name
+                    ));
+                }
+                Some(ActualSpan::from(&*span))
+            }
+            None => None,
+        };
+        drop(spans);
+
+        {
+            let mut expected = self.expected.lock();
+            let was_expected =
+                expected
+                    .front()
+                    .and_then(Expect::clone_span)
+                    .is_some_and(|expected_span| {
+                        let result = actual_span.as_ref().map_or_else(
+                            || {
+                                let observed_span = (&id).into();
+                                expected_span.check(&observed_span, "to clone a span", &self.name)
+                            },
+                            |observed_span| {
+                                expected_span.check(observed_span, "to clone a span", &self.name)
+                            },
+                        );
+                        let _result = self.record_result(result);
+                        true
+                    });
+            if was_expected {
+                let _matched = expected.pop_front();
+            }
+        }
+        Ok(id)
+    }
+
+    fn try_close(&self, id: Id) -> SubscriberResult<bool> {
+        let closed_span: Option<ActualSpan> = self.spans.try_lock().and_then(|mut spans| {
+            let span = spans.get_mut(&id)?;
+            if span.refs == 0 {
+                self.record_failure(format_args!(
+                    "[{}] close_span called for {} with no remaining refs; id={}",
                     self.name,
                     span.name,
-                    curr.as_ref().and_then(|id| spans.get(id)).map(|s| s.name)
-                );
+                    id.into_u64()
+                ));
+                return None;
             }
-            Some(ex) => ex.bad(&self.name, format_args!("exited span {:?}", span.name)),
-        };
-    }
+            span.refs = span.refs.saturating_sub(1);
+            if span.refs != 0 {
+                return None;
+            }
 
-    fn clone_span(&self, id: &Id) -> Id {
-        let mut spans = self.spans.lock();
-        let mut span = spans.get_mut(id);
-        match span.as_deref_mut() {
-            Some(span) => {
-                println!(
-                    "[{}] clone_span: {}; id={:?}; refs={:?};",
-                    self.name, span.name, id, span.refs,
-                );
-                span.refs += 1;
-            }
-            None => {
-                println!(
-                    "[{}] clone_span: id={:?} (not found in span list);",
-                    self.name, id
-                );
-            }
-        }
-
-        let mut expected = self.expected.lock();
-        let was_expected = if let Some(Expect::CloneSpan(expected_span)) = expected.front() {
-            match span {
-                Some(actual_span) => {
-                    let actual_span: &_ = actual_span;
-                    expected_span.check(&actual_span.into(), "to clone a span", &self.name);
-                }
-                // Check only by Id
-                None => expected_span.check(&id.into(), "to clone a span", &self.name),
-            }
-            true
-        } else {
-            false
+            let actual_span = (&*span).into();
+            let _closed = spans.remove(&id);
+            Some(actual_span)
+        });
+        let Some(actual_span) = closed_span else {
+            return Ok(false);
         };
-        if was_expected {
-            let _matched = expected.pop_front();
-        }
-        id.clone()
-    }
 
-    fn drop_span(&self, id: Id) {
-        let mut is_event = false;
-        let name = if let Some(mut spans) = self.spans.try_lock() {
-            spans.get_mut(&id).map(|span| {
-                let name = span.name;
-                if name.contains("event") {
-                    is_event = true;
-                }
-                println!(
-                    "[{}] drop_span: {}; id={:?}; refs={:?};",
-                    self.name, name, id, span.refs
-                );
-                span.refs -= 1;
-                name
-            })
-        } else {
-            None
-        };
-        if name.is_none() {
-            println!("[{}] drop_span: id={:?}", self.name, id);
-        }
         if let Some(mut expected) = self.expected.try_lock() {
             let was_expected = match expected.front() {
-                Some(Expect::DropSpan(span)) => {
-                    // Don't assert if this function was called while panicking,
-                    // as failing the assertion can cause a double panic.
-                    if !thread::panicking() {
-                        assert_eq!(name, span.name());
-                    }
+                Some(expectation) if expectation.close_span().is_some() => {
+                    let Some(expected_span) = expectation.close_span() else {
+                        return Ok(true);
+                    };
+                    let _result = self.record_result(expected_span.check(
+                        &actual_span,
+                        "to close a span",
+                        &self.name,
+                    ));
                     true
                 }
-                Some(Expect::Event(_)) => {
-                    if !thread::panicking() {
-                        assert!(is_event, "[{}] expected an event", self.name);
-                    }
-                    true
-                }
-                _ => false,
+                Some(_) | None => false,
             };
             if was_expected {
                 let _matched = expected.pop_front();
             }
         }
+
+        Ok(true)
     }
 
-    fn current_span(&self) -> tracing_core::span::Current {
-        let stack = self.current.lock();
-        match stack.last() {
-            Some(id) => {
-                let spans = self.spans.lock();
-                let state = spans.get(id).expect("state for current span");
-                tracing_core::span::Current::new(id.clone(), state.meta)
-            }
-            None => tracing_core::span::Current::none(),
-        }
+    fn current_span(&self) -> SubscriberResult<Current> {
+        let current = {
+            let stack = self.current.lock();
+            stack.last().copied()
+        };
+        Ok(current.map_or_else(Current::none, |id| {
+            let spans = self.spans.lock();
+            let Some(state) = spans.get(&id) else {
+                self.record_failure(format_args!(
+                    "[{}] no state for current span ID `{}`",
+                    self.name,
+                    id.into_u64()
+                ));
+                return Current::none();
+            };
+            let current_span = Current::new(id, state.meta);
+            drop(spans);
+            current_span
+        }))
     }
 }
 
@@ -1390,27 +1664,54 @@ impl<F> Running<F>
 where
     F: Fn(&Metadata<'_>) -> bool,
 {
+    /// Returns a fallback ID for impossible allocation failures.
+    const fn fallback_span_id() -> Id {
+        Id::from_non_zero_u64(NonZeroU64::MIN)
+    }
+
+    /// Records a formatted expectation failure.
+    fn record_failure(&self, args: fmt::Arguments<'_>) {
+        self.failures.record(ExpectationError::from_args(args));
+    }
+
+    /// Records a fallible expectation result.
+    fn record_result<T>(&self, result: ExpectationResult<T>) -> Option<T> {
+        self.failures.record_result(result)
+    }
+
+    /// Returns the currently entered span ID, if any.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "helper centralizes current-span stack lookup for ancestry closures"
+    )]
     fn lookup_current(&self) -> Option<Id> {
         let stack = self.current.lock();
-        stack.last().cloned()
+        stack.last().copied()
     }
 }
 
 impl MockHandle {
-    #[cfg(feature = "tracing-subscriber")]
-    pub(crate) fn new(expected: Arc<Mutex<VecDeque<Expect>>>, name: String) -> Self {
-        Self(expected, name)
+    /// Creates a mock handle over shared expectations.
+    pub(crate) const fn new(
+        expected: Arc<Mutex<VecDeque<Expect>>>,
+        failures: SharedFailures,
+        name: String,
+    ) -> Self {
+        Self {
+            expected,
+            failures,
+            name,
+        }
     }
 
-    /// Checks the expectations which were set on the
-    /// [`MockSubscriber`].
+    /// Checks the expectations which were set on the [`MockSubscriber`].
     ///
-    /// Calling `assert_finished` is usually the final part of a test.
+    /// This returns an error when any expected notifications were not recorded.
     ///
-    /// # Panics
+    /// # Errors
     ///
-    /// This method will panic if any of the provided expectations are
-    /// not met.
+    /// Returns a [`tracing_core::SubscriberError`] when a recorded notification mismatched
+    /// an expectation, or when expected notifications remain unobserved.
     ///
     /// # Examples
     ///
@@ -1425,16 +1726,34 @@ impl MockHandle {
     ///     tracing::info!("a");
     /// });
     ///
-    /// // Check assertions set on the mock subscriber
-    /// handle.assert_finished();
+    /// handle.finished()?;
+    /// # Ok::<_, tracing_core::SubscriberError>(())
     /// ```
-    pub fn assert_finished(&self) {
-        let expected = self.0.lock();
-        assert!(
-            !expected.iter().any(|thing| thing != &Expect::Nothing),
-            "\n[{}] more notifications expected: {:#?}",
-            self.1,
-            *expected
-        );
+    pub fn finished(&self) -> SubscriberResult {
+        if let Some(error) = self.failures.first() {
+            return Err(error);
+        }
+
+        let mut remaining = String::new();
+        {
+            let expected = self.expected.lock();
+            for expectation in &*expected {
+                if expectation != &Expect::Nothing {
+                    if !remaining.is_empty() {
+                        remaining.push_str(", ");
+                    }
+                    remaining.push_str(&expectation.to_string());
+                }
+            }
+        }
+
+        if remaining.is_empty() {
+            Ok(())
+        } else {
+            Err(ExpectationError::from_args(format_args!(
+                "\n[{}] more notifications expected: {}",
+                self.name, remaining
+            )))
+        }
     }
 }

@@ -4,18 +4,22 @@ use std::fmt::{self, Write};
 
 /// A wrapper that conditionally escapes ANSI sequences when formatted.
 pub(super) struct EscapeGuard<T> {
+    /// The value that may need escape-sequence sanitization while formatting.
     pub(super) value: T,
+    /// Whether ANSI and C1 control sequences should be escaped.
     pub(super) sanitize: bool,
 }
 
 impl<T> EscapeGuard<T> {
-    pub(super) fn new(value: T, sanitize: bool) -> Self {
+    /// Returns a wrapper that formats `value` with optional ANSI sanitization.
+    pub(super) const fn new(value: T, sanitize: bool) -> Self {
         Self { value, sanitize }
     }
 }
 
 /// Helper struct that escapes ANSI sequences as characters are written
 struct EscapingWriter<'a, 'b> {
+    /// The formatter receiving sanitized output.
     inner: &'a mut fmt::Formatter<'b>,
 }
 
@@ -33,8 +37,8 @@ impl Write for EscapingWriter<'_, '_> {
 
                 // C1 control characters (\x80-\x9f) - 8-bit control codes
                 // These can be used as alternative escape sequences in some terminals
-                ch if ch as u32 >= 0x80 && ch as u32 <= 0x9f => {
-                    write!(self.inner, "\\u{{{:x}}}", ch as u32)?
+                character if (0x80..=0x9f).contains(&u32::from(character)) => {
+                    write!(self.inner, "\\u{{{:x}}}", u32::from(character))?;
                 }
 
                 _ => self.inner.write_char(ch)?,

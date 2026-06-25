@@ -28,7 +28,7 @@ default = ["smallvec", "fmt", "ansi", "tracing-log", "std"]
 alloc = []
 std = ["alloc", "tracing-core/std", "parking_lot"]
 env-filter = ["matchers", "once_cell", "tracing", "std", "thread_local", "dep:regex-automata"]
-fmt = ["registry", "std"]
+fmt = ["registry", "std", "chrono"]
 ansi = ["fmt", "nu-ansi-term"]
 registry = ["sharded-slab", "thread_local", "std"]
 json = ["tracing-serde", "serde", "serde_json"]
@@ -80,6 +80,7 @@ log = { workspace = true }
 tracing-log = { workspace = true, default-features = true }
 criterion = { workspace = true }
 regex = { workspace = true }
+strict-test-support = { workspace = true, features = ["trybuild"] }
 tracing-futures = { workspace = true, features = ["std-future", "std"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
 # Enable the `time` crate's `macros` feature, for examples.

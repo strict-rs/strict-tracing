@@ -68,61 +68,80 @@ pub use tracing_core::{LevelFilter, metadata::ParseLevelFilterError};
 /// determine if those spans or events are enabled.
 ///
 /// [module-level documentation]: self#compile-time-filters
-pub const STATIC_MAX_LEVEL: LevelFilter = get_max_level_inner();
-
-/// Return the statically configured maximum trace level for this build.
-const fn get_max_level_inner() -> LevelFilter {
-    if !cfg!(debug_assertions) && release_max_level_configured() {
+pub const STATIC_MAX_LEVEL: LevelFilter = {
+    if !cfg!(debug_assertions)
+        && (cfg!(feature = "release_max_level_off")
+            || cfg!(feature = "release_max_level_error")
+            || cfg!(feature = "release_max_level_warn")
+            || cfg!(feature = "release_max_level_info")
+            || cfg!(feature = "release_max_level_debug")
+            || cfg!(feature = "release_max_level_trace"))
+    {
         select_max_level(
-            cfg!(feature = "release_max_level_off"),
-            cfg!(feature = "release_max_level_error"),
-            cfg!(feature = "release_max_level_warn"),
-            cfg!(feature = "release_max_level_info"),
-            cfg!(feature = "release_max_level_debug"),
-            cfg!(feature = "release_max_level_trace"),
+            FeatureState::from_cfg(cfg!(feature = "release_max_level_off")),
+            FeatureState::from_cfg(cfg!(feature = "release_max_level_error")),
+            FeatureState::from_cfg(cfg!(feature = "release_max_level_warn")),
+            FeatureState::from_cfg(cfg!(feature = "release_max_level_info")),
+            FeatureState::from_cfg(cfg!(feature = "release_max_level_debug")),
+            FeatureState::from_cfg(cfg!(feature = "release_max_level_trace")),
         )
     } else {
         select_max_level(
-            cfg!(feature = "max_level_off"),
-            cfg!(feature = "max_level_error"),
-            cfg!(feature = "max_level_warn"),
-            cfg!(feature = "max_level_info"),
-            cfg!(feature = "max_level_debug"),
-            cfg!(feature = "max_level_trace"),
+            FeatureState::from_cfg(cfg!(feature = "max_level_off")),
+            FeatureState::from_cfg(cfg!(feature = "max_level_error")),
+            FeatureState::from_cfg(cfg!(feature = "max_level_warn")),
+            FeatureState::from_cfg(cfg!(feature = "max_level_info")),
+            FeatureState::from_cfg(cfg!(feature = "max_level_debug")),
+            FeatureState::from_cfg(cfg!(feature = "max_level_trace")),
         )
     }
+};
+
+/// Whether a static max-level feature is enabled.
+#[derive(Clone, Copy)]
+enum FeatureState {
+    /// The feature is enabled.
+    Enabled,
+    /// The feature is disabled.
+    Disabled,
 }
 
-/// Return whether release builds have an explicit static max-level override.
-const fn release_max_level_configured() -> bool {
-    cfg!(feature = "release_max_level_off")
-        || cfg!(feature = "release_max_level_error")
-        || cfg!(feature = "release_max_level_warn")
-        || cfg!(feature = "release_max_level_info")
-        || cfg!(feature = "release_max_level_debug")
-        || cfg!(feature = "release_max_level_trace")
+impl FeatureState {
+    /// Convert the result of `cfg!(feature = ...)` into a named state.
+    const fn from_cfg(enabled: bool) -> Self {
+        if enabled {
+            Self::Enabled
+        } else {
+            Self::Disabled
+        }
+    }
+
+    /// Return whether this feature state is enabled.
+    const fn is_enabled(self) -> bool {
+        matches!(self, Self::Enabled)
+    }
 }
 
 /// Choose the most permissive enabled static max-level feature.
 const fn select_max_level(
-    off: bool,
-    error: bool,
-    warn: bool,
-    info: bool,
-    debug: bool,
-    trace: bool,
+    off: FeatureState,
+    error: FeatureState,
+    warn: FeatureState,
+    info: FeatureState,
+    debug: FeatureState,
+    trace: FeatureState,
 ) -> LevelFilter {
-    if trace {
+    if trace.is_enabled() {
         LevelFilter::TRACE
-    } else if debug {
+    } else if debug.is_enabled() {
         LevelFilter::DEBUG
-    } else if info {
+    } else if info.is_enabled() {
         LevelFilter::INFO
-    } else if warn {
+    } else if warn.is_enabled() {
         LevelFilter::WARN
-    } else if error {
+    } else if error.is_enabled() {
         LevelFilter::ERROR
-    } else if off {
+    } else if off.is_enabled() {
         LevelFilter::OFF
     } else {
         LevelFilter::TRACE
@@ -131,13 +150,16 @@ const fn select_max_level(
 
 #[cfg(test)]
 mod tests {
-    use super::{LevelFilter, select_max_level};
+    use super::{FeatureState, LevelFilter, select_max_level};
     use strict_test_support::{TestFailure, ensure_eq};
+
+    const DISABLED: FeatureState = FeatureState::Disabled;
+    const ENABLED: FeatureState = FeatureState::Enabled;
 
     #[test]
     fn select_max_level_defaults_to_trace() -> Result<(), TestFailure> {
         ensure_eq(
-            &select_max_level(false, false, false, false, false, false),
+            &select_max_level(DISABLED, DISABLED, DISABLED, DISABLED, DISABLED, DISABLED),
             &LevelFilter::TRACE,
             "no max-level feature defaults to TRACE",
         )
@@ -146,27 +168,27 @@ mod tests {
     #[test]
     fn select_max_level_preserves_single_restrictive_features() -> Result<(), TestFailure> {
         ensure_eq(
-            &select_max_level(true, false, false, false, false, false),
+            &select_max_level(ENABLED, DISABLED, DISABLED, DISABLED, DISABLED, DISABLED),
             &LevelFilter::OFF,
             "max_level_off maps to OFF",
         )?;
         ensure_eq(
-            &select_max_level(false, true, false, false, false, false),
+            &select_max_level(DISABLED, ENABLED, DISABLED, DISABLED, DISABLED, DISABLED),
             &LevelFilter::ERROR,
             "max_level_error maps to ERROR",
         )?;
         ensure_eq(
-            &select_max_level(false, false, true, false, false, false),
+            &select_max_level(DISABLED, DISABLED, ENABLED, DISABLED, DISABLED, DISABLED),
             &LevelFilter::WARN,
             "max_level_warn maps to WARN",
         )?;
         ensure_eq(
-            &select_max_level(false, false, false, true, false, false),
+            &select_max_level(DISABLED, DISABLED, DISABLED, ENABLED, DISABLED, DISABLED),
             &LevelFilter::INFO,
             "max_level_info maps to INFO",
         )?;
         ensure_eq(
-            &select_max_level(false, false, false, false, true, false),
+            &select_max_level(DISABLED, DISABLED, DISABLED, DISABLED, ENABLED, DISABLED),
             &LevelFilter::DEBUG,
             "max_level_debug maps to DEBUG",
         )
@@ -175,17 +197,17 @@ mod tests {
     #[test]
     fn select_max_level_uses_most_permissive_enabled_feature() -> Result<(), TestFailure> {
         ensure_eq(
-            &select_max_level(true, false, false, true, false, false),
+            &select_max_level(ENABLED, DISABLED, DISABLED, ENABLED, DISABLED, DISABLED),
             &LevelFilter::INFO,
             "more permissive INFO wins over OFF",
         )?;
         ensure_eq(
-            &select_max_level(true, true, true, true, true, false),
+            &select_max_level(ENABLED, ENABLED, ENABLED, ENABLED, ENABLED, DISABLED),
             &LevelFilter::DEBUG,
             "more permissive DEBUG wins over lower levels",
         )?;
         ensure_eq(
-            &select_max_level(true, true, true, true, true, true),
+            &select_max_level(ENABLED, ENABLED, ENABLED, ENABLED, ENABLED, ENABLED),
             &LevelFilter::TRACE,
             "TRACE is the most permissive static level",
         )

@@ -3,8 +3,7 @@
 use core::num::NonZeroU64;
 
 use crate::field::FieldSet;
-use crate::parent::Parent;
-use crate::{Metadata, field};
+use crate::{Metadata, Parent, field};
 
 /// Identifies a span within the context of a subscriber.
 ///
@@ -83,6 +82,10 @@ impl Id {
     }
 
     /// Constructs a new span ID from the given `NonZeroU64`.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public nonzero span ID constructor preserves the checked ID API"
+    )]
     #[inline]
     #[must_use]
     pub const fn from_non_zero_u64(id: NonZeroU64) -> Self {
@@ -114,6 +117,10 @@ impl<'a> From<&'a Id> for Option<Id> {
 impl<'a> Attributes<'a> {
     /// Returns `Attributes` describing a new child span of the current span,
     /// with the provided metadata and values.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public span Attributes constructor is used by downstream subscriber tests and instrumentation"
+    )]
     #[must_use]
     pub const fn new(
         metadata: &'static Metadata<'static>,
@@ -297,6 +304,10 @@ impl Current {
 
     /// Constructs a new `Current` that indicates the `Subscriber` does not
     /// track a current span.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "name the unknown current-span state separately from a known empty span"
+    )]
     pub(crate) const fn unknown() -> Self {
         Self {
             inner: CurrentInner::Unknown,

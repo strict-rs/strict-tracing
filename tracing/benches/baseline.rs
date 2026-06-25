@@ -3,22 +3,27 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 
-fn bench(c: &mut Criterion) {
+/// Benchmarks baseline operations used for comparison with tracing operations.
+#[allow(
+    clippy::single_call_fn,
+    reason = "Criterion invokes this benchmark entrypoint through criterion_group"
+)]
+fn bench(criterion: &mut Criterion) {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    let mut group = c.benchmark_group("comparison");
-    let _benchmark = group.bench_function("relaxed_load", |b| {
+    let mut group = criterion.benchmark_group("comparison");
+    let _relaxed_load_benchmark = group.bench_function("relaxed_load", |bencher| {
         let foo = AtomicUsize::new(1);
-        b.iter(|| black_box(foo.load(Ordering::Relaxed)));
+        bencher.iter(|| black_box(foo.load(Ordering::Relaxed)));
     });
-    let _benchmark = group.bench_function("acquire_load", |b| {
+    let _acquire_load_benchmark = group.bench_function("acquire_load", |bencher| {
         let foo = AtomicUsize::new(1);
-        b.iter(|| black_box(foo.load(Ordering::Acquire)))
+        bencher.iter(|| black_box(foo.load(Ordering::Acquire)));
     });
-    let _benchmark = group.bench_function("log", |b| {
-        b.iter(|| {
+    let _log_benchmark = group.bench_function("log", |bencher| {
+        bencher.iter(|| {
             log::log!(log::Level::Info, "log");
-        })
+        });
     });
     group.finish();
 }

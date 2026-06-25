@@ -52,16 +52,16 @@
 //!     // ...
 //! }
 //!
-//! # use tracing_core::{span::{Id, Attributes, Record}, Metadata, Event};
+//! # use tracing_core::{span::{Id, Attributes, Record}, subscriber::SubscriberResult, Metadata, Event};
 //! impl Subscriber for MySubscriber {
 //!     // ...
-//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(1) }
-//! #   fn record(&self, _: &Id, _: &Record) {}
-//! #   fn event(&self, _: &Event) {}
-//! #   fn record_follows_from(&self, _: &Id, _: &Id) {}
-//! #   fn enabled(&self, _: &Metadata) -> bool { false }
-//! #   fn enter(&self, _: &Id) {}
-//! #   fn exit(&self, _: &Id) {}
+//! #   fn new_span(&self, _: &Attributes) -> SubscriberResult<Id> { Ok(Id::from_non_zero_u64(core::num::NonZeroU64::MIN)) }
+//! #   fn record(&self, _: Id, _: &Record) -> SubscriberResult { Ok(()) }
+//! #   fn event(&self, _: &Event) -> SubscriberResult { Ok(()) }
+//! #   fn record_follows_from(&self, _: Id, _: Id) -> SubscriberResult { Ok(()) }
+//! #   fn enabled(&self, _: &Metadata) -> SubscriberResult<bool> { Ok(false) }
+//! #   fn enter(&self, _: Id) -> SubscriberResult { Ok(()) }
+//! #   fn exit(&self, _: Id) -> SubscriberResult { Ok(()) }
 //! }
 //! # impl MyLayer {
 //! # fn new() -> Self { Self {} }
@@ -98,15 +98,15 @@
 //! # pub struct MyLayer {}
 //! # impl<S: Subscriber> Layer<S> for MyLayer {}
 //! # pub struct MySubscriber { }
-//! # use tracing_core::{span::{Id, Attributes, Record}, Metadata, Event};
+//! # use tracing_core::{span::{Id, Attributes, Record}, subscriber::SubscriberResult, Metadata, Event};
 //! # impl Subscriber for MySubscriber {
-//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(1) }
-//! #   fn record(&self, _: &Id, _: &Record) {}
-//! #   fn event(&self, _: &Event) {}
-//! #   fn record_follows_from(&self, _: &Id, _: &Id) {}
-//! #   fn enabled(&self, _: &Metadata) -> bool { false }
-//! #   fn enter(&self, _: &Id) {}
-//! #   fn exit(&self, _: &Id) {}
+//! #   fn new_span(&self, _: &Attributes) -> SubscriberResult<Id> { Ok(Id::from_non_zero_u64(core::num::NonZeroU64::MIN)) }
+//! #   fn record(&self, _: Id, _: &Record) -> SubscriberResult { Ok(()) }
+//! #   fn event(&self, _: &Event) -> SubscriberResult { Ok(()) }
+//! #   fn record_follows_from(&self, _: Id, _: Id) -> SubscriberResult { Ok(()) }
+//! #   fn enabled(&self, _: &Metadata) -> SubscriberResult<bool> { Ok(false) }
+//! #   fn enter(&self, _: Id) -> SubscriberResult { Ok(()) }
+//! #   fn exit(&self, _: Id) -> SubscriberResult { Ok(()) }
 //! # }
 //! # impl MyLayer {
 //! # fn new() -> Self { Self {} }
@@ -170,8 +170,7 @@
 //!     layer
 //! };
 //!
-//! tracing::subscriber::set_global_default(subscriber)
-//!     .expect("Unable to set global subscriber");
+//! tracing::subscriber::set_global_default(subscriber)?;
 //! # Ok(()) }
 //! ```
 //!
@@ -209,8 +208,7 @@
 //! // regardless of whether the `Option`'s value is `None` or `Some`.
 //! let subscriber = subscriber.with(json_log);
 //!
-//! tracing::subscriber::set_global_default(subscriber)
-//!    .expect("Unable to set global subscriber");
+//! tracing::subscriber::set_global_default(subscriber)?;
 //! # Ok(()) }
 //! ```
 //!
@@ -236,7 +234,7 @@
 //! }
 //!
 //! impl LogConfig {
-//!     pub fn layer<S>(self) -> Box<dyn Layer<S> + Send + Sync + 'static>
+//!     pub fn layer<S>(self) -> io::Result<Box<dyn Layer<S> + Send + Sync + 'static>>
 //!     where
 //!         S: tracing_core::Subscriber,
 //!         for<'a> S: LookupSpan<'a>,
@@ -247,21 +245,23 @@
 //!             .with_thread_names(true);
 //!
 //!         // Configure the writer based on the desired log target:
-//!         match self {
+//!         Ok(match self {
 //!             LogConfig::File(path) => {
-//!                 let file = File::create(path).expect("failed to create log file");
+//!                 let file = File::create(path)?;
 //!                 Box::new(fmt.with_writer(file))
 //!             },
 //!             LogConfig::Stdout => Box::new(fmt.with_writer(io::stdout)),
 //!             LogConfig::Stderr => Box::new(fmt.with_writer(io::stderr)),
-//!         }
+//!         })
 //!     }
 //! }
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 //! let config = LogConfig::Stdout;
 //! tracing_subscriber::registry()
-//!     .with(config.layer())
-//!     .init();
+//!     .with(config.layer()?)
+//!     .try_init()?;
+//! # Ok(()) }
 //! ```
 //!
 //! The [`Layer::boxed`] method is provided to make boxing a `Layer`
@@ -289,6 +289,7 @@
 //! }
 //!
 //! // Create a variable-length `Vec` of layers
+//! # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 //! let mut layers = Vec::new();
 //! for _ in 0..how_many_layers() {
 //!     layers.push(MyLayer::new());
@@ -296,7 +297,8 @@
 //!
 //! tracing_subscriber::registry()
 //!     .with(layers)
-//!     .init();
+//!     .try_init()?;
+//! # Ok(()) }
 //! ```
 //!
 //! If a variable number of `Layer` is needed and those `Layer`s have
@@ -360,7 +362,7 @@
 //!
 //! tracing_subscriber::registry()
 //!     .with(layers)
-//!     .init();
+//!     .try_init()?;
 //!# Ok(()) }
 //! ```
 //!
@@ -501,9 +503,9 @@
 //! ```
 //! use tracing_subscriber::{filter, prelude::*};
 //!
+//! # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 //! // Generates an HTTP access log.
-//! let access_log = // ...
-//!     # filter::LevelFilter::INFO;
+//! let access_log = tracing_subscriber::fmt::layer();
 //!
 //! // Add a filter to the access log layer so that it only observes
 //! // spans and events with the `http_access` target.
@@ -521,7 +523,8 @@
 //! tracing_subscriber::registry()
 //!     .with(fmt_layer)
 //!     .with(access_log)
-//!     .init();
+//!     .try_init()?;
+//! # Ok(()) }
 //! ```
 //!
 //! Multiple layers can have their own, separate per-layer filters. A span or
@@ -532,8 +535,8 @@
 //! ```
 //! use tracing_subscriber::{filter::{filter_fn, LevelFilter}, prelude::*};
 //!
-//! let access_log = // ...
-//!     # LevelFilter::INFO;
+//! # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+//! let access_log = tracing_subscriber::fmt::layer();
 //! let fmt_layer = tracing_subscriber::fmt::layer();
 //!
 //! tracing_subscriber::registry()
@@ -545,7 +548,7 @@
 //!     // Add a filter for spans and events with the INFO level
 //!     // and below to the logging layer.
 //!     .with(fmt_layer.with_filter(LevelFilter::INFO))
-//!     .init();
+//!     .try_init()?;
 //!
 //! // Neither layer will observe this event
 //! tracing::debug!(does_anyone_care = false, "a tree fell in the forest");
@@ -559,6 +562,7 @@
 //!
 //! // Both layers will observe this event.
 //! tracing::error!(target: "http_access", "HTTP request failed with a very bad error!");
+//! # Ok(()) }
 //! ```
 //!
 //! A per-layer filter can be applied to multiple [`Layer`]s at a time, by
@@ -576,12 +580,10 @@
 //! ```
 //! use tracing_subscriber::{filter::LevelFilter, prelude::*};
 //!
-//! let layer_a = // ...
-//! # LevelFilter::INFO;
-//! let layer_b =  // ...
-//! # LevelFilter::INFO;
-//! let layer_c =  // ...
-//! # LevelFilter::INFO;
+//! # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+//! let layer_a = tracing_subscriber::fmt::layer();
+//! let layer_b = tracing_subscriber::fmt::layer();
+//! let layer_c = tracing_subscriber::fmt::layer();
 //!
 //! let info_layers = layer_a
 //!     // Combine `layer_a` and `layer_b` into a `Layered` layer:
@@ -593,7 +595,8 @@
 //!     // Add `layer_c` with a `DEBUG` filter.
 //!     .with(layer_c.with_filter(LevelFilter::DEBUG))
 //!     .with(info_layers)
-//!     .init();
+//!     .try_init()?;
+//! # Ok(()) }
 //!```
 //!
 //! If a [`Filtered`] [`Layer`] is combined with another [`Layer`]
@@ -656,7 +659,7 @@
 //!             metadata.target().starts_with("metrics")
 //!         }))
 //!     )
-//!     .init();
+//!     .try_init()?;
 //!
 //! // This event will *only* be recorded by the metrics layer.
 //! tracing::info!(target: "metrics::cool_stuff_count", value = 42);
@@ -691,24 +694,29 @@
 //! [target]: tracing_core::Metadata::target
 //! [`LevelFilter`]: crate::filter::LevelFilter
 //! [feat]: crate#feature-flags
-use crate::filter;
+use crate::{filter, sealed};
 
 use tracing_core::{
     Dispatch, Event, LevelFilter,
     metadata::Metadata,
     span,
-    subscriber::{Interest, Subscriber},
+    subscriber::{Interest, Subscriber, SubscriberResult},
 };
 
-use core::any::{Any, TypeId};
+use core::{
+    any::{Any, TypeId},
+    cmp,
+};
 
 feature! {
     #![feature = "alloc"]
     use alloc::boxed::Box;
-    use core::ops::{Deref, DerefMut};
+    use core::ops::{Deref as _, DerefMut as _};
 }
 
+/// Context passed from subscribers to layers.
 mod context;
+/// Layer composition implementations.
 mod layered;
 pub use self::{context::*, layered::*};
 
@@ -751,8 +759,13 @@ where
     /// [`WeakDispatch`]: tracing_core::dispatcher::WeakDispatch
     /// [upgraded]: tracing_core::dispatcher::WeakDispatch::upgrade
     /// [`Subscriber`]: tracing_core::Subscriber
-    fn on_register_dispatch(&self, subscriber: &Dispatch) {
-        let _ = subscriber;
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the layer cannot record that it has been attached to
+    /// a dispatch.
+    fn on_register_dispatch(&self, _subscriber: &Dispatch) -> SubscriberResult<()> {
+        Ok(())
     }
 
     /// Performs late initialization when attaching a `Layer` to a
@@ -782,9 +795,7 @@ where
     /// [`register_filter`]: crate::registry::LookupSpan::register_filter
     /// [per-layer filtering]: #per-layer-filtering
     /// [`FilterId`]: crate::filter::FilterId
-    fn on_layer(&mut self, subscriber: &mut S) {
-        let _ = subscriber;
-    }
+    fn on_layer(&mut self, _subscriber: &mut S) {}
 
     /// Registers a new callsite with this layer, returning whether or not
     /// the layer is interested in being notified about the callsite, similarly
@@ -826,12 +837,20 @@ where
     /// [`on_enter`]: Layer::on_enter()
     /// [`on_exit`]: Layer::on_exit()
     /// [the trait-level documentation]: #filtering-with-layers
-    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
-        if self.enabled(metadata, Context::none()) {
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the layer cannot evaluate or record its interest in
+    /// the callsite.
+    fn register_callsite(
+        &self,
+        metadata: &'static Metadata<'static>,
+    ) -> SubscriberResult<Interest> {
+        Ok(if self.enabled(metadata, Context::none())? {
             Interest::always()
         } else {
             Interest::never()
-        }
+        })
     }
 
     /// Returns `true` if this layer is interested in a span or event with the
@@ -866,40 +885,84 @@ where
     /// [`on_enter`]: Layer::on_enter()
     /// [`on_exit`]: Layer::on_exit()
     /// [the trait-level documentation]: #filtering-with-layers
-    fn enabled(&self, metadata: &Metadata<'_>, ctx: Context<'_, S>) -> bool {
-        let _ = (metadata, ctx);
-        true
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the layer cannot evaluate whether the metadata should
+    /// be enabled in the provided context.
+    fn enabled(&self, _metadata: &Metadata<'_>, _ctx: Context<'_, S>) -> SubscriberResult<bool> {
+        Ok(true)
     }
 
     /// Notifies this layer that a new span was constructed with the given
     /// `Attributes` and `Id`.
-    fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
-        let _ = (attrs, id, ctx);
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the layer cannot process the new-span notification.
+    fn on_new_span(
+        &self,
+        _attrs: &span::Attributes<'_>,
+        _id: span::Id,
+        _ctx: Context<'_, S>,
+    ) -> SubscriberResult<()> {
+        Ok(())
     }
 
     // TODO(eliza): do we want this to be a public API? If we end up moving
     // filtering layers to a separate trait, we may no longer want `Layer`s to
     // be able to participate in max level hinting...
     #[doc(hidden)]
-    fn max_level_hint(&self) -> Option<LevelFilter> {
-        None
+    #[allow(
+        clippy::single_call_fn,
+        reason = "hidden Layer callback remains part of the layer composition contract"
+    )]
+    /// # Errors
+    ///
+    /// Returns an error if the layer cannot query its maximum enabled level.
+    fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
+        Ok(None)
     }
 
     /// Notifies this layer that a span with the given `Id` recorded the given
     /// `values`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the layer cannot process the span-record
+    /// notification.
     // Note: it's unclear to me why we'd need the current span in `record` (the
     // only thing the `Context` type currently provides), but passing it in anyway
     // seems like a good future-proofing measure as it may grow other methods later...
-    fn on_record(&self, _span: &span::Id, _values: &span::Record<'_>, _ctx: Context<'_, S>) {}
+    fn on_record(
+        &self,
+        _span: span::Id,
+        _values: &span::Record<'_>,
+        _ctx: Context<'_, S>,
+    ) -> SubscriberResult<()> {
+        Ok(())
+    }
 
     /// Notifies this layer that a span with the ID `span` recorded that it
     /// follows from the span with the ID `follows`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the layer cannot process the follows-from
+    /// notification.
     // Note: it's unclear to me why we'd need the current span in `record` (the
     // only thing the `Context` type currently provides), but passing it in anyway
     // seems like a good future-proofing measure as it may grow other methods later...
-    fn on_follows_from(&self, _span: &span::Id, _follows: &span::Id, _ctx: Context<'_, S>) {}
+    fn on_follows_from(
+        &self,
+        _span: span::Id,
+        _follows: span::Id,
+        _ctx: Context<'_, S>,
+    ) -> SubscriberResult<()> {
+        Ok(())
+    }
 
-    /// Called before [`on_event`], to determine if `on_event` should be called.
+    /// Called before [`Layer::on_event`], to determine if `on_event` should be called.
     ///
     /// <div class="example-wrap" style="display:inline-block">
     /// <pre class="ignore" style="white-space:normal;font:inherit;">
@@ -909,7 +972,7 @@ where
     /// event. This is intended to be used by `Layer`s that implement
     /// filtering for the entire stack. `Layer`s which do not wish to be
     /// notified about certain events but do not wish to globally disable them
-    /// should ignore those events in their [on_event][Self::on_event].
+    /// should ignore those events in their [`on_event`][Self::on_event].
     ///
     /// </pre></div>
     ///
@@ -919,26 +982,68 @@ where
     /// [`on_event`]: Self::on_event
     /// [`Interest`]: tracing_core::Interest
     /// [the trait-level documentation]: #filtering-with-layers
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the layer cannot evaluate whether the event should be
+    /// processed.
     #[inline] // collapse this to a constant please mrs optimizer
-    fn event_enabled(&self, _event: &Event<'_>, _ctx: Context<'_, S>) -> bool {
-        true
+    fn event_enabled(&self, _event: &Event<'_>, _ctx: Context<'_, S>) -> SubscriberResult<bool> {
+        Ok(true)
     }
 
     /// Notifies this layer that an event has occurred.
-    fn on_event(&self, _event: &Event<'_>, _ctx: Context<'_, S>) {}
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the layer cannot process the event notification.
+    fn on_event(&self, _event: &Event<'_>, _ctx: Context<'_, S>) -> SubscriberResult<()> {
+        Ok(())
+    }
 
     /// Notifies this layer that a span with the given ID was entered.
-    fn on_enter(&self, _id: &span::Id, _ctx: Context<'_, S>) {}
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the layer cannot process the span-enter
+    /// notification.
+    fn on_enter(&self, _id: span::Id, _ctx: Context<'_, S>) -> SubscriberResult<()> {
+        Ok(())
+    }
 
     /// Notifies this layer that the span with the given ID was exited.
-    fn on_exit(&self, _id: &span::Id, _ctx: Context<'_, S>) {}
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the layer cannot process the span-exit notification.
+    fn on_exit(&self, _id: span::Id, _ctx: Context<'_, S>) -> SubscriberResult<()> {
+        Ok(())
+    }
 
     /// Notifies this layer that the span with the given ID has been closed.
-    fn on_close(&self, _id: span::Id, _ctx: Context<'_, S>) {}
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the layer cannot process the span-close notification.
+    fn on_close(&self, _id: span::Id, _ctx: Context<'_, S>) -> SubscriberResult<()> {
+        Ok(())
+    }
 
     /// Notifies this layer that a span ID has been cloned, and that the
     /// subscriber returned a different ID.
-    fn on_id_change(&self, _old: &span::Id, _new: &span::Id, _ctx: Context<'_, S>) {}
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the layer cannot process the span-ID change
+    /// notification.
+    fn on_id_change(
+        &self,
+        _old: span::Id,
+        _new: span::Id,
+        _ctx: Context<'_, S>,
+    ) -> SubscriberResult<()> {
+        Ok(())
+    }
 
     /// Composes this layer around the given `Layer`, returning a `Layered`
     /// struct implementing `Layer`.
@@ -979,15 +1084,15 @@ where
     /// # impl MySubscriber {
     /// # fn new() -> Self { Self { }}
     /// # }
-    /// # use tracing_core::{span::{Id, Attributes, Record}, Metadata, Event};
+    /// # use tracing_core::{span::{Id, Attributes, Record}, subscriber::SubscriberResult, Metadata, Event};
     /// # impl tracing_core::Subscriber for MySubscriber {
-    /// #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(1) }
-    /// #   fn record(&self, _: &Id, _: &Record) {}
-    /// #   fn event(&self, _: &Event) {}
-    /// #   fn record_follows_from(&self, _: &Id, _: &Id) {}
-    /// #   fn enabled(&self, _: &Metadata) -> bool { false }
-    /// #   fn enter(&self, _: &Id) {}
-    /// #   fn exit(&self, _: &Id) {}
+    /// #   fn new_span(&self, _: &Attributes) -> SubscriberResult<Id> { Ok(Id::from_non_zero_u64(core::num::NonZeroU64::MIN)) }
+    /// #   fn record(&self, _: Id, _: &Record) -> SubscriberResult { Ok(()) }
+    /// #   fn event(&self, _: &Event) -> SubscriberResult { Ok(()) }
+    /// #   fn record_follows_from(&self, _: Id, _: Id) -> SubscriberResult { Ok(()) }
+    /// #   fn enabled(&self, _: &Metadata) -> SubscriberResult<bool> { Ok(false) }
+    /// #   fn enter(&self, _: Id) -> SubscriberResult { Ok(()) }
+    /// #   fn exit(&self, _: Id) -> SubscriberResult { Ok(()) }
     /// # }
     /// let subscriber = FooLayer::new()
     ///     .and_then(BarLayer::new())
@@ -1013,15 +1118,15 @@ where
     /// # impl MySubscriber {
     /// # fn new() -> Self { Self { }}
     /// # }
-    /// # use tracing_core::{span::{Id, Attributes, Record}, Metadata, Event};
+    /// # use tracing_core::{span::{Id, Attributes, Record}, subscriber::SubscriberResult, Metadata, Event};
     /// # impl tracing_core::Subscriber for MySubscriber {
-    /// #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(1) }
-    /// #   fn record(&self, _: &Id, _: &Record) {}
-    /// #   fn event(&self, _: &Event) {}
-    /// #   fn record_follows_from(&self, _: &Id, _: &Id) {}
-    /// #   fn enabled(&self, _: &Metadata) -> bool { false }
-    /// #   fn enter(&self, _: &Id) {}
-    /// #   fn exit(&self, _: &Id) {}
+    /// #   fn new_span(&self, _: &Attributes) -> SubscriberResult<Id> { Ok(Id::from_non_zero_u64(core::num::NonZeroU64::MIN)) }
+    /// #   fn record(&self, _: Id, _: &Record) -> SubscriberResult { Ok(()) }
+    /// #   fn event(&self, _: &Event) -> SubscriberResult { Ok(()) }
+    /// #   fn record_follows_from(&self, _: Id, _: Id) -> SubscriberResult { Ok(()) }
+    /// #   fn enabled(&self, _: &Metadata) -> SubscriberResult<bool> { Ok(false) }
+    /// #   fn enter(&self, _: Id) -> SubscriberResult { Ok(()) }
+    /// #   fn exit(&self, _: Id) -> SubscriberResult { Ok(()) }
     /// # }
     /// pub struct BazLayer {
     ///     // ...
@@ -1074,15 +1179,15 @@ where
     /// # impl MySubscriber {
     /// # fn new() -> Self { Self { }}
     /// # }
-    /// # use tracing_core::{span::{Id, Attributes, Record}, Metadata};
+    /// # use tracing_core::{span::{Id, Attributes, Record}, subscriber::SubscriberResult, Metadata};
     /// # impl tracing_core::Subscriber for MySubscriber {
-    /// #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(0) }
-    /// #   fn record(&self, _: &Id, _: &Record) {}
-    /// #   fn event(&self, _: &tracing_core::Event) {}
-    /// #   fn record_follows_from(&self, _: &Id, _: &Id) {}
-    /// #   fn enabled(&self, _: &Metadata) -> bool { false }
-    /// #   fn enter(&self, _: &Id) {}
-    /// #   fn exit(&self, _: &Id) {}
+    /// #   fn new_span(&self, _: &Attributes) -> SubscriberResult<Id> { Ok(Id::from_non_zero_u64(core::num::NonZeroU64::MIN)) }
+    /// #   fn record(&self, _: Id, _: &Record) -> SubscriberResult { Ok(()) }
+    /// #   fn event(&self, _: &tracing_core::Event) -> SubscriberResult { Ok(()) }
+    /// #   fn record_follows_from(&self, _: Id, _: Id) -> SubscriberResult { Ok(()) }
+    /// #   fn enabled(&self, _: &Metadata) -> SubscriberResult<bool> { Ok(false) }
+    /// #   fn enter(&self, _: Id) -> SubscriberResult { Ok(()) }
+    /// #   fn exit(&self, _: Id) -> SubscriberResult { Ok(()) }
     /// # }
     /// let subscriber = FooLayer::new()
     ///     .with_subscriber(MySubscriber::new());
@@ -1181,7 +1286,7 @@ where
     ///
     /// tracing_subscriber::registry()
     ///     .with(log_layer)
-    ///     .init();
+    ///     .try_init()?;
     /// # Ok(()) }
     /// ```
     ///
@@ -1227,7 +1332,7 @@ where
     ///
     /// tracing_subscriber::registry()
     ///     .with(log_layer)
-    ///     .init();
+    ///     .try_init()?;
     /// # Ok(()) }
     /// ```
     #[cfg(any(feature = "alloc", feature = "std"))]
@@ -1244,18 +1349,14 @@ where
     #[doc(hidden)]
     fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
         let this = self.as_any();
-        if this.type_id() == id {
-            Some(this)
-        } else {
-            None
-        }
+        (this.type_id() == id).then_some(this)
     }
 }
 
-/// Provides `Any` access for type-erased [`Layer`] downcasting.
+/// Provides [`Any`] access for type-erased [`Layer`] downcasting.
 #[doc(hidden)]
 pub trait AsAny: Any {
-    /// Returns this value as `dyn Any`.
+    /// Returns this value as [`dyn Any`].
     fn as_any(&self) -> &dyn Any;
 }
 
@@ -1292,7 +1393,12 @@ feature! {
         /// [`metadata`]: tracing_core::Metadata
         /// [`Subscriber::enabled`]: tracing_core::Subscriber::enabled
         /// [filtered]: crate::filter::Filtered
-        fn enabled(&self, meta: &Metadata<'_>, cx: &Context<'_, S>) -> bool;
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the filter cannot determine whether the span or
+        /// event metadata is enabled for the filtered layer.
+        fn enabled(&self, meta: &Metadata<'_>, cx: &Context<'_, S>) -> SubscriberResult<bool>;
 
         /// Returns an [`Interest`] indicating whether this layer will [always],
         /// [sometimes], or [never] be interested in the given [`Metadata`].
@@ -1356,7 +1462,7 @@ feature! {
         ///
         /// ```
         /// use tracing_subscriber::layer;
-        /// use tracing_core::{Metadata, subscriber::Interest};
+        /// use tracing_core::{Metadata, subscriber::{Interest, SubscriberResult}};
         ///
         /// struct MyFilter {
         ///     // ...
@@ -1374,23 +1480,23 @@ feature! {
         /// }
         ///
         /// impl<S> layer::Filter<S> for MyFilter {
-        ///     fn enabled(&self, metadata: &Metadata<'_>, _: &layer::Context<'_, S>) -> bool {
+        ///     fn enabled(&self, metadata: &Metadata<'_>, _: &layer::Context<'_, S>) -> SubscriberResult<bool> {
         ///         // Even though we are implementing `callsite_enabled`, we must still provide a
         ///         // working implementation of `enabled`, as returning `Interest::always()` or
         ///         // `Interest::never()` will *allow* caching, but will not *guarantee* it.
         ///         // Other filters may still return `Interest::sometimes()`, so we may be
         ///         // asked again in `enabled`.
-        ///         self.is_enabled(metadata)
+        ///         Ok(self.is_enabled(metadata))
         ///     }
         ///
-        ///     fn callsite_enabled(&self, metadata: &'static Metadata<'static>) -> Interest {
+        ///     fn callsite_enabled(&self, metadata: &'static Metadata<'static>) -> SubscriberResult<Interest> {
         ///         // The result of `self.enabled(metadata, ...)` will always be
         ///         // the same for any given `Metadata`, so we can convert it into
         ///         // an `Interest`:
         ///         if self.is_enabled(metadata) {
-        ///             Interest::always()
+        ///             Ok(Interest::always())
         ///         } else {
-        ///             Interest::never()
+        ///             Ok(Interest::never())
         ///         }
         ///     }
         /// }
@@ -1405,12 +1511,19 @@ feature! {
         /// [`Subscriber`]: tracing_core::Subscriber
         /// [`enabled`]: Filter::enabled
         /// [`Filtered`]: crate::filter::Filtered
-        fn callsite_enabled(&self, meta: &'static Metadata<'static>) -> Interest {
-            let _ = meta;
-            Interest::sometimes()
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the filter cannot determine its cached interest
+        /// in the callsite.
+        fn callsite_enabled(
+            &self,
+            _meta: &'static Metadata<'static>,
+        ) -> SubscriberResult<Interest> {
+            Ok(Interest::sometimes())
         }
 
-        /// Called before the filtered [`Layer]'s [`on_event`], to determine if
+        /// Called before the filtered [`Layer`]'s [`on_event`], to determine if
         /// `on_event` should be called.
         ///
         /// This gives a chance to filter events based on their fields. Note,
@@ -1424,10 +1537,18 @@ feature! {
         ///
         /// [`enabled`]: crate::layer::Filter::enabled
         /// [`on_event`]: crate::layer::Layer::on_event
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the filter cannot determine whether the event is
+        /// enabled for the filtered layer.
         #[inline] // collapse this to a constant please mrs optimizer
-        fn event_enabled(&self, event: &Event<'_>, cx: &Context<'_, S>) -> bool {
-            let _ = (event, cx);
-            true
+        fn event_enabled(
+            &self,
+            _event: &Event<'_>,
+            _cx: &Context<'_, S>,
+        ) -> SubscriberResult<bool> {
+            Ok(true)
         }
 
         /// Returns an optional hint of the highest [verbosity level][level] that
@@ -1459,8 +1580,17 @@ feature! {
         /// [`LevelFilter`]: crate::filter::LevelFilter
         /// [`Interest`]: tracing_core::subscriber::Interest
         /// [rebuild]: tracing_core::callsite::rebuild_interest_cache
-        fn max_level_hint(&self) -> Option<LevelFilter> {
-            None
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the filter cannot determine its maximum enabled
+        /// level hint.
+        #[allow(
+            clippy::single_call_fn,
+            reason = "Filter max-level callback is an extension point for filter implementations"
+        )]
+        fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
+            Ok(None)
         }
 
         /// Notifies this filter that a new span was constructed with the given
@@ -1469,49 +1599,83 @@ feature! {
         /// By default, this method does nothing. `Filter` implementations that
         /// need to be notified when new spans are created can override this
         /// method.
-        fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
-            let _ = (attrs, id, ctx);
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the filter cannot record or initialize state for
+        /// the new span.
+        fn on_new_span(
+            &self,
+            _attrs: &span::Attributes<'_>,
+            _id: span::Id,
+            _ctx: Context<'_, S>,
+        ) -> SubscriberResult<()> {
+            Ok(())
         }
-
 
         /// Notifies this filter that a span with the given `Id` recorded the given
         /// `values`.
         ///
         /// By default, this method does nothing. `Filter` implementations that
-        /// need to be notified when new spans are created can override this
+        /// need to be notified when span fields are recorded can override this
         /// method.
-        fn on_record(&self, id: &span::Id, values: &span::Record<'_>, ctx: Context<'_, S>) {
-            let _ = (id, values, ctx);
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the filter cannot record the field values for the
+        /// span.
+        fn on_record(
+            &self,
+            _id: span::Id,
+            _values: &span::Record<'_>,
+            _ctx: Context<'_, S>,
+        ) -> SubscriberResult<()> {
+            Ok(())
         }
 
         /// Notifies this filter that a span with the given ID was entered.
         ///
         /// By default, this method does nothing. `Filter` implementations that
         /// need to be notified when a span is entered can override this method.
-        fn on_enter(&self, id: &span::Id, ctx: Context<'_, S>) {
-            let _ = (id, ctx);
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the filter cannot update its state for the
+        /// entered span.
+        fn on_enter(&self, _id: span::Id, _ctx: Context<'_, S>) -> SubscriberResult<()> {
+            Ok(())
         }
 
         /// Notifies this filter that a span with the given ID was exited.
         ///
         /// By default, this method does nothing. `Filter` implementations that
         /// need to be notified when a span is exited can override this method.
-        fn on_exit(&self, id: &span::Id, ctx: Context<'_, S>) {
-            let _ = (id, ctx);
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the filter cannot update its state for the exited
+        /// span.
+        fn on_exit(&self, _id: span::Id, _ctx: Context<'_, S>) -> SubscriberResult<()> {
+            Ok(())
         }
 
         /// Notifies this filter that a span with the given ID has been closed.
         ///
         /// By default, this method does nothing. `Filter` implementations that
         /// need to be notified when a span is closed can override this method.
-        fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
-            let _ = (id, ctx);
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the filter cannot update or finalize its state
+        /// for the closed span.
+        fn on_close(&self, _id: span::Id, _ctx: Context<'_, S>) -> SubscriberResult<()> {
+            Ok(())
         }
     }
 }
 
 /// Extension trait adding a `with(Layer)` combinator to `Subscriber`s.
-pub trait SubscriberExt: Subscriber + crate::sealed::Sealed {
+pub trait SubscriberExt: Subscriber + sealed::Sealed {
     /// Wraps `self` with the provided `layer`.
     fn with<L>(self, layer: L) -> Layered<L, Self>
     where
@@ -1525,13 +1689,17 @@ pub trait SubscriberExt: Subscriber + crate::sealed::Sealed {
 /// A layer that does nothing.
 #[derive(Copy, Clone, Debug, Default)]
 pub struct Identity {
+    /// Private field preserving constructor control.
     _p: (),
 }
 
 // === impl Layer ===
 
+/// Marker returned by disabled optional layers during downcasting.
 #[derive(Clone, Copy)]
 pub(crate) struct NoneLayerMarker(());
+
+/// Shared marker value for disabled optional layers.
 pub(crate) static NONE_LAYER_MARKER: NoneLayerMarker = NoneLayerMarker(());
 
 /// Is a type implementing `Layer` `Option::<_>::None`?
@@ -1545,124 +1713,141 @@ where
         .is_some()
 }
 
-/// Is a type implementing `Subscriber` `Option::<_>::None`?
-pub(crate) fn subscriber_is_none<S>(subscriber: &S) -> bool
-where
-    S: Subscriber,
-{
-    subscriber
-        .downcast_ref_by_id(TypeId::of::<NoneLayerMarker>())
-        .is_some()
-}
-
 impl<L, S> Layer<S> for Option<L>
 where
     L: Layer<S>,
     S: Subscriber,
 {
     fn on_layer(&mut self, subscriber: &mut S) {
-        if let Some(layer) = self {
-            layer.on_layer(subscriber)
+        if let Some(layer) = self.as_mut() {
+            layer.on_layer(subscriber);
         }
     }
 
     #[inline]
-    fn on_register_dispatch(&self, subscriber: &Dispatch) {
-        if let Some(layer) = self {
-            layer.on_register_dispatch(subscriber);
+    fn on_register_dispatch(&self, subscriber: &Dispatch) -> SubscriberResult<()> {
+        if let Some(layer) = self.as_ref() {
+            layer.on_register_dispatch(subscriber)?;
         }
+        Ok(())
     }
 
     #[inline]
-    fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
-        if let Some(inner) = self {
-            inner.on_new_span(attrs, id, ctx)
+    fn on_new_span(
+        &self,
+        attrs: &span::Attributes<'_>,
+        id: span::Id,
+        ctx: Context<'_, S>,
+    ) -> SubscriberResult<()> {
+        if let Some(inner) = self.as_ref() {
+            inner.on_new_span(attrs, id, ctx)?;
         }
+        Ok(())
     }
 
     #[inline]
-    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
-        match self {
-            Some(inner) => inner.register_callsite(metadata),
-            None => Interest::always(),
-        }
+    fn register_callsite(
+        &self,
+        metadata: &'static Metadata<'static>,
+    ) -> SubscriberResult<Interest> {
+        self.as_ref().map_or(Ok(Interest::always()), |inner| {
+            inner.register_callsite(metadata)
+        })
     }
 
     #[inline]
-    fn enabled(&self, metadata: &Metadata<'_>, ctx: Context<'_, S>) -> bool {
-        match self {
-            Some(inner) => inner.enabled(metadata, ctx),
-            None => true,
-        }
+    fn enabled(&self, metadata: &Metadata<'_>, ctx: Context<'_, S>) -> SubscriberResult<bool> {
+        self.as_ref()
+            .map_or(Ok(true), |inner| inner.enabled(metadata, ctx))
     }
 
     #[inline]
-    fn max_level_hint(&self) -> Option<LevelFilter> {
-        match self {
-            Some(inner) => inner.max_level_hint(),
-            None => {
+    fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
+        self.as_ref().map_or_else(
+            || {
                 // There is no inner layer, so this layer will
                 // never enable anything.
-                Some(LevelFilter::OFF)
-            }
-        }
+                Ok(Some(LevelFilter::OFF))
+            },
+            Layer::max_level_hint,
+        )
     }
 
     #[inline]
-    fn on_record(&self, span: &span::Id, values: &span::Record<'_>, ctx: Context<'_, S>) {
-        if let Some(inner) = self {
-            inner.on_record(span, values, ctx);
+    fn on_record(
+        &self,
+        span: span::Id,
+        values: &span::Record<'_>,
+        ctx: Context<'_, S>,
+    ) -> SubscriberResult<()> {
+        if let Some(inner) = self.as_ref() {
+            inner.on_record(span, values, ctx)?;
         }
+        Ok(())
     }
 
     #[inline]
-    fn on_follows_from(&self, span: &span::Id, follows: &span::Id, ctx: Context<'_, S>) {
-        if let Some(inner) = self {
-            inner.on_follows_from(span, follows, ctx);
+    fn on_follows_from(
+        &self,
+        span: span::Id,
+        follows: span::Id,
+        ctx: Context<'_, S>,
+    ) -> SubscriberResult<()> {
+        if let Some(inner) = self.as_ref() {
+            inner.on_follows_from(span, follows, ctx)?;
         }
+        Ok(())
     }
 
     #[inline]
-    fn event_enabled(&self, event: &Event<'_>, ctx: Context<'_, S>) -> bool {
-        match self {
-            Some(inner) => inner.event_enabled(event, ctx),
-            None => true,
-        }
+    fn event_enabled(&self, event: &Event<'_>, ctx: Context<'_, S>) -> SubscriberResult<bool> {
+        self.as_ref()
+            .map_or(Ok(true), |inner| inner.event_enabled(event, ctx))
     }
 
     #[inline]
-    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-        if let Some(inner) = self {
-            inner.on_event(event, ctx);
+    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) -> SubscriberResult<()> {
+        if let Some(inner) = self.as_ref() {
+            inner.on_event(event, ctx)?;
         }
+        Ok(())
     }
 
     #[inline]
-    fn on_enter(&self, id: &span::Id, ctx: Context<'_, S>) {
-        if let Some(inner) = self {
-            inner.on_enter(id, ctx);
+    fn on_enter(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
+        if let Some(inner) = self.as_ref() {
+            inner.on_enter(id, ctx)?;
         }
+        Ok(())
     }
 
     #[inline]
-    fn on_exit(&self, id: &span::Id, ctx: Context<'_, S>) {
-        if let Some(inner) = self {
-            inner.on_exit(id, ctx);
+    fn on_exit(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
+        if let Some(inner) = self.as_ref() {
+            inner.on_exit(id, ctx)?;
         }
+        Ok(())
     }
 
     #[inline]
-    fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
-        if let Some(inner) = self {
-            inner.on_close(id, ctx);
+    fn on_close(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
+        if let Some(inner) = self.as_ref() {
+            inner.on_close(id, ctx)?;
         }
+        Ok(())
     }
 
     #[inline]
-    fn on_id_change(&self, old: &span::Id, new: &span::Id, ctx: Context<'_, S>) {
-        if let Some(inner) = self {
-            inner.on_id_change(old, new, ctx)
+    fn on_id_change(
+        &self,
+        old: span::Id,
+        new: span::Id,
+        ctx: Context<'_, S>,
+    ) -> SubscriberResult<()> {
+        if let Some(inner) = self.as_ref() {
+            inner.on_id_change(old, new, ctx)?;
         }
+        Ok(())
     }
 
     #[doc(hidden)]
@@ -1671,7 +1856,8 @@ where
         if id == TypeId::of::<Self>() {
             Some(self)
         } else if id == TypeId::of::<NoneLayerMarker>() && self.is_none() {
-            Some(&NONE_LAYER_MARKER)
+            let marker: &dyn Any = &NONE_LAYER_MARKER;
+            Some(marker)
         } else {
             self.as_ref().and_then(|inner| inner.downcast_ref_by_id(id))
         }
@@ -1682,11 +1868,12 @@ feature! {
     #![any(feature = "std", feature = "alloc")]
     use alloc::vec::Vec;
 
+    /// Generates forwarding [`Layer`] implementations for pointer-like wrappers.
     macro_rules! layer_impl_body {
         () => {
             #[inline]
-            fn on_register_dispatch(&self, subscriber: &Dispatch) {
-                self.deref().on_register_dispatch(subscriber);
+            fn on_register_dispatch(&self, subscriber: &Dispatch) -> SubscriberResult<()> {
+                self.deref().on_register_dispatch(subscriber)
             }
 
             #[inline]
@@ -1695,62 +1882,85 @@ feature! {
             }
 
             #[inline]
-            fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
+            fn on_new_span(
+                &self,
+                attrs: &span::Attributes<'_>,
+                id: span::Id,
+                ctx: Context<'_, S>,
+            ) -> SubscriberResult<()> {
                 self.deref().on_new_span(attrs, id, ctx)
             }
 
             #[inline]
-            fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
+            fn register_callsite(
+                &self,
+                metadata: &'static Metadata<'static>,
+            ) -> SubscriberResult<Interest> {
                 self.deref().register_callsite(metadata)
             }
 
             #[inline]
-            fn enabled(&self, metadata: &Metadata<'_>, ctx: Context<'_, S>) -> bool {
+            fn enabled(&self, metadata: &Metadata<'_>, ctx: Context<'_, S>) -> SubscriberResult<bool> {
                 self.deref().enabled(metadata, ctx)
             }
 
             #[inline]
-            fn max_level_hint(&self) -> Option<LevelFilter> {
+            fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
                 self.deref().max_level_hint()
             }
 
             #[inline]
-            fn on_record(&self, span: &span::Id, values: &span::Record<'_>, ctx: Context<'_, S>) {
+            fn on_record(
+                &self,
+                span: span::Id,
+                values: &span::Record<'_>,
+                ctx: Context<'_, S>,
+            ) -> SubscriberResult<()> {
                 self.deref().on_record(span, values, ctx)
             }
 
             #[inline]
-            fn on_follows_from(&self, span: &span::Id, follows: &span::Id, ctx: Context<'_, S>) {
+            fn on_follows_from(
+                &self,
+                span: span::Id,
+                follows: span::Id,
+                ctx: Context<'_, S>,
+            ) -> SubscriberResult<()> {
                 self.deref().on_follows_from(span, follows, ctx)
             }
 
             #[inline]
-            fn event_enabled(&self, event: &Event<'_>, ctx: Context<'_, S>) -> bool {
+            fn event_enabled(&self, event: &Event<'_>, ctx: Context<'_, S>) -> SubscriberResult<bool> {
                 self.deref().event_enabled(event, ctx)
             }
 
             #[inline]
-            fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+            fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) -> SubscriberResult<()> {
                 self.deref().on_event(event, ctx)
             }
 
             #[inline]
-            fn on_enter(&self, id: &span::Id, ctx: Context<'_, S>) {
+            fn on_enter(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
                 self.deref().on_enter(id, ctx)
             }
 
             #[inline]
-            fn on_exit(&self, id: &span::Id, ctx: Context<'_, S>) {
+            fn on_exit(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
                 self.deref().on_exit(id, ctx)
             }
 
             #[inline]
-            fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
+            fn on_close(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
                 self.deref().on_close(id, ctx)
             }
 
             #[inline]
-            fn on_id_change(&self, old: &span::Id, new: &span::Id, ctx: Context<'_, S>) {
+            fn on_id_change(
+                &self,
+                old: span::Id,
+                new: span::Id,
+                ctx: Context<'_, S>,
+            ) -> SubscriberResult<()> {
                 self.deref().on_id_change(old, new, ctx)
             }
 
@@ -1787,24 +1997,27 @@ feature! {
         L: Layer<S>,
         S: Subscriber,
     {
-
         fn on_layer(&mut self, subscriber: &mut S) {
-            for l in self {
-                l.on_layer(subscriber);
+            for layer in self {
+                layer.on_layer(subscriber);
             }
         }
 
-        fn on_register_dispatch(&self, subscriber: &Dispatch) {
-            for l in self {
-                l.on_register_dispatch(subscriber);
+        fn on_register_dispatch(&self, subscriber: &Dispatch) -> SubscriberResult<()> {
+            for layer in self {
+                layer.on_register_dispatch(subscriber)?;
             }
+            Ok(())
         }
 
-        fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
+        fn register_callsite(
+            &self,
+            metadata: &'static Metadata<'static>,
+        ) -> SubscriberResult<Interest> {
             // Return highest level of interest.
             let mut interest = Interest::never();
-            for l in self {
-                let new_interest = l.register_callsite(metadata);
+            for layer in self {
+                let new_interest = layer.register_callsite(metadata)?;
                 let promotes_sometimes_to_always =
                     interest.is_sometimes() && new_interest.is_always();
                 let promotes_never_to_enabled = interest.is_never() && !new_interest.is_never();
@@ -1813,71 +2026,105 @@ feature! {
                 }
             }
 
-            interest
+            Ok(interest)
         }
 
-        fn enabled(&self, metadata: &Metadata<'_>, ctx: Context<'_, S>) -> bool {
-            self.iter().all(|l| l.enabled(metadata, ctx.clone()))
-        }
-
-        fn event_enabled(&self, event: &Event<'_>, ctx: Context<'_, S>) -> bool {
-            self.iter().all(|l| l.event_enabled(event, ctx.clone()))
-        }
-
-        fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
-            for l in self {
-                l.on_new_span(attrs, id, ctx.clone());
+        fn enabled(&self, metadata: &Metadata<'_>, ctx: Context<'_, S>) -> SubscriberResult<bool> {
+            for layer in self {
+                if !layer.enabled(metadata, ctx.clone())? {
+                    return Ok(false);
+                }
             }
+            Ok(true)
         }
 
-        fn max_level_hint(&self) -> Option<LevelFilter> {
+        fn event_enabled(&self, event: &Event<'_>, ctx: Context<'_, S>) -> SubscriberResult<bool> {
+            for layer in self {
+                if !layer.event_enabled(event, ctx.clone())? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
+        }
+
+        fn on_new_span(
+            &self,
+            attrs: &span::Attributes<'_>,
+            id: span::Id,
+            ctx: Context<'_, S>,
+        ) -> SubscriberResult<()> {
+            for layer in self {
+                layer.on_new_span(attrs, id, ctx.clone())?;
+            }
+            Ok(())
+        }
+
+        fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
             // Default to `OFF` if there are no inner layers.
             let mut max_level = LevelFilter::OFF;
-            for l in self {
+            for layer in self {
                 // NOTE(eliza): this is slightly subtle: if *any* layer
                 // returns `None`, we have to return `None`, assuming there is
                 // no max level hint, since that particular layer cannot
                 // provide a hint.
-                let hint = l.max_level_hint()?;
-                max_level = core::cmp::max(hint, max_level);
+                let Some(hint) = layer.max_level_hint()? else {
+                    return Ok(None);
+                };
+                max_level = cmp::max(hint, max_level);
             }
-            Some(max_level)
+            Ok(Some(max_level))
         }
 
-        fn on_record(&self, span: &span::Id, values: &span::Record<'_>, ctx: Context<'_, S>) {
-            for l in self {
-                l.on_record(span, values, ctx.clone())
+        fn on_record(
+            &self,
+            span: span::Id,
+            values: &span::Record<'_>,
+            ctx: Context<'_, S>,
+        ) -> SubscriberResult<()> {
+            for layer in self {
+                layer.on_record(span, values, ctx.clone())?;
             }
+            Ok(())
         }
 
-        fn on_follows_from(&self, span: &span::Id, follows: &span::Id, ctx: Context<'_, S>) {
-            for l in self {
-                l.on_follows_from(span, follows, ctx.clone());
+        fn on_follows_from(
+            &self,
+            span: span::Id,
+            follows: span::Id,
+            ctx: Context<'_, S>,
+        ) -> SubscriberResult<()> {
+            for layer in self {
+                layer.on_follows_from(span, follows, ctx.clone())?;
             }
+            Ok(())
         }
 
-        fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-            for l in self {
-                l.on_event(event, ctx.clone());
+        fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) -> SubscriberResult<()> {
+            for layer in self {
+                layer.on_event(event, ctx.clone())?;
             }
+            Ok(())
         }
 
-        fn on_enter(&self, id: &span::Id, ctx: Context<'_, S>) {
-            for l in self {
-                l.on_enter(id, ctx.clone());
+        fn on_enter(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
+            for layer in self {
+                layer.on_enter(id, ctx.clone())?;
             }
+            Ok(())
         }
 
-        fn on_exit(&self, id: &span::Id, ctx: Context<'_, S>) {
-            for l in self {
-                l.on_exit(id, ctx.clone());
+        fn on_exit(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
+            for layer in self {
+                layer.on_exit(id, ctx.clone())?;
             }
+            Ok(())
         }
 
-        fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
-            for l in self {
-                l.on_close(id.clone(), ctx.clone());
+        fn on_close(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult<()> {
+            for layer in self {
+                layer.on_close(id, ctx.clone())?;
             }
+            Ok(())
         }
 
         #[doc(hidden)]
@@ -1895,7 +2142,7 @@ feature! {
             // time. It would be nice if this could be cached, but that would
             // require replacing the `Vec` impl with an impl for a newtype...
             if filter::is_plf_downcast_marker(id)
-                && self.iter().any(|s| s.downcast_ref_by_id(id).is_none())
+                && self.iter().any(|layer| layer.downcast_ref_by_id(id).is_none())
             {
                 return None;
             }
@@ -1903,14 +2150,14 @@ feature! {
             // Otherwise, return the first child of `self` that downcaasts to
             // the selected type, if any.
             // XXX(eliza): hope this is reasonable lol
-            self.iter().find_map(|l| l.downcast_ref_by_id(id))
+            self.iter().find_map(|layer| layer.downcast_ref_by_id(id))
         }
     }
 }
 
 // === impl SubscriberExt ===
 
-impl<S: Subscriber> crate::sealed::Sealed for S {}
+impl<S: Subscriber> sealed::Sealed for S {}
 impl<S: Subscriber> SubscriberExt for S {}
 
 // === impl Identity ===
@@ -1919,7 +2166,8 @@ impl<S: Subscriber> Layer<S> for Identity {}
 
 impl Identity {
     /// Returns a new `Identity` layer.
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self { _p: () }
     }
 }

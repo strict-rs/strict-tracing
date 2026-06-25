@@ -1,21 +1,23 @@
 //! Example binary for tracing workspace checks.
 
 use std::{
-    io::{self},
-    sync::{Arc, Mutex},
+    io::{self, Write},
+    sync::Arc,
 };
 
-use ansi_to_tui::IntoText;
+use ansi_to_tui::IntoText as _;
 use crossterm::event;
+use parking_lot::Mutex;
 use ratatui::{
+    DefaultTerminal, Frame,
     buffer::Buffer,
     layout::{Constraint, Layout, Rect},
-    style::Stylize,
+    style::Stylize as _,
     widgets::{Block, Widget},
-    DefaultTerminal, Frame,
 };
 use ratatui_textarea::{Input, Key, TextArea};
-use tracing_subscriber::{filter::ParseError, fmt::MakeWriter, EnvFilter};
+use tracing::subscriber::with_default;
+use tracing_subscriber::{EnvFilter, filter::ParseError, fmt::MakeWriter};
 
 /// A list of preset filters to make it easier to explore the filter syntax.
 ///
@@ -47,17 +49,29 @@ fn main() -> io::Result<()> {
     result
 }
 
+/// Terminal app state for interactively evaluating `EnvFilter` strings.
 struct App {
+    /// Editable filter text area.
     filter: TextArea<'static>,
+    /// Currently selected preset index.
     preset_index: usize,
+    /// Whether the app should exit its event loop.
     exit: bool,
+    /// Last evaluated log widget or parse error.
     log_widget: Result<LogWidget, ParseError>,
 }
 
 impl App {
     /// Creates a new instance of the application, ready to run
+    #[allow(
+        clippy::single_call_fn,
+        reason = "keeps terminal state setup separate from the event loop"
+    )]
     fn new() -> Self {
-        let mut filter = TextArea::new(vec![PRESET_FILTERS[0].to_string()]);
+        let initial_filter = PRESET_FILTERS
+            .first()
+            .map_or_else(String::new, |filter| (*filter).to_owned());
+        let mut filter = TextArea::new(vec![initial_filter]);
         let title = "Env Filter Explorer. <Esc> to quit, <Up>/<Down> to select preset";
         filter.set_block(Block::bordered().title(title));
         Self {
@@ -83,7 +97,7 @@ impl App {
         let layout = Layout::vertical([Constraint::Length(3), Constraint::Fill(1)]);
         let [filter_area, main_area] = layout.areas(frame.area());
         frame.render_widget(&self.filter, filter_area);
-        match &self.log_widget {
+        match self.log_widget.as_ref() {
             Ok(log_widget) => frame.render_widget(log_widget, main_area),
             Err(error) => frame.render_widget(error.to_string().red(), main_area),
         }
@@ -93,12 +107,18 @@ impl App {
     fn handle_event(&mut self) -> io::Result<()> {
         let event = event::read()?;
         let input = Input::from(event);
-        match input.key {
-            Key::Enter => return Ok(()), // ignore new lines
-            Key::Esc => self.exit = true,
-            Key::Up => self.select_previous_preset(),
-            Key::Down => self.select_next_preset(),
-            _ => self.add_input(input),
+        let key = input.key;
+        if key == Key::Enter {
+            return Ok(());
+        }
+        if key == Key::Esc {
+            self.exit = true;
+        } else if key == Key::Up {
+            self.select_previous_preset();
+        } else if key == Key::Down {
+            self.select_next_preset();
+        } else {
+            self.add_input(input);
         }
         Ok(())
     }
@@ -110,15 +130,19 @@ impl App {
 
     /// Selects the next preset filter in the list.
     fn select_next_preset(&mut self) {
-        self.select_preset((self.preset_index + 1).min(PRESET_FILTERS.len() - 1));
+        let last_index = PRESET_FILTERS.len().saturating_sub(1);
+        let next_index = self.preset_index.saturating_add(1).min(last_index);
+        self.select_preset(next_index);
     }
 
     /// Selects a preset filter by index and updates the filter text area.
     fn select_preset(&mut self, index: usize) {
-        self.preset_index = index;
-        self.filter.select_all();
-        let _deleted = self.filter.delete_line_by_head();
-        let _inserted = self.filter.insert_str(PRESET_FILTERS[self.preset_index]);
+        if let Some(filter) = PRESET_FILTERS.get(index) {
+            self.preset_index = index;
+            self.filter.select_all();
+            let _deleted = self.filter.delete_line_by_head();
+            let _inserted = self.filter.insert_str(*filter);
+        }
     }
 
     /// Handles normal keyboard input by adding it to the filter text area.
@@ -127,15 +151,19 @@ impl App {
     }
 
     /// Evaluates the current filter and returns a log widget with the filtered logs or an error.
-    fn evaluate_filter(&mut self) -> Result<LogWidget, ParseError> {
-        let filter = self.filter.lines()[0].to_string();
+    fn evaluate_filter(&self) -> Result<LogWidget, ParseError> {
+        let filter = self
+            .filter
+            .lines()
+            .first()
+            .map_or_else(String::new, ToOwned::to_owned);
         let env_filter = EnvFilter::builder().parse(filter)?;
         let log_widget = LogWidget::default();
         let subscriber = tracing_subscriber::fmt()
             .with_env_filter(env_filter)
             .with_writer(log_widget.clone())
             .finish();
-        tracing::subscriber::with_default(subscriber, || {
+        with_default(subscriber, || {
             simulate_logging();
             other_crate_span();
         });
@@ -146,16 +174,19 @@ impl App {
 /// A writer that collects logs into a buffer and can be displayed as a widget.
 #[derive(Clone, Default, Debug)]
 struct LogWidget {
+    /// Captured formatted log output.
     buffer: Arc<Mutex<Vec<u8>>>,
 }
 
-impl io::Write for LogWidget {
+impl Write for LogWidget {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.buffer.lock().unwrap().write(buf)
+        let mut buffer = self.buffer.lock();
+        buffer.write(buf)
     }
 
     fn flush(&mut self) -> io::Result<()> {
-        self.buffer.lock().unwrap().flush()
+        let mut buffer = self.buffer.lock();
+        buffer.flush()
     }
 }
 
@@ -172,19 +203,26 @@ impl Widget for &LogWidget {
     ///
     /// If the buffer is empty, it displays "No matching logs".
     fn render(self, area: Rect, buf: &mut Buffer) {
-        let buffer = self.buffer.lock().unwrap();
-        let string = String::from_utf8_lossy(&buffer).to_string();
-        if string.is_empty() {
+        let logs = {
+            let buffer = self.buffer.lock();
+            String::from_utf8_lossy(&buffer).into_owned()
+        };
+        if logs.is_empty() {
             "No matching logs".render(area, buf);
             return;
         }
-        string
-            .into_text() // convert a string with ANSI escape codes into ratatui Text
-            .unwrap_or_else(|err| format!("Error parsing output: {err}").into())
-            .render(area, buf);
+        match logs.into_text() {
+            Ok(text) => text.render(area, buf),
+            Err(error) => format!("Error parsing output: {error}").render(area, buf),
+        }
     }
 }
 
+/// Emits logs across levels and spans for the active filter.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps the generated log workload named for interactive filter evaluation"
+)]
 #[tracing::instrument]
 fn simulate_logging() {
     tracing::info!("This is an info message");
@@ -203,11 +241,17 @@ fn simulate_logging() {
     error_span();
 }
 
+/// Emits an event with named fields used by the filter presets.
 #[tracing::instrument]
 fn with_fields(foo: u32, bar: &'static str) {
     tracing::info!(foo, bar, "This is an info message with fields");
 }
 
+/// Emits logs inside a trace-level span.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps a distinct trace-level span available to the filter explorer"
+)]
 #[tracing::instrument(level = "trace")]
 fn trace_span() {
     tracing::error!("Error message inside a span with trace level");
@@ -215,6 +259,11 @@ fn trace_span() {
     tracing::trace!("Trace message inside a span with trace level");
 }
 
+/// Emits logs inside a debug-level span.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps a distinct debug-level span available to the filter explorer"
+)]
 #[tracing::instrument]
 fn debug_span() {
     tracing::error!("Error message inside a span with debug level");
@@ -222,6 +271,11 @@ fn debug_span() {
     tracing::debug!("Debug message inside a span with debug level");
 }
 
+/// Emits logs inside an info-level span.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps a distinct info-level span available to the filter explorer"
+)]
 #[tracing::instrument]
 fn info_span() {
     tracing::error!("Error message inside a span with info level");
@@ -229,6 +283,11 @@ fn info_span() {
     tracing::debug!("Debug message inside a span with info level");
 }
 
+/// Emits logs inside a warn-level span.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps a distinct warn-level span available to the filter explorer"
+)]
 #[tracing::instrument]
 fn warn_span() {
     tracing::error!("Error message inside a span with warn level");
@@ -236,6 +295,11 @@ fn warn_span() {
     tracing::debug!("Debug message inside a span with warn level");
 }
 
+/// Emits logs inside an error-level span.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps a distinct error-level span available to the filter explorer"
+)]
 #[tracing::instrument]
 fn error_span() {
     tracing::error!("Error message inside a span with error level");
@@ -243,6 +307,11 @@ fn error_span() {
     tracing::debug!("Debug message inside a span with error level");
 }
 
+/// Emits logs from a non-default target.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps the alternate target span available to the filter explorer"
+)]
 #[tracing::instrument(target = "other_crate")]
 fn other_crate_span() {
     tracing::error!(target: "other_crate", "An error message from another crate");

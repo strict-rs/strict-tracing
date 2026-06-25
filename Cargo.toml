@@ -129,7 +129,7 @@ tower-service = { version = "0.3.3" }
 valuable = { version = "0.1.1", default-features = false }
 valuable_crate = { package = "valuable", version = "0.1.1", default-features = false }
 valuable-serde = { version = "0.1.1", default-features = false }
-wasm-bindgen-test = { version = "0.3.75" }
+wasm-bindgen-test = { version = "0.3.76" }
 
 # Compile-diagnostics testing — engine behind `strict_test_support::ensure_compile_fail`
 # / `ensure_compiles`, used only through its terminal-free `TestCases::try_run` core.

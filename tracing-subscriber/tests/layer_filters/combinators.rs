@@ -1,11 +1,12 @@
 use super::*;
+use strict_test_support::{TestFailure, ensure_ok};
 use tracing_subscriber::{
-    filter::{filter_fn, FilterExt, LevelFilter},
+    filter::{FilterExt, LevelFilter, filter_fn},
     prelude::*,
 };
 
 #[test]
-fn and() {
+fn and() -> Result<(), TestFailure> {
     let (layer, handle) = layer::mock()
         .event(
             event::msg("a very interesting event")
@@ -25,9 +26,8 @@ fn and() {
     // spans and events that *both* filters will enable:
     let filter = target_filter.and(level_filter);
 
-    let subscriber = tracing_subscriber::registry()
-        .with(layer.with_filter(filter));
-        let _subscriber = tracing::subscriber::set_default(subscriber);
+    let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
+    let _subscriber = tracing::subscriber::set_default(subscriber);
 
     // This event will *not* be enabled:
     tracing::info!("an event with an uninteresting target");
@@ -38,5 +38,6 @@ fn and() {
     // This event will *not* be enabled:
     tracing::debug!(target: "interesting_target", "interesting debug event...");
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }

@@ -39,6 +39,9 @@ traced-error = []
 tracing-subscriber = { workspace = true, features = ["registry", "fmt"] }
 tracing = { workspace = true, features = ["std"] }
 
+[dev-dependencies]
+strict-test-support = { workspace = true }
+
 [badges]
 maintenance = { status = "experimental" }
 

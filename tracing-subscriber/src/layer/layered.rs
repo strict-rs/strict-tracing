@@ -1,4 +1,6 @@
-use tracing_core::{Dispatch, Event, Interest, LevelFilter, Subscriber, metadata::Metadata, span};
+use tracing_core::{
+    Dispatch, Event, Interest, LevelFilter, Subscriber, SubscriberResult, metadata::Metadata, span,
+};
 
 use crate::{
     filter,
@@ -6,7 +8,10 @@ use crate::{
     registry::LookupSpan,
 };
 #[cfg(all(feature = "registry", feature = "std"))]
-use crate::{filter::FilterId, registry::Registry};
+use crate::{
+    filter::FilterId,
+    registry::{CloseSpan as _, Registry},
+};
 use core::{
     any::{Any, TypeId},
     cmp, fmt,
@@ -30,74 +35,89 @@ pub struct Layered<L, I, S = I> {
     /// `Subscriber` instead.
     inner: I,
 
-    // These booleans are used to determine how to combine `Interest`s and max
-    // level hints when per-layer filters are in use.
-    /// Is `self.inner` a `Registry`?
-    ///
-    /// If so, when combining `Interest`s, we want to "bubble up" its
-    /// `Interest`.
-    inner_is_registry: bool,
-
-    /// Does `self.layer` have per-layer filters?
-    ///
-    /// This will be true if:
-    /// - `self.inner` is a `Filtered`.
-    /// - `self.inner` is a tree of `Layered`s where _all_ arms of those
-    ///   `Layered`s have per-layer filters.
-    ///
-    /// Otherwise, if it's a `Layered` with one per-layer filter in one branch,
-    /// but a non-per-layer-filtered layer in the other branch, this will be
-    /// _false_, because the `Layered` is already handling the combining of
-    /// per-layer filter `Interest`s and max level hints with its non-filtered
-    /// `Layer`.
-    has_layer_filter: bool,
-
-    /// Does `self.inner` have per-layer filters?
-    ///
-    /// This is determined according to the same rules as
-    /// `has_layer_filter` above.
-    inner_has_layer_filter: bool,
+    /// Per-layer filter state used to combine `Interest`s and max level hints.
+    filters: LayeredFilterState,
+    /// Tracks the subscriber type parameter when this value is a nested layer.
     _s: PhantomData<fn(S)>,
+}
+
+/// Compact per-layer filter flags for a [`Layered`] value.
+#[derive(Clone, Copy, Debug)]
+struct LayeredFilterState {
+    /// Packed flag bits.
+    flags: u8,
+}
+
+impl LayeredFilterState {
+    /// Outer layer has a per-layer filter.
+    const HAS_LAYER_FILTER: u8 = 0b001;
+    /// Inner stack has per-layer filters.
+    const INNER_HAS_LAYER_FILTER: u8 = 0b010;
+    /// Inner subscriber is the registry.
+    const INNER_IS_REGISTRY: u8 = 0b100;
+
+    /// Returns `true` when the outer layer has a per-layer filter.
+    #[must_use]
+    const fn has_layer_filter(self) -> bool {
+        self.flags & Self::HAS_LAYER_FILTER != 0
+    }
+
+    /// Returns `true` when the inner stack has per-layer filters.
+    #[must_use]
+    const fn inner_has_layer_filter(self) -> bool {
+        self.flags & Self::INNER_HAS_LAYER_FILTER != 0
+    }
+
+    /// Returns `true` when the inner subscriber is the registry.
+    #[must_use]
+    const fn inner_is_registry(self) -> bool {
+        self.flags & Self::INNER_IS_REGISTRY != 0
+    }
 }
 
 // === impl Layered ===
 
-impl<L, S> Layered<L, S>
+impl<L, I> Layered<L, I>
 where
-    L: Layer<S>,
-    S: Subscriber,
+    L: Layer<I>,
+    I: Subscriber,
 {
     /// Returns `true` if this [`Subscriber`] is the same type as `T`.
+    #[must_use]
     pub fn is<T: Any>(&self) -> bool {
         self.downcast_ref::<T>().is_some()
     }
 
     /// Returns some reference to this [`Subscriber`] value if it is of type `T`,
     /// or `None` if it isn't.
+    #[must_use]
     pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
         self.downcast_ref_by_id(TypeId::of::<T>())?
             .downcast_ref::<T>()
     }
 }
 
-impl<L, S> Subscriber for Layered<L, S>
+impl<L, I> Subscriber for Layered<L, I>
 where
-    L: Layer<S>,
-    S: Subscriber,
+    L: Layer<I>,
+    I: Subscriber,
 {
-    fn on_register_dispatch(&self, subscriber: &Dispatch) {
-        self.inner.on_register_dispatch(subscriber);
-        self.layer.on_register_dispatch(subscriber);
+    fn on_register_dispatch(&self, subscriber: &Dispatch) -> SubscriberResult {
+        self.inner.on_register_dispatch(subscriber)?;
+        self.layer.on_register_dispatch(subscriber)
     }
 
-    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
-        self.pick_interest(self.layer.register_callsite(metadata), || {
+    fn register_callsite(
+        &self,
+        metadata: &'static Metadata<'static>,
+    ) -> SubscriberResult<Interest> {
+        self.pick_interest(self.layer.register_callsite(metadata)?, || {
             self.inner.register_callsite(metadata)
         })
     }
 
-    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        if self.layer.enabled(metadata, self.ctx()) {
+    fn enabled(&self, metadata: &Metadata<'_>) -> SubscriberResult<bool> {
+        if self.layer.enabled(metadata, self.ctx())? {
             // if the outer layer enables the callsite metadata, ask the subscriber.
             self.inner.enabled(metadata)
         } else {
@@ -109,98 +129,95 @@ where
             #[cfg(feature = "registry")]
             filter::FilterState::clear_enabled();
 
-            false
+            Ok(false)
         }
     }
 
     fn max_level_hint(&self) -> Option<LevelFilter> {
         self.pick_level_hint(
-            self.layer.max_level_hint(),
+            self.layer.max_level_hint().ok().flatten(),
             self.inner.max_level_hint(),
-            super::subscriber_is_none(&self.inner),
+            self.inner
+                .downcast_ref_by_id(TypeId::of::<super::NoneLayerMarker>())
+                .is_some(),
         )
     }
 
-    fn new_span(&self, span: &span::Attributes<'_>) -> span::Id {
-        let id = self.inner.new_span(span);
-        self.layer.on_new_span(span, &id, self.ctx());
-        id
+    fn new_span(&self, span: &span::Attributes<'_>) -> SubscriberResult<span::Id> {
+        let id = self.inner.new_span(span)?;
+        self.layer.on_new_span(span, id, self.ctx())?;
+        Ok(id)
     }
 
-    fn record(&self, span: &span::Id, values: &span::Record<'_>) {
-        self.inner.record(span, values);
-        self.layer.on_record(span, values, self.ctx());
+    fn record(&self, span: span::Id, values: &span::Record<'_>) -> SubscriberResult {
+        self.inner.record(span, values)?;
+        self.layer.on_record(span, values, self.ctx())
     }
 
-    fn record_follows_from(&self, span: &span::Id, follows: &span::Id) {
-        self.inner.record_follows_from(span, follows);
-        self.layer.on_follows_from(span, follows, self.ctx());
+    fn record_follows_from(&self, span: span::Id, follows: span::Id) -> SubscriberResult {
+        self.inner.record_follows_from(span, follows)?;
+        self.layer.on_follows_from(span, follows, self.ctx())
     }
 
-    fn event_enabled(&self, event: &Event<'_>) -> bool {
-        if self.layer.event_enabled(event, self.ctx()) {
+    fn event_enabled(&self, event: &Event<'_>) -> SubscriberResult<bool> {
+        if self.layer.event_enabled(event, self.ctx())? {
             // if the outer layer enables the event, ask the inner subscriber.
             self.inner.event_enabled(event)
         } else {
             // otherwise, the event is disabled by this layer
-            false
+            Ok(false)
         }
     }
 
-    fn event(&self, event: &Event<'_>) {
-        self.inner.event(event);
-        self.layer.on_event(event, self.ctx());
+    fn event(&self, event: &Event<'_>) -> SubscriberResult {
+        self.inner.event(event)?;
+        self.layer.on_event(event, self.ctx())
     }
 
-    fn enter(&self, span: &span::Id) {
-        self.inner.enter(span);
-        self.layer.on_enter(span, self.ctx());
+    fn enter(&self, span: span::Id) -> SubscriberResult {
+        self.inner.enter(span)?;
+        self.layer.on_enter(span, self.ctx())
     }
 
-    fn exit(&self, span: &span::Id) {
-        self.inner.exit(span);
-        self.layer.on_exit(span, self.ctx());
+    fn exit(&self, span: span::Id) -> SubscriberResult {
+        self.inner.exit(span)?;
+        self.layer.on_exit(span, self.ctx())
     }
 
-    fn clone_span(&self, old: &span::Id) -> span::Id {
-        let new = self.inner.clone_span(old);
-        if &new != old {
-            self.layer.on_id_change(old, &new, self.ctx())
-        };
-        new
+    fn clone_span(&self, old: span::Id) -> SubscriberResult<span::Id> {
+        let new = self.inner.clone_span(old)?;
+        if new != old {
+            self.layer.on_id_change(old, new, self.ctx())?;
+        }
+        Ok(new)
     }
 
-    #[inline]
-    fn drop_span(&self, id: span::Id) {
-        let _closed = self.try_close(id);
-    }
-
-    fn try_close(&self, id: span::Id) -> bool {
+    fn try_close(&self, id: span::Id) -> SubscriberResult<bool> {
         #[cfg(all(feature = "registry", feature = "std"))]
         let subscriber: &dyn Subscriber = &self.inner;
         #[cfg(all(feature = "registry", feature = "std"))]
-        let mut guard = subscriber
+        let mut close_handle = subscriber
             .downcast_ref::<Registry>()
-            .map(|registry| registry.start_close(id.clone()));
-        if self.inner.try_close(id.clone()) {
+            .map(|registry| registry.start_close(id));
+        if self.inner.try_close(id)? {
             // If we have a registry's close guard, indicate that the span is
             // closing.
             #[cfg(all(feature = "registry", feature = "std"))]
             {
-                if let Some(g) = guard.as_mut() {
-                    g.set_closing()
-                };
+                if let Some(handle) = close_handle.as_mut() {
+                    handle.set_closing();
+                }
             }
 
-            self.layer.on_close(id, self.ctx());
-            true
+            self.layer.on_close(id, self.ctx())?;
+            Ok(true)
         } else {
-            false
+            Ok(false)
         }
     }
 
     #[inline]
-    fn current_span(&self) -> span::Current {
+    fn current_span(&self) -> SubscriberResult<span::Current> {
         self.inner.current_span()
     }
 
@@ -242,9 +259,9 @@ where
     B: Layer<S>,
     S: Subscriber,
 {
-    fn on_register_dispatch(&self, subscriber: &Dispatch) {
-        self.layer.on_register_dispatch(subscriber);
-        self.inner.on_register_dispatch(subscriber);
+    fn on_register_dispatch(&self, subscriber: &Dispatch) -> SubscriberResult {
+        self.layer.on_register_dispatch(subscriber)?;
+        self.inner.on_register_dispatch(subscriber)
     }
 
     fn on_layer(&mut self, subscriber: &mut S) {
@@ -252,93 +269,111 @@ where
         self.inner.on_layer(subscriber);
     }
 
-    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
-        self.pick_interest(self.layer.register_callsite(metadata), || {
+    fn register_callsite(
+        &self,
+        metadata: &'static Metadata<'static>,
+    ) -> SubscriberResult<Interest> {
+        self.pick_interest(self.layer.register_callsite(metadata)?, || {
             self.inner.register_callsite(metadata)
         })
     }
 
-    fn enabled(&self, metadata: &Metadata<'_>, ctx: Context<'_, S>) -> bool {
-        if self.layer.enabled(metadata, ctx.clone()) {
+    fn enabled(&self, metadata: &Metadata<'_>, ctx: Context<'_, S>) -> SubscriberResult<bool> {
+        if self.layer.enabled(metadata, ctx.clone())? {
             // if the outer subscriber enables the callsite metadata, ask the inner layer.
             self.inner.enabled(metadata, ctx)
         } else {
             // otherwise, the callsite is disabled by this layer
-            false
+            Ok(false)
         }
     }
 
-    fn max_level_hint(&self) -> Option<LevelFilter> {
-        self.pick_level_hint(
-            self.layer.max_level_hint(),
-            self.inner.max_level_hint(),
+    fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
+        Ok(self.pick_level_hint(
+            self.layer.max_level_hint()?,
+            self.inner.max_level_hint()?,
             super::layer_is_none(&self.inner),
-        )
+        ))
     }
 
     #[inline]
-    fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: Context<'_, S>) {
-        self.inner.on_new_span(attrs, id, ctx.clone());
-        self.layer.on_new_span(attrs, id, ctx);
+    fn on_new_span(
+        &self,
+        attrs: &span::Attributes<'_>,
+        id: span::Id,
+        ctx: Context<'_, S>,
+    ) -> SubscriberResult {
+        self.inner.on_new_span(attrs, id, ctx.clone())?;
+        self.layer.on_new_span(attrs, id, ctx)
     }
 
     #[inline]
-    fn on_record(&self, span: &span::Id, values: &span::Record<'_>, ctx: Context<'_, S>) {
-        self.inner.on_record(span, values, ctx.clone());
-        self.layer.on_record(span, values, ctx);
+    fn on_record(
+        &self,
+        span: span::Id,
+        values: &span::Record<'_>,
+        ctx: Context<'_, S>,
+    ) -> SubscriberResult {
+        self.inner.on_record(span, values, ctx.clone())?;
+        self.layer.on_record(span, values, ctx)
     }
 
     #[inline]
-    fn on_follows_from(&self, span: &span::Id, follows: &span::Id, ctx: Context<'_, S>) {
-        self.inner.on_follows_from(span, follows, ctx.clone());
-        self.layer.on_follows_from(span, follows, ctx);
+    fn on_follows_from(
+        &self,
+        span: span::Id,
+        follows: span::Id,
+        ctx: Context<'_, S>,
+    ) -> SubscriberResult {
+        self.inner.on_follows_from(span, follows, ctx.clone())?;
+        self.layer.on_follows_from(span, follows, ctx)
     }
 
     #[inline]
-    fn event_enabled(&self, event: &Event<'_>, ctx: Context<'_, S>) -> bool {
-        if self.layer.event_enabled(event, ctx.clone()) {
+    fn event_enabled(&self, event: &Event<'_>, ctx: Context<'_, S>) -> SubscriberResult<bool> {
+        if self.layer.event_enabled(event, ctx.clone())? {
             // if the outer layer enables the event, ask the inner subscriber.
             self.inner.event_enabled(event, ctx)
         } else {
             // otherwise, the event is disabled by this layer
-            false
+            Ok(false)
         }
     }
 
     #[inline]
-    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
-        self.inner.on_event(event, ctx.clone());
-        self.layer.on_event(event, ctx);
+    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) -> SubscriberResult {
+        self.inner.on_event(event, ctx.clone())?;
+        self.layer.on_event(event, ctx)
     }
 
     #[inline]
-    fn on_enter(&self, id: &span::Id, ctx: Context<'_, S>) {
-        self.inner.on_enter(id, ctx.clone());
-        self.layer.on_enter(id, ctx);
+    fn on_enter(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult {
+        self.inner.on_enter(id, ctx.clone())?;
+        self.layer.on_enter(id, ctx)
     }
 
     #[inline]
-    fn on_exit(&self, id: &span::Id, ctx: Context<'_, S>) {
-        self.inner.on_exit(id, ctx.clone());
-        self.layer.on_exit(id, ctx);
+    fn on_exit(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult {
+        self.inner.on_exit(id, ctx.clone())?;
+        self.layer.on_exit(id, ctx)
     }
 
     #[inline]
-    fn on_close(&self, id: span::Id, ctx: Context<'_, S>) {
-        self.inner.on_close(id.clone(), ctx.clone());
-        self.layer.on_close(id, ctx);
+    fn on_close(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult {
+        self.inner.on_close(id, ctx.clone())?;
+        self.layer.on_close(id, ctx)
     }
 
     #[inline]
-    fn on_id_change(&self, old: &span::Id, new: &span::Id, ctx: Context<'_, S>) {
-        self.inner.on_id_change(old, new, ctx.clone());
-        self.layer.on_id_change(old, new, ctx);
+    fn on_id_change(&self, old: span::Id, new: span::Id, ctx: Context<'_, S>) -> SubscriberResult {
+        self.inner.on_id_change(old, new, ctx.clone())?;
+        self.layer.on_id_change(old, new, ctx)
     }
 
     #[doc(hidden)]
     fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
         match id {
-            id if id == TypeId::of::<Self>() => Some(self),
+            downcast_id if downcast_id == TypeId::of::<Self>() => Some(self),
 
             // Oh, we're looking for per-layer filters!
             //
@@ -366,11 +401,9 @@ where
             //
             // If you don't understand this...that's fine, just don't mess with
             // it. :)
-            id if filter::is_plf_downcast_marker(id) => {
-                if self.layer.downcast_ref_by_id(id).is_none() {
-                    return None;
-                }
-                self.inner.downcast_ref_by_id(id)
+            downcast_id if filter::is_plf_downcast_marker(downcast_id) => {
+                let _: &dyn Any = self.layer.downcast_ref_by_id(downcast_id)?;
+                self.inner.downcast_ref_by_id(downcast_id)
             }
 
             // Otherwise, try to downcast both branches normally...
@@ -382,13 +415,13 @@ where
     }
 }
 
-impl<'a, L, S> LookupSpan<'a> for Layered<L, S>
+impl<'a, L, I> LookupSpan<'a> for Layered<L, I>
 where
-    S: Subscriber + LookupSpan<'a>,
+    I: Subscriber + LookupSpan<'a>,
 {
-    type Data = S::Data;
+    type Data = I::Data;
 
-    fn span_data(&'a self, id: &span::Id) -> Option<Self::Data> {
+    fn span_data(&'a self, id: span::Id) -> Option<Self::Data> {
         self.inner.span_data(id)
     }
 
@@ -398,11 +431,12 @@ where
     }
 }
 
-impl<L, S> Layered<L, S>
+impl<L, I> Layered<L, I>
 where
-    S: Subscriber,
+    I: Subscriber,
 {
-    fn ctx(&self) -> Context<'_, S> {
+    /// Returns a context for the inner subscriber.
+    const fn ctx(&self) -> Context<'_, I> {
         Context::new(&self.inner)
     }
 }
@@ -412,6 +446,7 @@ where
     A: Layer<S>,
     S: Subscriber,
 {
+    /// Returns a new layered value.
     pub(super) fn new(layer: A, inner: B, inner_has_layer_filter: bool) -> Self {
         #[cfg(all(feature = "registry", feature = "std"))]
         let inner_is_registry = TypeId::of::<S>() == TypeId::of::<Registry>();
@@ -419,21 +454,37 @@ where
         #[cfg(not(all(feature = "registry", feature = "std")))]
         let inner_is_registry = false;
 
-        let inner_has_layer_filter = inner_has_layer_filter || inner_is_registry;
+        let inner_filter = inner_has_layer_filter || inner_is_registry;
         let has_layer_filter = filter::layer_has_plf(&layer);
+        let mut filter_flags = 0;
+        if has_layer_filter {
+            filter_flags |= LayeredFilterState::HAS_LAYER_FILTER;
+        }
+        if inner_filter {
+            filter_flags |= LayeredFilterState::INNER_HAS_LAYER_FILTER;
+        }
+        if inner_is_registry {
+            filter_flags |= LayeredFilterState::INNER_IS_REGISTRY;
+        }
+        let filters = LayeredFilterState {
+            flags: filter_flags,
+        };
         Self {
             layer,
             inner,
-            has_layer_filter,
-            inner_has_layer_filter,
-            inner_is_registry,
+            filters,
             _s: PhantomData,
         }
     }
 
-    fn pick_interest(&self, outer: Interest, inner: impl FnOnce() -> Interest) -> Interest {
-        if self.has_layer_filter {
-            return inner();
+    /// Combines outer and inner callsite interest.
+    fn pick_interest(
+        &self,
+        outer: Interest,
+        inner_interest: impl FnOnce() -> SubscriberResult<Interest>,
+    ) -> SubscriberResult<Interest> {
+        if self.filters.has_layer_filter() {
+            return inner_interest();
         }
 
         // If the outer layer has disabled the callsite, return now so that
@@ -443,20 +494,20 @@ where
             // (rather than calling into the inner type), clear the current
             // per-layer filter interest state.
             #[cfg(feature = "registry")]
-            let _interest = filter::FilterState::take_interest();
+            let _: Option<Interest> = filter::FilterState::take_interest();
 
-            return outer;
+            return Ok(outer);
         }
 
         // The `inner` closure will call `inner.register_callsite()`. We do this
         // before the `if` statement to  ensure that the inner subscriber is
         // informed that the callsite exists regardless of the outer layer's
         // filtering decision.
-        let inner = inner();
+        let inner = inner_interest()?;
         if outer.is_sometimes() {
             // if this interest is "sometimes", return "sometimes" to ensure that
             // filters are reevaluated.
-            return outer;
+            return Ok(outer);
         }
 
         // If there is a per-layer filter in the `inner` stack, and it returns
@@ -466,33 +517,34 @@ where
         // didn't want it. Therefore, returning `sometimes` will ensure
         // `enabled` is called so that the per-layer filter can skip that
         // span/event, while the `outer` layer still gets to see it.
-        if inner.is_never() && self.inner_has_layer_filter {
-            return Interest::sometimes();
+        if inner.is_never() && self.filters.inner_has_layer_filter() {
+            return Ok(Interest::sometimes());
         }
 
         // otherwise, allow the inner subscriber or subscriber to weigh in.
-        inner
+        Ok(inner)
     }
 
+    /// Combines outer and inner max-level hints.
     fn pick_level_hint(
         &self,
         outer_hint: Option<LevelFilter>,
         inner_hint: Option<LevelFilter>,
         inner_is_none: bool,
     ) -> Option<LevelFilter> {
-        if self.inner_is_registry {
+        if self.filters.inner_is_registry() {
             return outer_hint;
         }
 
-        if self.has_layer_filter && self.inner_has_layer_filter {
+        if self.filters.has_layer_filter() && self.filters.inner_has_layer_filter() {
             return Some(cmp::max(outer_hint?, inner_hint?));
         }
 
-        if self.has_layer_filter && inner_hint.is_none() {
+        if self.filters.has_layer_filter() && inner_hint.is_none() {
             return None;
         }
 
-        if self.inner_has_layer_filter && outer_hint.is_none() {
+        if self.filters.inner_has_layer_filter() && outer_hint.is_none() {
             return None;
         }
 
@@ -530,10 +582,10 @@ where
     A: fmt::Debug,
     B: fmt::Debug,
 {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         #[cfg(all(feature = "registry", feature = "std"))]
-        let alt = f.alternate();
-        let mut s = f.debug_struct("Layered");
+        let alt = formatter.alternate();
+        let mut debug = formatter.debug_struct("Layered");
         // These additional fields are more verbose and usually only necessary
         // for internal debugging purposes, so only print them if alternate mode
         // is enabled.
@@ -541,14 +593,18 @@ where
         #[cfg(all(feature = "registry", feature = "std"))]
         {
             if alt {
-                let _builder = s
-                    .field("inner_is_registry", &self.inner_is_registry)
-                    .field("has_layer_filter", &self.has_layer_filter)
-                    .field("inner_has_layer_filter", &self.inner_has_layer_filter);
+                let _debug = debug
+                    .field("inner_is_registry", &self.filters.inner_is_registry())
+                    .field("has_layer_filter", &self.filters.has_layer_filter())
+                    .field(
+                        "inner_has_layer_filter",
+                        &self.filters.inner_has_layer_filter(),
+                    );
             }
         }
 
-        s.field("layer", &self.layer)
+        debug
+            .field("layer", &self.layer)
             .field("inner", &self.inner)
             .finish()
     }

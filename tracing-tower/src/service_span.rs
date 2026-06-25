@@ -9,7 +9,9 @@ use std::task::{Context, Poll};
 #[derive(Debug)]
 /// A service wrapper that enters a span while polling readiness and calling.
 pub struct Service<S> {
+    /// Wrapped service.
     inner: S,
+    /// Span entered while the wrapped service is polled or called.
     span: tracing::Span,
 }
 
@@ -19,8 +21,9 @@ pub use self::layer::*;
 
 #[cfg(feature = "tower-layer")]
 #[cfg_attr(docsrs, doc(cfg(feature = "tower-layer")))]
+/// Tower layer support for service-span instrumentation.
 mod layer {
-    use super::*;
+    use super::{GetSpan, PhantomData, Service};
 
     #[derive(Debug)]
     /// A Tower layer that instruments a service with a span.
@@ -29,7 +32,9 @@ mod layer {
         G: GetSpan<S>,
         S: tower_service::Service<R>,
     {
+        /// Function or span used to create service spans.
         get_span: G,
+        /// Preserve the service and request type parameters without storing a request.
         _p: PhantomData<fn(S, R)>,
     }
 
@@ -78,7 +83,7 @@ mod layer {
 #[cfg_attr(docsrs, doc(cfg(feature = "tower-layer")))]
 /// Make-service adapters that enter spans while creating services.
 pub mod make {
-    use super::*;
+    use super::{Context, Future, GetSpan, PhantomData, Pin, Poll, Service};
     use pin_project_lite::pin_project;
 
     #[derive(Debug)]
@@ -87,14 +92,17 @@ pub mod make {
     where
         G: GetSpan<T>,
     {
+        /// Function or span used to create spans for make-service targets.
         get_span: G,
+        /// Wrapped make-service.
         inner: M,
+        /// Preserve the target and request type parameters without storing either value.
         _p: PhantomData<fn(T, R)>,
     }
 
     pin_project! {
-        #[derive(Debug)]
         /// Future returned by [`MakeService`].
+        #[derive(Debug)]
         pub struct MakeFuture<F> {
             #[pin]
             inner: F,
@@ -108,7 +116,9 @@ pub mod make {
     where
         G: GetSpan<T> + Clone,
     {
+        /// Function or span cloned into each make-service wrapper.
         get_span: G,
+        /// Preserve the target and request type parameters without storing either value.
         _p: PhantomData<fn(T, R)>,
     }
 
@@ -188,13 +198,15 @@ pub mod make {
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             let this = self.project();
-            let inner = {
+            let result = {
                 let _guard = this.span.as_ref().map(tracing::Span::enter);
                 futures::ready!(this.inner.poll(cx))
             };
 
-            let span = this.span.take().expect("polled after ready");
-            Poll::Ready(inner.map(|svc| Service::new(svc, span)))
+            let Some(span) = this.span.take() else {
+                return Poll::Pending;
+            };
+            Poll::Ready(result.map(|service| Service::new(service, span)))
         }
     }
 
@@ -204,7 +216,7 @@ pub mod make {
     {
         /// Creates a new make-service instrumented with spans from `get_span`.
         pub fn new(inner: M, get_span: G) -> Self {
-            MakeService {
+            Self {
                 get_span,
                 inner,
                 _p: PhantomData,
@@ -227,7 +239,7 @@ pub mod make {
 
 impl<S> Service<S> {
     /// Creates a service wrapper that enters `span` around service operations.
-    pub fn new(inner: S, span: tracing::Span) -> Self {
+    pub const fn new(inner: S, span: tracing::Span) -> Self {
         Self { inner, span }
     }
 }
@@ -256,7 +268,7 @@ where
     S: Clone,
 {
     fn clone(&self) -> Self {
-        Service {
+        Self {
             span: self.span.clone(),
             inner: self.inner.clone(),
         }

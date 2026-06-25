@@ -1,7 +1,11 @@
+//! Subscriber layer support for making span trace capture inspectable.
+
+use crate::WithContext;
 use std::any::{Any, TypeId, type_name};
+use std::borrow::Cow;
 use std::fmt;
 use std::marker::PhantomData;
-use tracing::{Dispatch, Metadata, Subscriber, span};
+use tracing::{Dispatch, Metadata, Subscriber, span, subscriber::SubscriberResult};
 use tracing_subscriber::fmt::format::{DefaultFields, FormatFields};
 use tracing_subscriber::{
     fmt::FormattedFields,
@@ -20,18 +24,15 @@ use tracing_subscriber::{
 /// [field formatter]: tracing_subscriber::fmt::FormatFields
 /// [default format]: tracing_subscriber::fmt::format::DefaultFields
 pub struct ErrorLayer<S, F = DefaultFields> {
+    /// Formats span fields before storing them in span extensions.
     format: F,
 
+    /// Recovers formatted span context through the captured subscriber type.
     get_context: WithContext,
+
+    /// Tracks the subscriber type that this layer is attached to.
     _subscriber: PhantomData<fn(S)>,
 }
-
-// this function "remembers" the types of the subscriber and the formatter,
-// so that we can downcast to something aware of them without knowing those
-// types at the callsite.
-pub(crate) struct WithContext(
-    fn(&Dispatch, &span::Id, f: &mut dyn FnMut(&'static Metadata<'static>, &str) -> bool),
-);
 
 impl<S, F> Layer<S> for ErrorLayer<S, F>
 where
@@ -40,22 +41,43 @@ where
 {
     /// Notifies this layer that a new span was constructed with the given
     /// `Attributes` and `Id`.
-    fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: layer::Context<'_, S>) {
-        let span = ctx.span(id).expect("span must already exist!");
-        if span.extensions().get::<FormattedFields<F>>().is_some() {
-            return;
+    fn on_new_span(
+        &self,
+        attrs: &span::Attributes<'_>,
+        id: span::Id,
+        ctx: layer::Context<'_, S>,
+    ) -> SubscriberResult {
+        let Some(span_ref) = ctx.span(id) else {
+            return Ok(());
+        };
+
+        if span_ref.extensions().get::<FormattedFields<F>>().is_some() {
+            return Ok(());
         }
-        let mut fields = FormattedFields::<F>::new(String::new());
-        if self.format.format_fields(fields.as_writer(), attrs).is_ok() {
-            span.extensions_mut().insert(fields);
+
+        let mut formatted_fields = FormattedFields::<F>::new(String::new());
+        let Ok(()) = self
+            .format
+            .format_fields(formatted_fields.as_writer(), attrs)
+        else {
+            return Ok(());
+        };
+
+        if span_ref.extensions().get::<FormattedFields<F>>().is_some() {
+            return Ok(());
         }
+
+        drop(span_ref.extensions_mut().insert(formatted_fields));
+        Ok(())
     }
 
-    fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
-        match id {
-            id if id == TypeId::of::<Self>() => Some(self),
-            id if id == TypeId::of::<WithContext>() => Some(&self.get_context),
-            _ => None,
+    fn downcast_ref_by_id(&self, requested: TypeId) -> Option<&dyn Any> {
+        if requested == TypeId::of::<Self>() {
+            Some(self)
+        } else if requested == TypeId::of::<WithContext>() {
+            Some(&self.get_context)
+        } else {
+            None
         }
     }
 }
@@ -68,46 +90,50 @@ where
     /// Returns a new `ErrorLayer` with the provided [field formatter].
     ///
     /// [field formatter]: tracing_subscriber::fmt::FormatFields
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public constructor remains the API for installing a custom field formatter"
+    )]
     pub fn new(format: F) -> Self {
         Self {
             format,
-            get_context: WithContext(Self::get_context),
+            get_context: WithContext::new(Self::visit_context),
             _subscriber: PhantomData,
         }
     }
 
-    fn get_context(
+    /// Visits the captured span and its scope with formatter-specific fields.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "named function item is stored as the type-erased SpanTrace context callback"
+    )]
+    fn visit_context(
         dispatch: &Dispatch,
-        id: &span::Id,
-        f: &mut dyn FnMut(&'static Metadata<'static>, &str) -> bool,
+        id: span::Id,
+        visitor: &mut dyn FnMut(&'static Metadata<'static>, &str) -> bool,
     ) {
-        let subscriber = dispatch
-            .downcast_ref::<S>()
-            .expect("subscriber should downcast to expected type; this is a bug!");
-        let span = subscriber
-            .span(id)
-            .expect("registry should have a span for the current ID");
-        for span in span.scope() {
-            let cont = if let Some(fields) = span.extensions().get::<FormattedFields<F>>() {
-                f(span.metadata(), fields.fields.as_str())
-            } else {
-                f(span.metadata(), "")
+        let Some(subscriber) = dispatch.downcast_ref::<S>() else {
+            return;
+        };
+        let Some(captured_span) = subscriber.span(id) else {
+            return;
+        };
+
+        for scope_span in captured_span.scope() {
+            let formatted_fields = {
+                let extensions = scope_span.extensions();
+                extensions
+                    .get::<FormattedFields<F>>()
+                    .map_or(Cow::Borrowed(""), |stored_fields| {
+                        Cow::Owned(stored_fields.fields().to_owned())
+                    })
             };
-            if !cont {
+
+            let continue_visiting = visitor(scope_span.metadata(), formatted_fields.as_ref());
+            if !continue_visiting {
                 break;
             }
         }
-    }
-}
-
-impl WithContext {
-    pub(crate) fn with_context(
-        &self,
-        dispatch: &Dispatch,
-        id: &span::Id,
-        mut f: impl FnMut(&'static Metadata<'static>, &str) -> bool,
-    ) {
-        (self.0)(dispatch, id, &mut f)
     }
 }
 
@@ -121,10 +147,12 @@ where
 }
 
 impl<S, F: fmt::Debug> fmt::Debug for ErrorLayer<S, F> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ErrorLayer")
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ErrorLayer")
             .field("format", &self.format)
-            .field("subscriber", &format_args!("{}", type_name::<S>()))
+            .field("get_context", &self.get_context)
+            .field("_subscriber", &format_args!("{}", type_name::<S>()))
             .finish()
     }
 }

@@ -1,20 +1,34 @@
 //! Example binary for tracing workspace checks.
+#![cfg(test)]
+use strict_test_support::{TestFailure, ensure_ok};
 use tracing::{Id, Level, Span, subscriber::with_default};
 use tracing_attributes::instrument;
 use tracing_mock::{expect, subscriber};
 use tracing_test::block_on_future;
 
 #[instrument(follows_from = causes, skip(causes))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "follows_from fixture remains a named function item so generated span links can be asserted"
+)]
 fn with_follows_from_sync(causes: impl IntoIterator<Item = impl Into<Option<Id>>>) {}
 
 #[instrument(follows_from = causes, skip(causes))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "async follows_from fixture remains a named function item so generated span links can be asserted"
+)]
 async fn with_follows_from_async(causes: impl IntoIterator<Item = impl Into<Option<Id>>>) {}
 
 #[instrument(follows_from = [&Span::current()])]
+#[allow(
+    clippy::single_call_fn,
+    reason = "current-span follows_from fixture remains named so the macro expression form is asserted"
+)]
 fn follows_from_current() {}
 
 #[test]
-fn follows_from_sync_test() {
+fn follows_from_sync_test() -> Result<(), TestFailure> {
     let cause_a = expect::span().named("cause_a");
     let cause_b = expect::span().named("cause_b");
     let cause_c = expect::span().named("cause_c");
@@ -33,19 +47,20 @@ fn follows_from_sync_test() {
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
-        let cause_a = tracing::span!(Level::TRACE, "cause_a");
-        let cause_b = tracing::span!(Level::TRACE, "cause_b");
-        let cause_c = tracing::span!(Level::TRACE, "cause_c");
+    with_default(subscriber, || {
+        let runtime_cause_a = tracing::span!(Level::TRACE, "cause_a");
+        let runtime_cause_b = tracing::span!(Level::TRACE, "cause_b");
+        let runtime_cause_c = tracing::span!(Level::TRACE, "cause_c");
 
-        with_follows_from_sync(&[cause_a, cause_b, cause_c])
+        with_follows_from_sync(&[runtime_cause_a, runtime_cause_b, runtime_cause_c]);
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn follows_from_async_test() {
+fn follows_from_async_test() -> Result<(), TestFailure> {
     let cause_a = expect::span().named("cause_a");
     let cause_b = expect::span().named("cause_b");
     let cause_c = expect::span().named("cause_c");
@@ -66,21 +81,22 @@ fn follows_from_async_test() {
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
-        let _result = block_on_future(async {
-            let cause_a = tracing::span!(Level::TRACE, "cause_a");
-            let cause_b = tracing::span!(Level::TRACE, "cause_b");
-            let cause_c = tracing::span!(Level::TRACE, "cause_c");
+    with_default(subscriber, || {
+        block_on_future(async {
+            let runtime_cause_a = tracing::span!(Level::TRACE, "cause_a");
+            let runtime_cause_b = tracing::span!(Level::TRACE, "cause_b");
+            let runtime_cause_c = tracing::span!(Level::TRACE, "cause_c");
 
-            with_follows_from_async(&[cause_a, cause_b, cause_c]).await
+            with_follows_from_async(&[runtime_cause_a, runtime_cause_b, runtime_cause_c]).await;
         });
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn follows_from_current_test() {
+fn follows_from_current_test() -> Result<(), TestFailure> {
     let cause = expect::span().named("cause");
     let consequence = expect::span().named("follows_from_current");
 
@@ -95,9 +111,10 @@ fn follows_from_current_test() {
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
-        tracing::span!(Level::TRACE, "cause").in_scope(follows_from_current)
+    with_default(subscriber, || {
+        tracing::span!(Level::TRACE, "cause").in_scope(follows_from_current);
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }

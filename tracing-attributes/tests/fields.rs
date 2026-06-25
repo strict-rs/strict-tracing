@@ -1,54 +1,101 @@
 //! Example binary for tracing workspace checks.
+#![cfg(test)]
 
-use tracing::subscriber::with_default;
+use strict_test_support::{TestFailure, ensure_ok};
+use tracing::{field::display, subscriber::with_default};
 use tracing_attributes::instrument;
 use tracing_mock::{expect, span::NewSpan, subscriber};
 
 #[instrument(fields(foo = "bar", dsa = true, num = 1))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "field fixture remains a named instrumented function so literal custom fields can be asserted"
+)]
 fn fn_no_param() {}
 
 #[instrument(fields(foo = "bar"))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "field fixture remains a named instrumented function so parameters and custom fields can be asserted"
+)]
 fn fn_param(param: u32) {}
 
 #[instrument(fields(foo = "bar", empty))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "field fixture remains a named instrumented function so empty custom fields can be asserted"
+)]
 fn fn_empty_field() {}
 
-#[instrument(fields(len = s.len()))]
-fn fn_expr_field(s: &str) {}
+#[instrument(fields(s = text, len = text.len()), skip(text))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "field fixture remains a named instrumented function so expression fields can be asserted"
+)]
+fn fn_expr_field(text: &str) {}
 
-#[instrument(fields(s.len = s.len(), s.is_empty = s.is_empty()))]
-fn fn_two_expr_fields(s: &str) {
-    let _ = s;
+#[instrument(fields(s = text, s.len = text.len(), s.is_empty = text.is_empty()), skip(text))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "field fixture remains a named instrumented function so dotted expression fields can be asserted"
+)]
+fn fn_two_expr_fields(text: &str) {}
+
+#[instrument(fields(s = %text, s.len = text.len()), skip(text))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "field fixture remains a named instrumented function so display expression fields can be asserted"
+)]
+fn fn_clashy_expr_field(text: &str) {}
+
+#[instrument(fields(s = "s"), skip(text))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "field fixture remains a named instrumented function so literal field replacement can be asserted"
+)]
+fn fn_clashy_expr_field2(text: &str) {
+    let observed_text = String::from(text);
+    drop(observed_text);
 }
 
-#[instrument(fields(%s, s.len = s.len()))]
-fn fn_clashy_expr_field(s: &str) {
-    let _ = s;
+#[instrument(fields(s = &text), skip(text))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "field fixture remains a named instrumented function so borrowed string fields can be asserted"
+)]
+fn fn_string(text: String) {
+    drop(text);
 }
 
-#[instrument(fields(s = "s"))]
-fn fn_clashy_expr_field2(s: &str) {
-    let _ = s;
-}
-
-#[instrument(fields(s = &s))]
-fn fn_string(s: String) {
-    drop(s);
-}
-
-#[instrument(fields(keywords.impl.type.fn = _arg), skip(_arg))]
-fn fn_keyword_ident_in_field(_arg: &str) {}
+#[instrument(fields(keywords.impl.type.fn = arg), skip(arg))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "field fixture remains a named instrumented function so keyword path field names can be asserted"
+)]
+fn fn_keyword_ident_in_field(arg: &str) {}
 
 const CONST_FIELD_NAME: &str = "foo.bar";
 
 #[instrument(fields({CONST_FIELD_NAME} = "baz"))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "field fixture remains a named instrumented function so const expression field names can be asserted"
+)]
 fn fn_const_field_name() {}
 
+#[allow(
+    clippy::single_call_fn,
+    reason = "const field-name fixture must remain callable from the instrument field expression under test"
+)]
 const fn get_const_fn_field_name() -> &'static str {
     "foo.bar"
 }
 
 #[instrument(fields({get_const_fn_field_name()} = "baz"))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "field fixture remains a named instrumented function so const fn field names can be asserted"
+)]
 fn fn_const_fn_field_name() {}
 
 struct FieldNames;
@@ -57,16 +104,29 @@ impl FieldNames {
 }
 
 #[instrument(fields({FieldNames::FOO_BAR} = "baz"))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "field fixture remains a named instrumented function so associated const field names can be asserted"
+)]
 fn fn_struct_const_field_name() {}
 
 #[instrument(fields({"foo"} = "bar"))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "field fixture remains a named instrumented function so string literal field names can be asserted"
+)]
 fn fn_string_field_name() {}
 
 const CLASHY_FIELD_NAME: &str = "s";
 
-#[instrument(fields({CLASHY_FIELD_NAME} = "foo"))]
-fn fn_clashy_const_field_name(s: &str) {
-    let _ = s;
+#[instrument(fields(s = text, {CLASHY_FIELD_NAME} = "foo"), skip(text))]
+#[allow(
+    clippy::single_call_fn,
+    reason = "field fixture remains a named instrumented function so duplicate const field names can be asserted"
+)]
+fn fn_clashy_const_field_name(text: &str) {
+    let observed_text = String::from(text);
+    drop(observed_text);
 }
 
 #[derive(Debug)]
@@ -80,7 +140,7 @@ impl HasField {
 }
 
 #[test]
-fn fields() {
+fn fields() -> Result<(), TestFailure> {
     let span = expect::span().with_fields(
         expect::field("foo")
             .with_value(&"bar")
@@ -90,11 +150,12 @@ fn fields() {
     );
     run_test(span, || {
         fn_no_param();
-    });
+    })?;
+    Ok(())
 }
 
 #[test]
-fn expr_field() {
+fn expr_field() -> Result<(), TestFailure> {
     let span = expect::span().with_fields(
         expect::field("s")
             .with_value(&"hello world")
@@ -103,11 +164,12 @@ fn expr_field() {
     );
     run_test(span, || {
         fn_expr_field("hello world");
-    });
+    })?;
+    Ok(())
 }
 
 #[test]
-fn two_expr_fields() {
+fn two_expr_fields() -> Result<(), TestFailure> {
     let span = expect::span().with_fields(
         expect::field("s")
             .with_value(&"hello world")
@@ -117,31 +179,34 @@ fn two_expr_fields() {
     );
     run_test(span, || {
         fn_two_expr_fields("hello world");
-    });
+    })?;
+    Ok(())
 }
 
 #[test]
-fn clashy_expr_field() {
+fn clashy_expr_field() -> Result<(), TestFailure> {
     let span = expect::span().with_fields(
         // Overriding the `s` field should record `s` as a `Display` value,
         // rather than as a `Debug` value.
         expect::field("s")
-            .with_value(&tracing::field::display("hello world"))
+            .with_value(&display("hello world"))
             .and(expect::field("s.len").with_value(&"hello world".len()))
             .only(),
     );
     run_test(span, || {
         fn_clashy_expr_field("hello world");
-    });
+    })?;
 
-    let span = expect::span().with_fields(expect::field("s").with_value(&"s").only());
-    run_test(span, || {
+    let clashy_literal_span =
+        expect::span().with_fields(expect::field("s").with_value(&"s").only());
+    run_test(clashy_literal_span, || {
         fn_clashy_expr_field2("hello world");
-    });
+    })?;
+    Ok(())
 }
 
 #[test]
-fn self_expr_field() {
+fn self_expr_field() -> Result<(), TestFailure> {
     let span =
         expect::span().with_fields(expect::field("my_field").with_value(&"hello world").only());
     run_test(span, || {
@@ -149,11 +214,12 @@ fn self_expr_field() {
             my_field: "hello world",
         };
         has_field.self_expr_field();
-    });
+    })?;
+    Ok(())
 }
 
 #[test]
-fn parameters_with_fields() {
+fn parameters_with_fields() -> Result<(), TestFailure> {
     let span = expect::span().with_fields(
         expect::field("foo")
             .with_value(&"bar")
@@ -162,69 +228,77 @@ fn parameters_with_fields() {
     );
     run_test(span, || {
         fn_param(1);
-    });
+    })?;
+    Ok(())
 }
 
 #[test]
-fn empty_field() {
+fn empty_field() -> Result<(), TestFailure> {
     let span = expect::span().with_fields(expect::field("foo").with_value(&"bar").only());
     run_test(span, || {
         fn_empty_field();
-    });
+    })?;
+    Ok(())
 }
 
 #[test]
-fn string_field() {
+fn string_field() -> Result<(), TestFailure> {
     let span = expect::span().with_fields(expect::field("s").with_value(&"hello world").only());
     run_test(span, || {
         fn_string(String::from("hello world"));
-    });
+    })?;
+    Ok(())
 }
 
 #[test]
-fn keyword_ident_in_field_name() {
+fn keyword_ident_in_field_name() -> Result<(), TestFailure> {
     let span = expect::span().with_fields(
         expect::field("keywords.impl.type.fn")
             .with_value(&"test")
             .only(),
     );
-    run_test(span, || fn_keyword_ident_in_field("test"));
+    run_test(span, || fn_keyword_ident_in_field("test"))?;
+    Ok(())
 }
 
 #[test]
-fn expr_const_field_name() {
+fn expr_const_field_name() -> Result<(), TestFailure> {
     let span = expect::span().with_fields(expect::field("foo.bar").with_value(&"baz").only());
     run_test(span, || {
         fn_const_field_name();
-    });
+    })?;
+    Ok(())
 }
 
 #[test]
-fn expr_const_fn_field_name() {
+fn expr_const_fn_field_name() -> Result<(), TestFailure> {
     let span = expect::span().with_fields(expect::field("foo.bar").with_value(&"baz").only());
     run_test(span, || {
         fn_const_fn_field_name();
-    });
+    })?;
+    Ok(())
 }
 
 #[test]
-fn struct_const_field_name() {
+fn struct_const_field_name() -> Result<(), TestFailure> {
     let span = expect::span().with_fields(expect::field("foo.bar").with_value(&"baz").only());
     run_test(span, || {
         fn_struct_const_field_name();
-    });
+    })?;
+    Ok(())
 }
 
 #[test]
-fn string_field_name() {
+fn string_field_name() -> Result<(), TestFailure> {
     let span = expect::span().with_fields(expect::field("foo").with_value(&"bar").only());
     run_test(span, || {
         fn_string_field_name();
-    });
+    })?;
+    Ok(())
 }
 
 #[test]
-fn clashy_const_field_name() {
+fn clashy_const_field_name() -> Result<(), TestFailure> {
     let span = expect::span().with_fields(
         // #3158: To be consistent with event! and span! macros, the duplicated value should be
         // dropped, but checking for duplicated fields would incur a significant runtime cost, as
@@ -235,10 +309,11 @@ fn clashy_const_field_name() {
     );
     run_test(span, || {
         fn_clashy_const_field_name("hello world");
-    });
+    })?;
+    Ok(())
 }
 
-fn run_test<F: FnOnce() -> T, T>(span: NewSpan, fun: F) {
+fn run_test<F: FnOnce() -> T, T>(span: NewSpan, fun: F) -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
         .new_span(span)
         .enter(expect::span())
@@ -247,5 +322,6 @@ fn run_test<F: FnOnce() -> T, T>(span: NewSpan, fun: F) {
         .run_with_handle();
 
     let _result = with_default(subscriber, fun);
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }

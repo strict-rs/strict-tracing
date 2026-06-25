@@ -5,22 +5,29 @@ use http::{Method, Request, Uri};
 use http_body_util::Empty;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
+use std::error::Error;
 use std::time::Duration;
-use tower::{Service, ServiceBuilder};
-use tracing::info;
+use tower::{Service as _, ServiceBuilder};
+use tracing::{Span, info, info_span};
 use tracing_tower::request_span;
 
-type Err = Box<dyn std::error::Error + Send + Sync + 'static>;
+/// Error type returned by the Tower client example.
+type Err = Box<dyn Error + Send + Sync + 'static>;
 
-fn req_span<A>(req: &Request<A>) -> tracing::Span {
-    let span = tracing::info_span!(
+/// Create the tracing span attached to an outbound request.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps the `tracing_tower` request span callback explicit"
+)]
+fn req_span<A>(req: &Request<A>) -> Span {
+    let span = info_span!(
         "request",
         req.method = ?req.method(),
         req.uri = ?req.uri(),
         req.version = ?req.version(),
         headers = ?req.headers()
     );
-    tracing::info!(parent: &span, "sending request");
+    info!(parent: &span, "sending request");
     span
 }
 
@@ -42,8 +49,7 @@ async fn main() -> Result<(), Err> {
     let req = Request::builder()
         .method(Method::GET)
         .uri(uri)
-        .body(Empty::<Bytes>::new())
-        .expect("Unable to build request; this is a bug.");
+        .body(Empty::<Bytes>::new())?;
 
     let res = svc.call(req).await?;
     info!(message = "got a response", res.headers = ?res.headers());

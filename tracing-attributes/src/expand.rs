@@ -1,23 +1,6 @@
-use std::iter;
-
-use proc_macro2::TokenStream;
-use quote::TokenStreamExt as _;
-use quote::{ToTokens, quote, quote_spanned};
-use syn::visit_mut::VisitMut;
-use syn::{
-    Expr, ExprAsync, ExprCall, FieldPat, FnArg, Ident, Item, ItemFn, Pat, PatIdent, PatReference,
-    PatStruct, PatTuple, PatTupleStruct, PatType, Path, ReturnType, Signature, Stmt, Token, Type,
-    TypePath, punctuated::Punctuated, spanned::Spanned as _,
-};
-
-use crate::{
-    MaybeItemFn, MaybeItemFnRef,
-    attr::{Field, FieldName, Fields, FormatMode, InstrumentArgs, Level},
-};
-
 /// Given an existing function, generate an instrumented version of that function
-pub fn gen_function<'a, B: ToTokens + 'a>(
-    input: MaybeItemFnRef<'a, B>,
+fn gen_function<B: ToTokens>(
+    input: &MaybeItemFnRef<'_, B>,
     args: InstrumentArgs,
     instrumented_function_name: &str,
     self_type: Option<&TypePath>,
@@ -25,7 +8,7 @@ pub fn gen_function<'a, B: ToTokens + 'a>(
     // these are needed ahead of time, as ItemFn contains the function body _and_
     // isn't representable inside a quote!/quote_spanned! macro
     // (Syn's ToTokens isn't implemented for ItemFn)
-    let MaybeItemFnRef {
+    let &MaybeItemFnRef {
         outer_attrs,
         inner_attrs,
         vis,
@@ -34,46 +17,51 @@ pub fn gen_function<'a, B: ToTokens + 'a>(
         block,
     } = input;
 
-    let Signature {
-        output,
-        inputs: params,
-        unsafety,
-        asyncness,
-        constness,
-        abi,
-        ident,
-        generics:
-            syn::Generics {
-                params: gen_params,
-                where_clause,
-                lt_token,
-                gt_token,
-            },
-        fn_token,
-        paren_token,
-        variadic,
-    } = sig;
+    let output = &sig.output;
+    let params = &sig.inputs;
+    let unsafety = &sig.unsafety;
+    let asyncness = &sig.asyncness;
+    let constness = &sig.constness;
+    let abi = &sig.abi;
+    let ident = &sig.ident;
+    let gen_params = &sig.generics.params;
+    let where_clause = &sig.generics.where_clause;
+    let lt_token = &sig.generics.lt_token;
+    let gt_token = &sig.generics.gt_token;
+    let fn_token = &sig.fn_token;
+    let paren_token = &sig.paren_token;
+    let variadic = &sig.variadic;
 
     let warnings = args.warnings();
 
-    let (return_type, return_span) = if let ReturnType::Type(_, return_type) = &output {
-        (erase_impl_trait(return_type), return_type.span())
-    } else {
-        // Point at function name if we don't have an explicit return type
-        (syn::parse_quote! { () }, ident.span())
-    };
-    // Install a fake return statement as the first thing in the function
-    // body, so that we eagerly infer that the return type is what we
-    // declared in the async fn signature.
-    // The return statement is unreachable, but it affects inference, so it
-    // needs to be written exactly this way for it to do its magic.
-    let fake_return_edge = quote_spanned! {return_span=>
-        if false {
-            let __tracing_attr_fake_return: #return_type = loop {};
-            return __tracing_attr_fake_return;
+    let (return_type, return_span) = match *output {
+        ReturnType::Type(_, ref explicit_return_type) => {
+            let mut return_type = explicit_return_type.as_ref().clone();
+            ImplTraitEraser.visit_type_mut(&mut return_type);
+            (return_type, explicit_return_type.span())
+        }
+        ReturnType::Default => {
+            // Point at function name if we don't have an explicit return type
+            (syn::parse_quote! { () }, ident.span())
         }
     };
-    let block = quote! {
+    // Install a fake return edge as the first thing in the function body, so
+    // that we eagerly infer that the return type is what we declared in the
+    // async fn signature.
+    //
+    // The return edge is never taken, but it affects inference, so it needs to
+    // feed a value with the declared return type into a `return` expression.
+    // Match on `None` rather than constructing the value with a divergent
+    // expression so downstream crates can deny `unreachable_code`.
+    let fake_return_edge = quote_spanned! {return_span=>
+        match ::core::option::Option::<#return_type>::None {
+            ::core::option::Option::Some(__tracing_attr_fake_return) => {
+                return __tracing_attr_fake_return;
+            }
+            ::core::option::Option::None => {}
+        }
+    };
+    let wrapped_block = quote! {
         {
             #fake_return_edge
             { #block }
@@ -81,7 +69,7 @@ pub fn gen_function<'a, B: ToTokens + 'a>(
     };
 
     let body = gen_block(
-        &block,
+        &wrapped_block,
         params,
         asyncness.is_some(),
         args,
@@ -121,9 +109,7 @@ fn gen_block<B: ToTokens>(
     instrumented_function_name: &str,
     self_type: Option<&TypePath>,
 ) -> TokenStream {
-    // generate the span's name
     let span_name = args
-        // did the user override the span's name?
         .name
         .as_ref()
         .map_or_else(|| quote!(#instrumented_function_name), |name| quote!(#name));
@@ -131,222 +117,310 @@ fn gen_block<B: ToTokens>(
     let args_level = args.level();
     let level = args_level.clone();
 
-    let follows_from = args.follows_from.iter();
-    let follows_from = quote! {
-        #(for cause in #follows_from {
+    let follows_from_sources = args.follows_from.iter();
+    let follows_from_tokens = quote! {
+        #(for cause in #follows_from_sources {
             __tracing_attr_span.follows_from(cause);
         })*
     };
 
-    // generate this inside a closure, so we can return early on errors.
-    let span = (|| {
-        // Pull out the arguments-to-be-skipped first, so we can filter results
-        // below.
-        let param_names: Vec<(Ident, (Ident, RecordType))> = params
-            .clone()
-            .into_iter()
-            .flat_map(|param| match param {
-                FnArg::Typed(PatType { pat, ty, .. }) => {
-                    param_names(*pat, RecordType::parse_from_ty(&ty))
-                }
-                FnArg::Receiver(_) => Box::new(iter::once((
-                    Ident::new("self", param.span()),
-                    RecordType::Debug,
-                ))),
-            })
-            // Little dance with new (user-exposed) names and old (internal)
-            // names of identifiers. That way, we could do the following
-            // even though async_trait (<=0.1.43) rewrites "self" as "_self":
-            // ```
-            // #[async_trait]
-            // impl Foo for FooImpl {
-            //     #[instrument(skip(self))]
-            //     async fn foo(&self, v: usize) {}
-            // }
-            // ```
-            .map(|(x, record_type)| {
-                // if we are inside a function generated by async-trait <=0.1.43, we need to
-                // take care to rewrite "_self" as "self" for 'user convenience'
-                if self_type.is_some() && x == "_self" {
-                    (Ident::new("self", x.span()), (x, record_type))
-                } else {
-                    (x.clone(), (x, record_type))
-                }
-            })
-            .collect();
-
-        for skip in &args.skips {
-            if !param_names.iter().map(|(user, _)| user).any(|y| y == skip) {
-                return quote_spanned! {skip.span()=>
-                    compile_error!("attempting to skip non-existent parameter")
-                };
-            }
-        }
-
-        let target = args.target();
-
-        let parent = args.parent.iter();
-
-        // filter out skipped fields
-        let quoted_fields: Vec<_> = param_names
-            .iter()
-            .filter(|(param, _)| {
-                if args.skip_all || args.skips.contains(param) {
-                    return false;
-                }
-
-                // If any parameters have the same name as a custom field, skip
-                // and allow them to be formatted by the custom field.
-                if let Some(ref fields) = args.fields {
-                    fields.0.iter().all(|Field { name, .. }| {
-                        match name {
-                            // #3158: Expressions cannot be evaluated at compile time and will
-                            // incur a runtime cost to de-duplicate.
-                            FieldName::Expr(_) => true,
-                            FieldName::Punctuated(punctuated) => {
-                                let first = punctuated.first();
-                                first != punctuated.last()
-                                    || !first.iter().any(|name| name == &param)
-                            }
-                        }
-                    })
-                } else {
-                    true
-                }
-            })
-            .map(|(user_name, (real_name, record_type))| match record_type {
-                RecordType::Value => quote!(#user_name = #real_name),
-                RecordType::Debug => quote!(#user_name = ::tracing::field::debug(&#real_name)),
-            })
-            .collect();
-
-        // replace every use of a variable with its original name
-        if let Some(Fields(ref mut fields)) = args.fields {
-            let mut replacer = IdentAndTypesRenamer {
-                idents: param_names.into_iter().map(|(a, (b, _))| (a, b)).collect(),
-                types: Vec::new(),
-            };
-
-            // when async-trait <=0.1.43 is in use, replace instances
-            // of the "Self" type inside the fields values
-            if let Some(self_type) = self_type {
-                replacer.types.push(("Self", self_type.clone()));
-            }
-
-            for e in fields.iter_mut().filter_map(|f| f.value.as_mut()) {
-                syn::visit_mut::visit_expr_mut(&mut replacer, e);
-            }
-        }
-
-        let custom_fields = &args.fields;
-
-        quote!(::tracing::span!(
-            target: #target,
-            #(parent: #parent,)*
-            #level,
-            #span_name,
-            #(#quoted_fields,)*
-            #custom_fields
-
-        ))
-    })();
-
+    let span_tokens = gen_span(params, &mut args, &level, &span_name, self_type);
     let target = args.target();
+    let (err_event, ret_event) = gen_events(&args, &target, &args_level);
 
-    let err_event = match args.err_args {
-        Some(event_args) => {
-            let level_tokens = event_args.level(Level::Error);
-            match event_args.mode {
-                FormatMode::Default | FormatMode::Display => Some(quote!(
-                    ::tracing::event!(target: #target, #level_tokens, error = %e)
-                )),
-                FormatMode::Debug => Some(quote!(
-                    ::tracing::event!(target: #target, #level_tokens, error = ?e)
-                )),
-            }
-        }
-        _ => None,
-    };
-
-    let ret_event = match args.ret_args {
-        Some(event_args) => {
-            let level_tokens = event_args.level(args_level);
-            match event_args.mode {
-                FormatMode::Display => Some(quote!(
-                    ::tracing::event!(target: #target, #level_tokens, return = %x)
-                )),
-                FormatMode::Default | FormatMode::Debug => Some(quote!(
-                    ::tracing::event!(target: #target, #level_tokens, return = ?x)
-                )),
-            }
-        }
-        _ => None,
-    };
-
-    // Generate the instrumented function body.
-    // If the function is an `async fn`, this will wrap it in an async block,
-    // which is `instrument`ed using `tracing-futures`. Otherwise, this will
-    // enter the span and then perform the rest of the body.
-    // If `err` is in args, instrument any resulting `Err`s.
-    // If `ret` is in args, instrument any resulting `Ok`s when the function
-    // returns `Result`s, otherwise instrument any resulting values.
     if async_context {
-        let mk_fut = match (err_event, ret_event) {
-            (Some(err_event), Some(ret_event)) => quote_spanned!(block.span()=>
-                async move {
-                    let __match_scrutinee = async move #block.await;
-                    match  __match_scrutinee {
-                        Ok(x) => {
-                            #ret_event;
-                            Ok(x)
-                        },
-                        Err(e) => {
-                            #err_event;
-                            Err(e)
-                        }
-                    }
-                }
-            ),
-            (Some(err_event), None) => quote_spanned!(block.span()=>
-                async move {
-                    match async move #block.await {
-                        Ok(x) => Ok(x),
-                        Err(e) => {
-                            #err_event;
-                            Err(e)
-                        }
-                    }
-                }
-            ),
-            (None, Some(ret_event)) => quote_spanned!(block.span()=>
-                async move {
-                    let x = async move #block.await;
-                    #ret_event;
-                    x
-                }
-            ),
-            (None, None) => quote_spanned!(block.span()=>
-                async move #block
-            ),
-        };
-
-        return quote!(
-            let __tracing_attr_span = #span;
-            let __tracing_instrument_future = #mk_fut;
-            if !__tracing_attr_span.is_disabled() {
-                #follows_from
-                ::tracing::Instrument::instrument(
-                    __tracing_instrument_future,
-                    __tracing_attr_span
-                )
-                .await
-            } else {
-                __tracing_instrument_future.await
-            }
+        return gen_async_block(
+            block,
+            &span_tokens,
+            &follows_from_tokens,
+            err_event,
+            ret_event,
         );
     }
 
-    let span = quote!(
+    gen_sync_block(
+        block,
+        &span_tokens,
+        &follows_from_tokens,
+        &level,
+        err_event,
+        ret_event,
+    )
+}
+
+/// Generate the `tracing::span!` expression for an instrumented block.
+#[allow(
+    clippy::single_call_fn,
+    reason = "span token generation is a named macro pipeline stage that owns parameter-field validation"
+)]
+fn gen_span(
+    params: &Punctuated<FnArg, Token![,]>,
+    args: &mut InstrumentArgs,
+    level: &Level,
+    span_name: &TokenStream,
+    self_type: Option<&TypePath>,
+) -> TokenStream {
+    let param_names = collect_param_names(params, self_type);
+
+    for skip in &args.skips {
+        if !param_names.iter().any(|entry| &entry.0 == skip) {
+            return quote_spanned! {skip.span()=>
+                compile_error!("attempting to skip non-existent parameter")
+            };
+        }
+    }
+
+    let target = args.target();
+    let quoted_fields: Vec<_> = param_names
+        .iter()
+        .filter_map(|entry| {
+            let user_name = &entry.0;
+            if !should_record_param(user_name, args) {
+                return None;
+            }
+
+            let real_name = &entry.1.0;
+            let record_type = entry.1.1;
+            Some(match record_type {
+                RecordType::Value => quote!(#user_name = #real_name),
+                RecordType::Debug => quote!(#user_name = ::tracing::field::debug(&#real_name)),
+            })
+        })
+        .collect();
+
+    rename_custom_field_inputs(args, param_names, self_type);
+
+    let parent = args.parent.iter();
+    let custom_fields = &args.fields;
+
+    quote!(::tracing::span!(
+        target: #target,
+        #(parent: #parent,)*
+        #level,
+        #span_name,
+        #(#quoted_fields,)*
+        #custom_fields
+
+    ))
+}
+
+/// Collect parameter names and their inferred recording mode.
+#[allow(
+    clippy::single_call_fn,
+    reason = "parameter collection isolates destructuring and receiver normalization for span field generation"
+)]
+fn collect_param_names(
+    params: &Punctuated<FnArg, Token![,]>,
+    self_type: Option<&TypePath>,
+) -> Vec<(Ident, (Ident, RecordType))> {
+    params
+        .iter()
+        .cloned()
+        .flat_map(|param| match param {
+            FnArg::Typed(PatType { pat, ty, .. }) => {
+                param_names(*pat, RecordType::parse_from_ty(&ty))
+            }
+            FnArg::Receiver(_) => Box::new(iter::once((
+                Ident::new("self", param.span()),
+                RecordType::Debug,
+            ))),
+        })
+        .map(|(source_ident, record_type)| {
+            if self_type.is_some() && source_ident == "_self" {
+                (
+                    Ident::new("self", source_ident.span()),
+                    (source_ident, record_type),
+                )
+            } else {
+                (source_ident.clone(), (source_ident, record_type))
+            }
+        })
+        .collect()
+}
+
+/// Return whether a parameter should be recorded as a generated span field.
+#[allow(
+    clippy::single_call_fn,
+    reason = "recording predicate keeps skip and custom-field shadowing rules explicit"
+)]
+fn should_record_param(param: &Ident, args: &InstrumentArgs) -> bool {
+    if args.skip_all || args.skips.contains(param) {
+        return false;
+    }
+
+    args.fields.as_ref().is_none_or(|fields| {
+        fields
+            .0
+            .iter()
+            .all(|field| field_name_allows_param(&field.name, param))
+    })
+}
+
+/// Return whether a custom field name should leave a parameter auto-recorded.
+#[allow(
+    clippy::single_call_fn,
+    reason = "custom-field shadowing rule is kept named to document parameter auto-recording"
+)]
+fn field_name_allows_param(field_name: &FieldName, param: &Ident) -> bool {
+    match *field_name {
+        FieldName::Expr(_) => true,
+        FieldName::Punctuated(ref punctuated) => {
+            let first_field = punctuated.first();
+            first_field != punctuated.last()
+                || first_field.is_none_or(|field_ident| field_ident != param)
+        }
+    }
+}
+
+/// Rewrite custom field expressions to refer to async-trait generated bindings.
+#[allow(
+    clippy::single_call_fn,
+    reason = "async-trait field-expression rewrite requires a separate mutable pass after field collection"
+)]
+fn rename_custom_field_inputs(
+    args: &mut InstrumentArgs,
+    param_names: Vec<(Ident, (Ident, RecordType))>,
+    self_type: Option<&TypePath>,
+) {
+    let Some(custom_fields) = args.fields.as_mut() else {
+        return;
+    };
+
+    let mut replacer = IdentAndTypesRenamer {
+        idents: param_names
+            .into_iter()
+            .map(|(user_ident, (real_ident, _record_type))| (user_ident, real_ident))
+            .collect(),
+        types: Vec::new(),
+    };
+
+    if let Some(receiver_self_type) = self_type {
+        replacer.types.push(("Self", receiver_self_type.clone()));
+    }
+
+    for field_expr in custom_fields.0.iter_mut().filter_map(|field| field.value.as_mut()) {
+        visit_expr_mut(&mut replacer, field_expr);
+    }
+}
+
+/// Generate optional `err` and `ret` event expressions.
+#[allow(
+    clippy::single_call_fn,
+    reason = "err and ret event token generation is a named macro pipeline stage"
+)]
+fn gen_events(
+    args: &InstrumentArgs,
+    target: &TokenStream,
+    args_level: &Level,
+) -> (Option<TokenStream>, Option<TokenStream>) {
+    let err_event = args.err_args.as_ref().map(|event_args| {
+        let level_tokens = event_args.level(Level::Error);
+        match event_args.mode {
+            FormatMode::Default | FormatMode::Display => quote!(
+                ::tracing::event!(target: #target, #level_tokens, error = %__tracing_attr_error)
+            ),
+            FormatMode::Debug => quote!(
+                ::tracing::event!(target: #target, #level_tokens, error = ?__tracing_attr_error)
+            ),
+        }
+    });
+
+    let ret_event = args.ret_args.as_ref().map(|event_args| {
+        let level_tokens = event_args.level(args_level.clone());
+        match event_args.mode {
+            FormatMode::Display => quote!(
+                ::tracing::event!(target: #target, #level_tokens, return = %__tracing_attr_return)
+            ),
+            FormatMode::Default | FormatMode::Debug => quote!(
+                ::tracing::event!(target: #target, #level_tokens, return = ?__tracing_attr_return)
+            ),
+        }
+    });
+
+    (err_event, ret_event)
+}
+
+/// Generate the instrumented body for an async function or async block.
+#[allow(
+    clippy::single_call_fn,
+    reason = "async body expansion is a separate macro pipeline stage from synchronous body expansion"
+)]
+fn gen_async_block<B: ToTokens>(
+    block: &B,
+    span_tokens: &TokenStream,
+    follows_from_tokens: &TokenStream,
+    err_event: Option<TokenStream>,
+    ret_event: Option<TokenStream>,
+) -> TokenStream {
+    let instrumented_future = match (err_event, ret_event) {
+        (Some(err_tokens), Some(ret_tokens)) => quote_spanned!(block.span()=>
+            async move {
+                let __match_scrutinee = async move #block.await;
+                match  __match_scrutinee {
+                    Ok(__tracing_attr_return) => {
+                        #ret_tokens;
+                        Ok(__tracing_attr_return)
+                    },
+                    Err(__tracing_attr_error) => {
+                        #err_tokens;
+                        Err(__tracing_attr_error)
+                    }
+                }
+            }
+        ),
+        (Some(err_tokens), None) => quote_spanned!(block.span()=>
+            async move {
+                match async move #block.await {
+                    Ok(__tracing_attr_return) => Ok(__tracing_attr_return),
+                    Err(__tracing_attr_error) => {
+                        #err_tokens;
+                        Err(__tracing_attr_error)
+                    }
+                }
+            }
+        ),
+        (None, Some(ret_tokens)) => quote_spanned!(block.span()=>
+            async move {
+                let __tracing_attr_return = async move #block.await;
+                #ret_tokens;
+                __tracing_attr_return
+            }
+        ),
+        (None, None) => quote_spanned!(block.span()=>
+            async move #block
+        ),
+    };
+
+    quote!(
+        let __tracing_attr_span = #span_tokens;
+        let __tracing_instrument_future = #instrumented_future;
+        if !__tracing_attr_span.is_disabled() {
+            #follows_from_tokens
+            ::tracing::Instrument::instrument(
+                __tracing_instrument_future,
+                __tracing_attr_span
+            )
+            .await
+        } else {
+            __tracing_instrument_future.await
+        }
+    )
+}
+
+/// Generate the instrumented body for a synchronous function.
+#[allow(
+    clippy::single_call_fn,
+    reason = "synchronous body expansion is a separate macro pipeline stage from async body expansion"
+)]
+fn gen_sync_block<B: ToTokens>(
+    block: &B,
+    span_tokens: &TokenStream,
+    follows_from_tokens: &TokenStream,
+    level: &Level,
+    err_event: Option<TokenStream>,
+    ret_event: Option<TokenStream>,
+) -> TokenStream {
+    let enter_span_tokens = quote!(
         // These variables are left uninitialized and initialized only
         // if the tracing level is statically enabled at this point.
         // While the tracing level is also checked at span creation
@@ -360,41 +434,41 @@ fn gen_block<B: ToTokens>(
         let __tracing_attr_span;
         let __tracing_attr_guard;
         if ::tracing::level_enabled!(#level) || ::tracing::if_log_enabled!(#level, {true} else {false}) {
-            __tracing_attr_span = #span;
-            #follows_from
+            __tracing_attr_span = #span_tokens;
+            #follows_from_tokens
             __tracing_attr_guard = __tracing_attr_span.enter();
         }
     );
 
     match (err_event, ret_event) {
-        (Some(err_event), Some(ret_event)) => quote_spanned! {block.span()=>
-            #span
+        (Some(err_tokens), Some(ret_tokens)) => quote_spanned! {block.span()=>
+            #enter_span_tokens
             match (move || #block)() {
-                Ok(x) => {
-                    #ret_event;
-                    Ok(x)
+                Ok(__tracing_attr_return) => {
+                    #ret_tokens;
+                    Ok(__tracing_attr_return)
                 },
-                Err(e) => {
-                    #err_event;
-                    Err(e)
+                Err(__tracing_attr_error) => {
+                    #err_tokens;
+                    Err(__tracing_attr_error)
                 }
             }
         },
-        (Some(err_event), None) => quote_spanned!(block.span()=>
-            #span
+        (Some(err_tokens), None) => quote_spanned!(block.span()=>
+            #enter_span_tokens
             match (move || #block)() {
-                Ok(x) => Ok(x),
-                Err(e) => {
-                    #err_event;
-                    Err(e)
+                Ok(__tracing_attr_return) => Ok(__tracing_attr_return),
+                Err(__tracing_attr_error) => {
+                    #err_tokens;
+                    Err(__tracing_attr_error)
                 }
             }
         ),
-        (None, Some(ret_event)) => quote_spanned!(block.span()=>
-            #span
-            let x = (move || #block)();
-            #ret_event;
-            x
+        (None, Some(ret_tokens)) => quote_spanned!(block.span()=>
+            #enter_span_tokens
+            let __tracing_attr_return = (move || #block)();
+            #ret_tokens;
+            __tracing_attr_return
         ),
         (None, None) => quote_spanned!(block.span() =>
             // Because `quote` produces a stream of tokens _without_ whitespace, the
@@ -402,7 +476,7 @@ fn gen_block<B: ToTokens>(
             // generates a clippy lint about suspicious `if/else` formatting.
             // Therefore, suppress the lint inside the generated code...
             {
-                #span
+                #enter_span_tokens
                 #block
             }
         ),
@@ -410,6 +484,7 @@ fn gen_block<B: ToTokens>(
 }
 
 /// Indicates whether a field should be recorded as `Value` or `Debug`.
+#[derive(Clone, Copy)]
 enum RecordType {
     /// The field should be recorded using its `Value` implementation.
     Value,
@@ -455,54 +530,72 @@ impl RecordType {
     /// Parse `RecordType` from [Type] by looking up
     /// the [`RecordType::TYPES_FOR_VALUE`] array.
     fn parse_from_ty(ty: &Type) -> Self {
-        match ty {
-            Type::Path(TypePath { path, .. })
-                if path
-                    .segments
-                    .iter()
-                    .next_back()
-                    .is_some_and(|path_segment| {
-                        let ident = path_segment.ident.to_string();
-                        Self::TYPES_FOR_VALUE.iter().any(|&t| t == ident)
-                    }) =>
-            {
+        if let &Type::Path(TypePath { ref path, .. }) = ty {
+            if path.segments.iter().next_back().is_some_and(|path_segment| {
+                let ident = path_segment.ident.to_string();
+                Self::TYPES_FOR_VALUE.contains(&ident.as_str())
+            }) {
                 Self::Value
+            } else {
+                Self::Debug
             }
-            Type::Reference(syn::TypeReference { elem, .. }) => Self::parse_from_ty(elem),
-            _ => Self::Debug,
+        } else if let &Type::Reference(TypeReference { ref elem, .. }) = ty {
+            Self::parse_from_ty(elem)
+        } else {
+            Self::Debug
         }
     }
 }
 
-fn param_names(pat: Pat, record_type: RecordType) -> Box<dyn Iterator<Item = (Ident, RecordType)>> {
-    match pat {
+/// Return the identifiers bound by an irrefutable function-argument pattern.
+fn param_names(
+    pattern: Pat,
+    record_type: RecordType,
+) -> Box<dyn Iterator<Item = (Ident, RecordType)>> {
+    match pattern {
         Pat::Ident(PatIdent { ident, .. }) => Box::new(iter::once((ident, record_type))),
-        Pat::Reference(PatReference { pat, .. }) => param_names(*pat, record_type),
+        Pat::Reference(PatReference {
+            pat: referenced_pattern,
+            ..
+        }) => param_names(*referenced_pattern, record_type),
         // We can't get the concrete type of fields in the struct/tuple
         // patterns by using `syn`. e.g. `fn foo(Foo { x, y }: Foo) {}`.
         // Therefore, the struct/tuple patterns in the arguments will just
         // always be recorded as `RecordType::Debug`.
         Pat::Struct(PatStruct { fields, .. }) => Box::new(
-            fields
-                .into_iter()
-                .flat_map(|FieldPat { pat, .. }| param_names(*pat, RecordType::Debug)),
+            fields.into_iter().flat_map(|FieldPat {
+                pat: field_pattern,
+                ..
+            }| param_names(*field_pattern, RecordType::Debug)),
         ),
         Pat::Tuple(PatTuple { elems, .. }) => Box::new(
             elems
                 .into_iter()
-                .flat_map(|p| param_names(p, RecordType::Debug)),
+                .flat_map(|tuple_pattern| param_names(tuple_pattern, RecordType::Debug)),
         ),
         Pat::TupleStruct(PatTupleStruct { elems, .. }) => Box::new(
             elems
                 .into_iter()
-                .flat_map(|p| param_names(p, RecordType::Debug)),
+                .flat_map(|tuple_pattern| param_names(tuple_pattern, RecordType::Debug)),
         ),
 
         // The above *should* cover all cases of irrefutable patterns,
         // but we purposefully don't do any funny business here
         // (such as panicking) because that would obscure rustc's
         // much more informative error message.
-        _ => Box::new(iter::empty()),
+        Pat::Const(_)
+        | Pat::Lit(_)
+        | Pat::Macro(_)
+        | Pat::Or(_)
+        | Pat::Paren(_)
+        | Pat::Path(_)
+        | Pat::Range(_)
+        | Pat::Rest(_)
+        | Pat::Slice(_)
+        | Pat::Type(_)
+        | Pat::Verbatim(_)
+        | Pat::Wild(_)
+        | _ => Box::new(iter::empty()),
     }
 }
 
@@ -515,16 +608,22 @@ enum AsyncKind<'a> {
     /// as generated by `async-trait >= 0.1.44`:
     /// `Box::pin(async move { ... })`
     Async {
+        /// The detected async block containing the user body.
         async_expr: &'a ExprAsync,
+        /// Whether the async block was wrapped in `Box::pin(...)`.
         pinned_box: bool,
     },
 }
 
-pub struct AsyncInfo<'block> {
-    // statement that must be patched
+/// Information needed to instrument an async-trait-generated inner future.
+struct AsyncInfo<'block> {
+    /// Statement in the outer function body that must be replaced.
     source_stmt: &'block Stmt,
+    /// Detected async-trait expansion shape.
     kind: AsyncKind<'block>,
+    /// Concrete receiver type used to rewrite `Self` for old async-trait output.
     self_type: Option<TypePath>,
+    /// Original function whose body contains the async-trait expansion.
     input: &'block ItemFn,
 }
 
@@ -554,7 +653,11 @@ impl<'block> AsyncInfo<'block> {
     ///
     /// (this follows the approach suggested in
     /// <https://github.com/dtolnay/async-trait/issues/45#issuecomment-571245673>)
-    pub(crate) fn from_fn(input: &'block ItemFn) -> Option<Self> {
+    #[allow(
+        clippy::single_call_fn,
+        reason = "async-trait shape detection is isolated from code generation and parser fallback"
+    )]
+    fn from_fn(input: &'block ItemFn) -> Option<Self> {
         // are we in an async context? If yes, this isn't a manual async-like pattern
         if input.sig.asyncness.is_some() {
             return None;
@@ -564,7 +667,7 @@ impl<'block> AsyncInfo<'block> {
 
         // list of async functions declared inside the block
         let inside_funs = block.stmts.iter().filter_map(|stmt| {
-            if let Stmt::Item(Item::Fn(fun)) = &stmt {
+            if let &Stmt::Item(Item::Fn(ref fun)) = stmt {
                 // If the function is async, this is a candidate
                 if fun.sig.asyncness.is_some() {
                     return Some((stmt, fun));
@@ -576,7 +679,7 @@ impl<'block> AsyncInfo<'block> {
         // last expression of the block: it determines the return value of the
         // block, this is quite likely a `Box::pin` statement or an async block
         let (last_expr_stmt, last_expr) = block.stmts.iter().rev().find_map(|stmt| {
-            if let Stmt::Expr(expr, _semi) = stmt {
+            if let Stmt::Expr(ref expr, _) = *stmt {
                 Some((stmt, expr))
             } else {
                 None
@@ -584,7 +687,7 @@ impl<'block> AsyncInfo<'block> {
         })?;
 
         // is the last expression an async block?
-        if let Expr::Async(async_expr) = last_expr {
+        if let Expr::Async(ref async_expr) = *last_expr {
             return Some(AsyncInfo {
                 source_stmt: last_expr_stmt,
                 kind: AsyncKind::Async {
@@ -597,17 +700,20 @@ impl<'block> AsyncInfo<'block> {
         }
 
         // is the last expression a function call?
-        let (outside_func, outside_args) = match last_expr {
-            Expr::Call(ExprCall { func, args, .. }) => (func, args),
-            _ => return None,
+        let Expr::Call(ExprCall {
+            func: ref outside_func,
+            args: ref outside_args,
+            ..
+        }) = *last_expr
+        else {
+            return None;
         };
 
         // is it a call to `Box::pin()`?
-        let path = match outside_func.as_ref() {
-            Expr::Path(path) => &path.path,
-            _ => return None,
+        let Expr::Path(ref outside_path) = *outside_func.as_ref() else {
+            return None;
         };
-        if !path_to_string(path).ends_with("Box::pin") {
+        if !path_to_string(&outside_path.path).ends_with("Box::pin") {
             return None;
         }
 
@@ -620,7 +726,7 @@ impl<'block> AsyncInfo<'block> {
 
         // Is the argument to Box::pin an async block that
         // captures its arguments?
-        if let Expr::Async(async_expr) = &outside_args[0] {
+        if let Expr::Async(ref async_expr) = outside_args[0] {
             return Some(AsyncInfo {
                 source_stmt: last_expr_stmt,
                 kind: AsyncKind::Async {
@@ -633,39 +739,42 @@ impl<'block> AsyncInfo<'block> {
         }
 
         // Is the argument to Box::pin a function call itself?
-        let func = match &outside_args[0] {
-            Expr::Call(ExprCall { func, .. }) => func,
-            _ => return None,
+        let Expr::Call(ExprCall {
+            func: ref inner_call_func,
+            ..
+        }) = outside_args[0]
+        else {
+            return None;
         };
 
         // "stringify" the path of the function called
-        let func_name = match **func {
-            Expr::Path(ref func_path) => path_to_string(&func_path.path),
-            _ => return None,
+        let Expr::Path(ref func_path) = *inner_call_func.as_ref() else {
+            return None;
         };
+        let func_name = path_to_string(&func_path.path);
 
         // Was that function defined inside of the current block?
         // If so, retrieve the statement where it was declared and the function itself
-        let (stmt_func_declaration, func) = inside_funs
+        let (stmt_func_declaration, inner_func) = inside_funs
             .into_iter()
-            .find(|(_, fun)| fun.sig.ident == func_name)?;
+            .find(|candidate| candidate.1.sig.ident == func_name)?;
 
         // If "_self" is present as an argument, we store its type to be able to rewrite "Self" (the
         // parameter type) with the type of "_self"
         let mut self_type = None;
-        for arg in &func.sig.inputs {
-            if let FnArg::Typed(ty) = arg
-                && let Pat::Ident(PatIdent { ref ident, .. }) = *ty.pat
+        for arg in &inner_func.sig.inputs {
+            if let FnArg::Typed(ref typed_arg) = *arg
+                && let Pat::Ident(PatIdent { ref ident, .. }) = *typed_arg.pat
                 && ident == "_self"
             {
-                let mut ty = *ty.ty.clone();
+                let mut arg_type = *typed_arg.ty.clone();
                 // extract the inner type if the argument is "&self" or "&mut self"
-                if let Type::Reference(syn::TypeReference { elem, .. }) = ty {
-                    ty = *elem;
+                if let Type::Reference(TypeReference { elem, .. }) = arg_type {
+                    arg_type = *elem;
                 }
 
-                if let Type::Path(tp) = ty {
-                    self_type = Some(tp);
+                if let Type::Path(type_path) = arg_type {
+                    self_type = Some(type_path);
                     break;
                 }
             }
@@ -673,28 +782,70 @@ impl<'block> AsyncInfo<'block> {
 
         Some(AsyncInfo {
             source_stmt: stmt_func_declaration,
-            kind: AsyncKind::Function(func),
+            kind: AsyncKind::Function(inner_func),
             self_type,
             input,
         })
     }
 
-    pub(crate) fn gen_async(
+    /// Generate the outer function with its detected inner future instrumented.
+    fn gen_async(
         self,
-        args: InstrumentArgs,
+        args: &InstrumentArgs,
         instrumented_function_name: &str,
     ) -> proc_macro::TokenStream {
-        let replacement_index = self
-            .input
+        let Self {
+            source_stmt,
+            kind,
+            self_type,
+            input,
+        } = self;
+
+        let replacement_index = input
             .block
             .stmts
             .iter()
-            .enumerate()
-            .find(|(_iter, stmt)| *stmt == self.source_stmt)
-            .map(|(stmt_index, _stmt)| stmt_index);
+            .position(|stmt| stmt == source_stmt);
 
-        let out_stmts: Vec<TokenStream> = self
-            .input
+        let replacement = match kind {
+            // `Box::pin(immediately_invoked_async_fn())`
+            AsyncKind::Function(fun) => {
+                let maybe_fun = MaybeItemFn::from((*fun).clone());
+                let maybe_fun_ref = maybe_fun.as_ref();
+                gen_function(
+                    &maybe_fun_ref,
+                    args.clone(),
+                    instrumented_function_name,
+                    self_type.as_ref(),
+                )
+            }
+            // `async move { ... }`, optionally pinned
+            AsyncKind::Async {
+                async_expr,
+                pinned_box,
+            } => {
+                let instrumented_block = gen_block(
+                    &async_expr.block,
+                    &input.sig.inputs,
+                    true,
+                    args.clone(),
+                    instrumented_function_name,
+                    None,
+                );
+                let async_attrs = &async_expr.attrs;
+                if pinned_box {
+                    quote! {
+                        ::std::boxed::Box::pin(#(#async_attrs) * async move { #instrumented_block })
+                    }
+                } else {
+                    quote! {
+                        #(#async_attrs) * async move { #instrumented_block }
+                    }
+                }
+            }
+        };
+
+        let out_stmts: Vec<TokenStream> = input
             .block
             .stmts
             .iter()
@@ -704,48 +855,13 @@ impl<'block> AsyncInfo<'block> {
                     return stmt.to_token_stream();
                 }
 
-                match &self.kind {
-                // `Box::pin(immediately_invoked_async_fn())`
-                AsyncKind::Function(fun) => {
-                    let fun = MaybeItemFn::from((*fun).clone());
-                    gen_function(
-                        fun.as_ref(),
-                        args.clone(),
-                        instrumented_function_name,
-                        self.self_type.as_ref(),
-                    )
-                }
-                // `async move { ... }`, optionally pinned
-                AsyncKind::Async {
-                    async_expr,
-                    pinned_box,
-                } => {
-                    let instrumented_block = gen_block(
-                        &async_expr.block,
-                        &self.input.sig.inputs,
-                        true,
-                        args.clone(),
-                        instrumented_function_name,
-                        None,
-                    );
-                    let async_attrs = &async_expr.attrs;
-                    if *pinned_box {
-                        quote! {
-                            ::std::boxed::Box::pin(#(#async_attrs) * async move { #instrumented_block })
-                        }
-                    } else {
-                        quote! {
-                            #(#async_attrs) * async move { #instrumented_block }
-                        }
-                    }
-                }
-                }
+                replacement.clone()
             })
             .collect();
 
-        let vis = &self.input.vis;
-        let sig = &self.input.sig;
-        let attrs = &self.input.attrs;
+        let vis = &input.vis;
+        let sig = &input.sig;
+        let attrs = &input.attrs;
         quote!(
             #(#attrs) *
             #vis #sig {
@@ -756,7 +872,7 @@ impl<'block> AsyncInfo<'block> {
     }
 }
 
-// Return a path as a String
+/// Return a path's segments joined by `::`, ignoring path arguments.
 fn path_to_string(path: &Path) -> String {
     let mut segments = path.segments.iter();
     let Some(first_segment) = segments.next() else {
@@ -776,51 +892,54 @@ fn path_to_string(path: &Path) -> String {
 /// fields expressions when the function is generated by an old
 /// version of async-trait).
 struct IdentAndTypesRenamer<'a> {
+    /// Type names that should be replaced with concrete type paths.
     types: Vec<(&'a str, TypePath)>,
+    /// Identifier names that should be rewritten to generated binding names.
     idents: Vec<(Ident, Ident)>,
 }
 
 impl VisitMut for IdentAndTypesRenamer<'_> {
-    // we deliberately compare strings because we want to ignore the spans
-    // If we apply clippy's lint, the behavior changes
+    // `Ident` equality compares the symbol text, which is what we need when
+    // replacing user-visible names with async-trait generated bindings.
     fn visit_ident_mut(&mut self, id: &mut Ident) {
-        for (old_ident, new_ident) in &self.idents {
-            if *old_ident == id.to_string() {
+        for replacement in &self.idents {
+            let old_ident = &replacement.0;
+            let new_ident = &replacement.1;
+            if old_ident == id {
                 *id = new_ident.clone();
             }
         }
     }
 
-    fn visit_type_mut(&mut self, ty: &mut Type) {
-        for (type_name, new_type) in &self.types {
-            if let Type::Path(TypePath { path, .. }) = ty
-                && path_to_string(path) == *type_name
-            {
-                *ty = Type::Path(new_type.clone());
+    fn visit_type_mut(&mut self, field_type: &mut Type) {
+        for replacement in &self.types {
+            let type_name = replacement.0;
+            let new_type = &replacement.1;
+            let replace_type = if let Type::Path(TypePath { ref path, .. }) = *field_type {
+                path_to_string(path) == type_name
+            } else {
+                false
+            };
+            if replace_type {
+                *field_type = Type::Path(new_type.clone());
             }
         }
     }
 }
 
-// Replaces any `impl Trait` with `_` so it can be used as the type in
-// a `let` statement's LHS.
+/// Replaces any `impl Trait` with `_` so it can be used as the type in
+/// a `let` statement's LHS.
 struct ImplTraitEraser;
 
 impl VisitMut for ImplTraitEraser {
-    fn visit_type_mut(&mut self, t: &mut Type) {
-        if let Type::ImplTrait(..) = t {
-            *t = syn::TypeInfer {
-                underscore_token: Token![_](t.span()),
+    fn visit_type_mut(&mut self, field_type: &mut Type) {
+        if let Type::ImplTrait(..) = *field_type {
+            *field_type = TypeInfer {
+                underscore_token: Token![_](field_type.span()),
             }
             .into();
         } else {
-            syn::visit_mut::visit_type_mut(self, t);
+            visit_type_mut(self, field_type);
         }
     }
-}
-
-fn erase_impl_trait(ty: &Type) -> Type {
-    let mut ty = ty.clone();
-    ImplTraitEraser.visit_type_mut(&mut ty);
-    ty
 }

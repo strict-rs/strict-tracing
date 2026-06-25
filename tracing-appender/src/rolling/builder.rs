@@ -7,10 +7,15 @@ use thiserror::Error;
 /// [builder]: https://rust-unofficial.github.io/patterns/patterns/creational/builder.html
 #[derive(Debug)]
 pub struct Builder {
+    /// Rotation strategy used to choose log filenames and rollover times.
     pub(super) rotation: Rotation,
+    /// Optional non-empty filename prefix written before the timestamp.
     pub(super) prefix: Option<String>,
+    /// Optional non-empty filename suffix written after the timestamp.
     pub(super) suffix: Option<String>,
+    /// Optional non-empty symlink filename that points at the latest log file.
     pub(super) latest_symlink: Option<String>,
+    /// Optional maximum number of matching log files to retain.
     pub(super) max_files: Option<usize>,
 }
 
@@ -18,12 +23,15 @@ pub struct Builder {
 #[derive(Error, Debug)]
 #[error("{context}: {source}")]
 pub struct InitError {
+    /// Static description of the operation that failed.
     context: &'static str,
+    /// Underlying I/O error returned while initializing the appender.
     #[source]
     source: io::Error,
 }
 
 impl InitError {
+    /// Returns an error adapter that attaches `context` to an I/O error.
     pub(crate) fn ctx(context: &'static str) -> impl FnOnce(io::Error) -> Self {
         move |source| Self { context, source }
     }
@@ -66,16 +74,16 @@ impl Builder {
     /// # Examples
     ///
     /// ```
-    /// # fn docs() {
+    /// # fn docs() -> Result<(), Box<dyn std::error::Error>> {
     /// use tracing_appender::rolling::{Rotation, RollingFileAppender};
     ///
     /// let appender = RollingFileAppender::builder()
     ///     .rotation(Rotation::HOURLY) // rotate log files once every hour
     ///     // ...
-    ///     .build("/var/log")
-    ///     .expect("failed to initialize rolling file appender");
+    ///     .build("/var/log")?;
     ///
-    /// # drop(appender)
+    /// # drop(appender);
+    /// # Ok(())
     /// # }
     /// ```
     ///
@@ -98,13 +106,13 @@ impl Builder {
     /// ```
     /// use tracing_appender::rolling::RollingFileAppender;
     ///
-    /// # fn docs() {
+    /// # fn docs() -> Result<(), Box<dyn std::error::Error>> {
     /// let appender = RollingFileAppender::builder()
     ///     .filename_prefix("myapp.log") // log files will have names like "myapp.log.2019-01-01"
     ///     // ...
-    ///     .build("/var/log")
-    ///     .expect("failed to initialize rolling file appender");
-    /// # drop(appender)
+    ///     .build("/var/log")?;
+    /// # drop(appender);
+    /// # Ok(())
     /// # }
     /// ```
     ///
@@ -113,26 +121,26 @@ impl Builder {
     /// ```
     /// use tracing_appender::rolling::RollingFileAppender;
     ///
-    /// # fn docs() {
+    /// # fn docs() -> Result<(), Box<dyn std::error::Error>> {
     /// let appender = RollingFileAppender::builder()
     ///     .filename_prefix("") // log files will have names like "2019-01-01"
     ///     // ...
-    ///     .build("/var/log")
-    ///     .expect("failed to initialize rolling file appender");
-    /// # drop(appender)
+    ///     .build("/var/log")?;
+    /// # drop(appender);
+    /// # Ok(())
     /// # }
     /// ```
     ///
     /// [rotation strategy]: Rotation
     #[must_use]
-    pub fn filename_prefix(self, prefix: impl Into<String>) -> Self {
-        let prefix = prefix.into();
+    pub fn filename_prefix(self, filename_prefix: impl Into<String>) -> Self {
+        let configured_prefix = filename_prefix.into();
         // If the configured prefix is the empty string, then don't include a
         // separator character.
-        let prefix = if prefix.is_empty() {
+        let prefix = if configured_prefix.is_empty() {
             None
         } else {
-            Some(prefix)
+            Some(configured_prefix)
         };
         Self { prefix, ..self }
     }
@@ -150,13 +158,13 @@ impl Builder {
     /// ```
     /// use tracing_appender::rolling::RollingFileAppender;
     ///
-    /// # fn docs() {
+    /// # fn docs() -> Result<(), Box<dyn std::error::Error>> {
     /// let appender = RollingFileAppender::builder()
     ///     .filename_suffix("myapp.log") // log files will have names like "2019-01-01.myapp.log"
     ///     // ...
-    ///     .build("/var/log")
-    ///     .expect("failed to initialize rolling file appender");
-    /// # drop(appender)
+    ///     .build("/var/log")?;
+    /// # drop(appender);
+    /// # Ok(())
     /// # }
     /// ```
     ///
@@ -165,26 +173,26 @@ impl Builder {
     /// ```
     /// use tracing_appender::rolling::RollingFileAppender;
     ///
-    /// # fn docs() {
+    /// # fn docs() -> Result<(), Box<dyn std::error::Error>> {
     /// let appender = RollingFileAppender::builder()
     ///     .filename_suffix("") // log files will have names like "2019-01-01"
     ///     // ...
-    ///     .build("/var/log")
-    ///     .expect("failed to initialize rolling file appender");
-    /// # drop(appender)
+    ///     .build("/var/log")?;
+    /// # drop(appender);
+    /// # Ok(())
     /// # }
     /// ```
     ///
     /// [rotation strategy]: Rotation
     #[must_use]
-    pub fn filename_suffix(self, suffix: impl Into<String>) -> Self {
-        let suffix = suffix.into();
+    pub fn filename_suffix(self, filename_suffix: impl Into<String>) -> Self {
+        let configured_suffix = filename_suffix.into();
         // If the configured suffix is the empty string, then don't include a
         // separator character.
-        let suffix = if suffix.is_empty() {
+        let suffix = if configured_suffix.is_empty() {
             None
         } else {
-            Some(suffix)
+            Some(configured_suffix)
         };
         Self { suffix, ..self }
     }
@@ -222,20 +230,20 @@ impl Builder {
     /// ```
     /// use tracing_appender::rolling::RollingFileAppender;
     ///
-    /// # fn docs() {
+    /// # fn docs() -> Result<(), Box<dyn std::error::Error>> {
     /// let appender = RollingFileAppender::builder()
     ///     .max_log_files(5) // only the most recent 5 log files will be kept
     ///     // ...
-    ///     .build("/var/log")
-    ///     .expect("failed to initialize rolling file appender");
-    /// # drop(appender)
+    ///     .build("/var/log")?;
+    /// # drop(appender);
+    /// # Ok(())
     /// # }
     /// ```
     #[must_use]
-    pub fn max_log_files(self, n: usize) -> Self {
+    pub fn max_log_files(self, max_files: usize) -> Self {
         Self {
-            // Setting `n` to 0 will disable the max files (effectively make it infinite).
-            max_files: Some(n).filter(|&n| n > 0),
+            // Setting `max_files` to 0 will disable the max files (effectively make it infinite).
+            max_files: (max_files > 0).then_some(max_files),
             ..self
         }
     }
@@ -248,19 +256,23 @@ impl Builder {
     /// ```
     /// use tracing_appender::rolling::RollingFileAppender;
     ///
-    /// # fn docs() {
+    /// # fn docs() -> Result<(), Box<dyn std::error::Error>> {
     /// let appender = RollingFileAppender::builder()
     ///     .latest_symlink("log.latest")
     ///     // ...
-    ///     .build("/var/log")
-    ///     .expect("failed to initialize rolling file appender");
-    /// # drop(appender)
+    ///     .build("/var/log")?;
+    /// # drop(appender);
+    /// # Ok(())
     /// # }
     /// ```
     #[must_use]
     pub fn latest_symlink(self, name: impl Into<String>) -> Self {
-        let name = name.into();
-        let latest_symlink = if name.is_empty() { None } else { Some(name) };
+        let symlink_name = name.into();
+        let latest_symlink = if symlink_name.is_empty() {
+            None
+        } else {
+            Some(symlink_name)
+        };
         Self {
             latest_symlink,
             ..self
@@ -270,29 +282,37 @@ impl Builder {
     /// Builds a new [`RollingFileAppender`] with the configured parameters,
     /// emitting log files to the provided directory.
     ///
-    /// Unlike [`RollingFileAppender::new`], this returns a `Result` rather than
-    /// panicking when the appender cannot be initialized.
+    /// Like [`RollingFileAppender::new`], this returns a `Result` when the
+    /// appender cannot be initialized.
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`InitError`] if initializing the rolling appender fails, such
+    /// as when directory, file, retention cleanup, or latest-symlink I/O cannot
+    /// be completed.
     ///
     /// # Examples
     ///
     /// ```
     /// use tracing_appender::rolling::{Rotation, RollingFileAppender};
     ///
-    /// # fn docs() {
+    /// # fn docs() -> Result<(), Box<dyn std::error::Error>> {
     /// let appender = RollingFileAppender::builder()
     ///     .rotation(Rotation::DAILY) // rotate log files once per day
     ///     .filename_prefix("myapp.log") // log files will have names like "myapp.log.2019-01-01"
     ///     .build("/var/log/myapp") // write log files to the '/var/log/myapp' directory
-    ///     .expect("failed to initialize rolling file appender");
+    ///     ?;
     /// # drop(appender);
+    /// # Ok(())
     /// # }
     /// ```
     ///
     /// This is equivalent to
     /// ```
-    /// # fn docs() {
-    /// let appender = tracing_appender::rolling::daily("myapp.log", "/var/log/myapp");
+    /// # fn docs() -> Result<(), Box<dyn std::error::Error>> {
+    /// let appender = tracing_appender::rolling::daily("/var/log/myapp", "myapp.log")?;
     /// # drop(appender);
+    /// # Ok(())
     /// # }
     /// ```
     pub fn build(&self, directory: impl AsRef<Path>) -> Result<RollingFileAppender, InitError> {

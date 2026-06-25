@@ -1,12 +1,14 @@
 //! Example binary for tracing workspace checks.
+#![cfg(test)]
 
+use strict_test_support::{TestFailure, ensure_ok};
 use tracing::Level;
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
 use tracing_mock::*;
 
 #[test]
-fn named_levels() {
+fn named_levels() -> Result<(), TestFailure> {
     #[instrument(level = "trace")]
     fn trace() {}
 
@@ -40,7 +42,7 @@ fn named_levels() {
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
+    with_default(subscriber, || {
         trace();
         debug();
         info();
@@ -48,11 +50,12 @@ fn named_levels() {
         error();
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn numeric_levels() {
+fn numeric_levels() -> Result<(), TestFailure> {
     #[instrument(level = 1)]
     fn trace() {}
 
@@ -86,7 +89,7 @@ fn numeric_levels() {
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
+    with_default(subscriber, || {
         trace();
         debug();
         info();
@@ -94,11 +97,12 @@ fn numeric_levels() {
         error();
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn enum_levels() {
+fn enum_levels() -> Result<(), TestFailure> {
     #[instrument(level = Level::TRACE)]
     fn trace() {}
 
@@ -132,7 +136,7 @@ fn enum_levels() {
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
+    with_default(subscriber, || {
         trace();
         debug();
         info();
@@ -140,5 +144,6 @@ fn enum_levels() {
         error();
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }

@@ -1,5 +1,11 @@
 //! Support for serializing fields as `serde` structs or maps.
-use super::*;
+use serde::{Serialize, ser::Serializer};
+use tracing_core::{
+    event::Event,
+    span::{Attributes, Record},
+};
+
+use super::{SerdeMapVisitor, sealed};
 
 /// A `serde::Serialize` adapter that records tracing fields as a map.
 #[derive(Debug)]
@@ -25,8 +31,8 @@ impl Serialize for SerializeFieldMap<'_, Event<'_>> {
         S: Serializer,
     {
         let len = self.0.fields().count();
-        let serializer = serializer.serialize_map(Some(len))?;
-        let mut visitor = SerdeMapVisitor::new(serializer);
+        let map = serializer.serialize_map(Some(len))?;
+        let mut visitor = SerdeMapVisitor::new(map);
         self.0.record(&mut visitor);
         visitor.finish()
     }
@@ -38,8 +44,8 @@ impl Serialize for SerializeFieldMap<'_, Attributes<'_>> {
         S: Serializer,
     {
         let len = self.0.metadata().fields().len();
-        let serializer = serializer.serialize_map(Some(len))?;
-        let mut visitor = SerdeMapVisitor::new(serializer);
+        let map = serializer.serialize_map(Some(len))?;
+        let mut visitor = SerdeMapVisitor::new(map);
         self.0.record(&mut visitor);
         visitor.finish()
     }
@@ -50,8 +56,8 @@ impl Serialize for SerializeFieldMap<'_, Record<'_>> {
     where
         S: Serializer,
     {
-        let serializer = serializer.serialize_map(None)?;
-        let mut visitor = SerdeMapVisitor::new(serializer);
+        let map = serializer.serialize_map(None)?;
+        let mut visitor = SerdeMapVisitor::new(map);
         self.0.record(&mut visitor);
         visitor.finish()
     }

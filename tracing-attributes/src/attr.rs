@@ -1,48 +1,51 @@
-use core::marker::PhantomData;
-
-use syn::{Expr, Ident, LitInt, LitStr, Path, Token, punctuated::Punctuated};
-
-use proc_macro2::TokenStream;
-use quote::{ToTokens, quote, quote_spanned};
-use syn::ext::IdentExt as _;
-use syn::parse::{Parse, ParseStream};
-use syn::token::Brace;
-
 /// Arguments to `#[instrument(err(...))]` and `#[instrument(ret(...))]` which describe how the
 /// return value event should be emitted.
 #[derive(Clone, Default, Debug)]
-pub struct EventArgs {
+struct EventArgs {
+    /// Optional event level override for `err` or `ret` events.
     level: Option<Level>,
-    pub(crate) mode: FormatMode,
+    /// Formatting mode used for the emitted value or error field.
+    mode: FormatMode,
 }
 
+/// Parsed arguments supplied to the `#[instrument(...)]` attribute.
 #[derive(Clone, Default, Debug)]
-pub struct InstrumentArgs {
+struct InstrumentArgs {
+    /// Optional span level override.
     level: Option<Level>,
-    pub(crate) name: Option<LitStrOrIdent>,
+    /// Optional span name override.
+    name: Option<LitStrOrIdent>,
+    /// Optional span target override.
     target: Option<LitStrOrIdent>,
-    pub(crate) parent: Option<Expr>,
-    pub(crate) follows_from: Option<Expr>,
-    pub(crate) skips: Vec<Ident>,
-    pub(crate) skip_all: bool,
-    pub(crate) fields: Option<Fields>,
-    pub(crate) err_args: Option<EventArgs>,
-    pub(crate) ret_args: Option<EventArgs>,
+    /// Optional explicit parent span expression.
+    parent: Option<Expr>,
+    /// Optional `follows_from` causal span expression.
+    follows_from: Option<Expr>,
+    /// Function parameters that should not be recorded as fields.
+    skips: Vec<Ident>,
+    /// Whether all function parameters should be skipped.
+    skip_all: bool,
+    /// Custom fields supplied through `fields(...)`.
+    fields: Option<Fields>,
+    /// Optional configuration for an emitted error event.
+    err_args: Option<EventArgs>,
+    /// Optional configuration for an emitted return-value event.
+    ret_args: Option<EventArgs>,
     /// Errors describing any unrecognized parse inputs that we skipped.
     parse_warnings: Vec<syn::Error>,
 }
 
 impl InstrumentArgs {
-    pub(crate) fn level(&self) -> Level {
+    /// Return the configured span level, defaulting to `INFO`.
+    fn level(&self) -> Level {
         self.level.clone().unwrap_or(Level::Info)
     }
 
-    pub(crate) fn target(&self) -> impl ToTokens + use<> {
-        if let Some(ref target) = self.target {
-            quote!(#target)
-        } else {
-            quote!(module_path!())
-        }
+    /// Return the configured span target tokens, defaulting to `module_path!()`.
+    fn target(&self) -> TokenStream {
+        self.target
+            .as_ref()
+            .map_or_else(|| quote!(module_path!()), |target| quote!(#target))
     }
 
     /// Generate "deprecation" warnings for any unrecognized attribute inputs
@@ -51,17 +54,17 @@ impl InstrumentArgs {
     /// For backwards compatibility, we need to emit compiler warnings rather
     /// than errors for unrecognized inputs. Generating a fake deprecation is
     /// the only way to do this on stable Rust right now.
-    pub(crate) fn warnings(&self) -> impl ToTokens + use<> {
+    fn warnings(&self) -> impl ToTokens + use<> {
         let warnings = self.parse_warnings.iter().map(|err| {
-            let msg = format!("found unrecognized input, {err}");
-            let msg = LitStr::new(&msg, err.span());
+            let message_text = format!("found unrecognized input, {err}");
+            let message = LitStr::new(&message_text, err.span());
             // TODO(eliza): This is a bit of a hack, but it's just about the
             // only way to emit warnings from a proc macro on stable Rust.
             // Eventually, when the `proc_macro::Diagnostic` API stabilizes, we
             // should definitely use that instead.
             quote_spanned! {err.span()=>
                 {
-                    #[deprecated(since = "not actually deprecated", note = #msg)]
+                    #[deprecated(since = "not actually deprecated", note = #message)]
                     const TRACING_INSTRUMENT_WARNING: () = ();
                     let _ = TRACING_INSTRUMENT_WARNING;
                 }
@@ -141,7 +144,7 @@ impl Parse for InstrumentArgs {
                 }
                 args.fields = Some(input.parse()?);
             } else if lookahead.peek(kw::err) {
-                drop(input.parse::<kw::err>());
+                let _err: kw::err = input.parse()?;
                 let err_args = EventArgs::parse(input)?;
                 args.err_args = Some(err_args);
             } else if lookahead.peek(kw::ret) {
@@ -158,7 +161,7 @@ impl Parse for InstrumentArgs {
                 args.parse_warnings.push(lookahead.error());
                 // Parse the unrecognized token tree to advance the parse
                 // stream, and throw it away so we can keep parsing.
-                drop(input.parse::<proc_macro2::TokenTree>());
+                let _unknown: proc_macro2::TokenTree = input.parse()?;
             }
         }
         Ok(args)
@@ -166,18 +169,19 @@ impl Parse for InstrumentArgs {
 }
 
 impl EventArgs {
-    pub(crate) fn level(&self, default: Level) -> Level {
+    /// Return the configured event level, falling back to the caller-provided default.
+    fn level(&self, default: Level) -> Level {
         self.level.clone().unwrap_or(default)
     }
 }
 
 impl Parse for EventArgs {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        if !input.peek(syn::token::Paren) {
+        if !input.peek(Paren) {
             return Ok(Self::default());
         }
         let content;
-        let _ = syn::parenthesized!(content in input);
+        let _paren = syn::parenthesized!(content in input);
         let mut result = Self::default();
         let mut parse_one_arg = || {
             let lookahead = content.lookahead1();
@@ -186,18 +190,25 @@ impl Parse for EventArgs {
                     return Err(content.error("expected only a single `level` argument"));
                 }
                 result.level = Some(content.parse()?);
-            } else if result.mode != FormatMode::default() {
+                return Ok(());
+            }
+
+            if result.mode != FormatMode::default() {
                 return Err(content.error("expected only a single format argument"));
-            } else if let Some(ident) = content.parse::<Option<Ident>>()? {
-                match ident.to_string().as_str() {
-                    "Debug" => result.mode = FormatMode::Debug,
-                    "Display" => result.mode = FormatMode::Display,
-                    _ => {
-                        return Err(syn::Error::new(
-                            ident.span(),
-                            "unknown event formatting mode, expected either `Debug` or `Display`",
-                        ));
-                    }
+            }
+
+            let Some(ident) = content.parse::<Option<Ident>>()? else {
+                return Ok(());
+            };
+
+            match ident.to_string().as_str() {
+                "Debug" => result.mode = FormatMode::Debug,
+                "Display" => result.mode = FormatMode::Display,
+                _ => {
+                    return Err(syn::Error::new(
+                        ident.span(),
+                        "unknown event formatting mode, expected either `Debug` or `Display`",
+                    ));
                 }
             }
             Ok(())
@@ -205,7 +216,7 @@ impl Parse for EventArgs {
         parse_one_arg()?;
         if !content.is_empty() {
             if content.lookahead1().peek(Token![,]) {
-                let _ = content.parse::<Token![,]>()?;
+                let _comma: Token![,] = content.parse()?;
                 parse_one_arg()?;
             } else {
                 return Err(content.error("expected `,` or `)`"));
@@ -215,17 +226,20 @@ impl Parse for EventArgs {
     }
 }
 
+/// Either a string literal or an identifier used by `name = ...` and `target = ...`.
 #[derive(Debug, Clone)]
-pub enum LitStrOrIdent {
+enum LitStrOrIdent {
+    /// A literal value such as `"my_span"`.
     LitStr(LitStr),
+    /// An identifier whose value is resolved in generated code.
     Ident(Ident),
 }
 
 impl ToTokens for LitStrOrIdent {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        match self {
-            Self::LitStr(target) => target.to_tokens(tokens),
-            Self::Ident(ident) => ident.to_tokens(tokens),
+        match *self {
+            Self::LitStr(ref target) => target.to_tokens(tokens),
+            Self::Ident(ref ident) => ident.to_tokens(tokens),
         }
     }
 }
@@ -239,8 +253,11 @@ impl Parse for LitStrOrIdent {
     }
 }
 
+/// Parser for `keyword = string_or_ident` arguments.
 struct StrArg<T> {
+    /// Parsed argument value.
     value: LitStrOrIdent,
+    /// Marker tying this parser to the expected custom keyword.
     _p: PhantomData<T>,
 }
 
@@ -256,8 +273,11 @@ impl<T: Parse> Parse for StrArg<T> {
     }
 }
 
+/// Parser for `keyword = expr` arguments.
 struct ExprArg<T> {
+    /// Parsed expression value.
     value: Expr,
+    /// Marker tying this parser to the expected custom keyword.
     _p: PhantomData<T>,
 }
 
@@ -273,13 +293,14 @@ impl<T: Parse> Parse for ExprArg<T> {
     }
 }
 
+/// Parsed identifiers from `skip(...)`.
 struct Skips(Vec<Ident>);
 
 impl Parse for Skips {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        drop(input.parse::<kw::skip>());
+        let _skip: kw::skip = input.parse()?;
         let content;
-        let _ = syn::parenthesized!(content in input);
+        let _paren = syn::parenthesized!(content in input);
         let names = content.parse_terminated(Ident::parse_any, Token![,])?;
         let mut skips = Vec::new();
         for name in names {
@@ -293,53 +314,72 @@ impl Parse for Skips {
     }
 }
 
-#[derive(Clone, Debug, Hash, PartialEq, Eq, Default)]
-pub enum FormatMode {
+/// Formatting mode for emitted `err` and `ret` events.
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq, Default)]
+enum FormatMode {
+    /// Use the macro's default formatter for the event kind.
     #[default]
     Default,
+    /// Use `%`, requiring `Display`.
     Display,
+    /// Use `?`, requiring `Debug`.
     Debug,
 }
 
+/// Parsed custom fields from `fields(...)`.
 #[derive(Clone, Debug)]
-pub struct Fields(pub(crate) Punctuated<Field, Token![,]>);
+struct Fields(
+    /// Comma-separated custom field definitions.
+    Punctuated<Field, Token![,]>,
+);
 
+/// One parsed field entry from `fields(...)`.
 #[derive(Clone, Debug)]
-pub struct Field {
-    pub(crate) name: FieldName,
-    pub(crate) value: Option<Expr>,
-    pub(crate) kind: FieldKind,
+struct Field {
+    /// Field name, either dotted identifiers or `{expr}`.
+    name: FieldName,
+    /// Optional explicit field value after `=`.
+    value: Option<Expr>,
+    /// Formatting sigil or value mode for this field.
+    kind: FieldKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum FieldKind {
+/// Formatting mode for a custom field.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FieldKind {
+    /// Format the field with `?`.
     Debug,
+    /// Format the field with `%`.
     Display,
+    /// Record the field as a `tracing::Value`.
     Value,
 }
 
+/// Parsed custom field name.
 #[derive(Clone, Debug)]
-pub enum FieldName {
+enum FieldName {
+    /// Field name from the `{expr}` dynamic-name form.
     Expr(Expr),
+    /// Field name from one or more dotted identifiers.
     Punctuated(Punctuated<Ident, Token![.]>),
 }
 
 impl ToTokens for FieldName {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        match self {
-            Self::Expr(expr) => {
-                Brace::default().surround(tokens, |tokens| expr.to_tokens(tokens));
+        match *self {
+            Self::Expr(ref expr) => {
+                Brace::default().surround(tokens, |inner_tokens| expr.to_tokens(inner_tokens));
             }
-            Self::Punctuated(punctuated) => punctuated.to_tokens(tokens),
+            Self::Punctuated(ref punctuated) => punctuated.to_tokens(tokens),
         }
     }
 }
 
 impl Parse for Fields {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        drop(input.parse::<kw::fields>());
+        let _fields: kw::fields = input.parse()?;
         let content;
-        let _ = syn::parenthesized!(content in input);
+        let _paren = syn::parenthesized!(content in input);
         let fields = content.parse_terminated(Field::parse, Token![,])?;
         Ok(Self(fields))
     }
@@ -353,18 +393,11 @@ impl ToTokens for Fields {
 
 impl Parse for Field {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let mut kind = FieldKind::Value;
-        if input.peek(Token![%]) {
-            let _percent: Token![%] = input.parse()?;
-            kind = FieldKind::Display;
-        } else if input.peek(Token![?]) {
-            let _question: Token![?] = input.parse()?;
-            kind = FieldKind::Debug;
-        }
+        let mut kind = parse_field_kind_prefix(input)?.unwrap_or(FieldKind::Value);
         // Parse name as either an expr between braces or a dotted identifier.
         let name = if input.peek(Brace) {
             let content;
-            let _ = syn::braced!(content in input);
+            let _brace = syn::braced!(content in input);
             let expr = content.call(Expr::parse)?;
             FieldName::Expr(expr)
         } else {
@@ -375,12 +408,8 @@ impl Parse for Field {
         };
         let value = if input.peek(Token![=]) {
             let _eq: Token![=] = input.parse()?;
-            if input.peek(Token![%]) {
-                let _percent: Token![%] = input.parse()?;
-                kind = FieldKind::Display;
-            } else if input.peek(Token![?]) {
-                let _question: Token![?] = input.parse()?;
-                kind = FieldKind::Debug;
+            if let Some(value_kind) = parse_field_kind_prefix(input)? {
+                kind = value_kind;
             }
             Some(input.parse()?)
         } else {
@@ -415,56 +444,82 @@ impl ToTokens for Field {
 
 impl ToTokens for FieldKind {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        match self {
+        match *self {
             Self::Debug => tokens.extend(quote! { ? }),
             Self::Display => tokens.extend(quote! { % }),
-            _ => {}
+            Self::Value => {}
         }
     }
 }
 
+/// Parse an optional `%` or `?` field formatting prefix.
+fn parse_field_kind_prefix(input: ParseStream<'_>) -> syn::Result<Option<FieldKind>> {
+    if input.peek(Token![%]) {
+        let _percent: Token![%] = input.parse()?;
+        return Ok(Some(FieldKind::Display));
+    }
+
+    if input.peek(Token![?]) {
+        let _question: Token![?] = input.parse()?;
+        return Ok(Some(FieldKind::Debug));
+    }
+
+    Ok(None)
+}
+
+/// Parsed tracing level for spans and events.
 #[derive(Clone, Debug)]
-pub enum Level {
+enum Level {
+    /// `TRACE`.
     Trace,
+    /// `DEBUG`.
     Debug,
+    /// `INFO`.
     Info,
+    /// `WARN`.
     Warn,
+    /// `ERROR`.
     Error,
+    /// Path expression resolved in generated code.
     Path(Path),
 }
 
 impl Parse for Level {
     fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let _ = input.parse::<kw::level>()?;
-        let _ = input.parse::<Token![=]>()?;
+        let _level_keyword: kw::level = input.parse()?;
+        let _eq: Token![=] = input.parse()?;
         let lookahead = input.lookahead1();
         if lookahead.peek(LitStr) {
-            let str: LitStr = input.parse()?;
-            match str.value() {
-                s if s.eq_ignore_ascii_case("trace") => Ok(Self::Trace),
-                s if s.eq_ignore_ascii_case("debug") => Ok(Self::Debug),
-                s if s.eq_ignore_ascii_case("info") => Ok(Self::Info),
-                s if s.eq_ignore_ascii_case("warn") => Ok(Self::Warn),
-                s if s.eq_ignore_ascii_case("error") => Ok(Self::Error),
-                _ => Err(input.error(
+            let level: LitStr = input.parse()?;
+            let level_name = level.value();
+            if level_name.eq_ignore_ascii_case("trace") {
+                Ok(Self::Trace)
+            } else if level_name.eq_ignore_ascii_case("debug") {
+                Ok(Self::Debug)
+            } else if level_name.eq_ignore_ascii_case("info") {
+                Ok(Self::Info)
+            } else if level_name.eq_ignore_ascii_case("warn") {
+                Ok(Self::Warn)
+            } else if level_name.eq_ignore_ascii_case("error") {
+                Ok(Self::Error)
+            } else {
+                Err(input.error(
                     "unknown verbosity level, expected one of \"trace\", \
                      \"debug\", \"info\", \"warn\", or \"error\", or a number 1-5",
-                )),
+                ))
             }
         } else if lookahead.peek(LitInt) {
             fn is_level(lit: &LitInt, expected: u64) -> bool {
-                match lit.base10_parse::<u64>() {
-                    Ok(value) => value == expected,
-                    Err(_) => false,
-                }
+                lit.base10_parse::<u64>()
+                    .is_ok_and(|value| value == expected)
             }
-            let int: LitInt = input.parse()?;
-            match &int {
-                i if is_level(i, 1) => Ok(Self::Trace),
-                i if is_level(i, 2) => Ok(Self::Debug),
-                i if is_level(i, 3) => Ok(Self::Info),
-                i if is_level(i, 4) => Ok(Self::Warn),
-                i if is_level(i, 5) => Ok(Self::Error),
+            let level: LitInt = input.parse()?;
+            match &level {
+                literal if is_level(literal, 1) => Ok(Self::Trace),
+                literal if is_level(literal, 2) => Ok(Self::Debug),
+                literal if is_level(literal, 3) => Ok(Self::Info),
+                literal if is_level(literal, 4) => Ok(Self::Warn),
+                literal if is_level(literal, 5) => Ok(Self::Error),
                 _ => Err(input.error(
                     "unknown verbosity level, expected one of \"trace\", \
                      \"debug\", \"info\", \"warn\", or \"error\", or a number 1-5",
@@ -480,17 +535,18 @@ impl Parse for Level {
 
 impl ToTokens for Level {
     fn to_tokens(&self, tokens: &mut TokenStream) {
-        match self {
+        match *self {
             Self::Trace => tokens.extend(quote!(::tracing::Level::TRACE)),
             Self::Debug => tokens.extend(quote!(::tracing::Level::DEBUG)),
             Self::Info => tokens.extend(quote!(::tracing::Level::INFO)),
             Self::Warn => tokens.extend(quote!(::tracing::Level::WARN)),
             Self::Error => tokens.extend(quote!(::tracing::Level::ERROR)),
-            Self::Path(pat) => tokens.extend(quote!(#pat)),
+            Self::Path(ref path) => tokens.extend(quote!(#path)),
         }
     }
 }
 
+/// Custom keywords used by the `#[instrument(...)]` parser.
 mod kw {
     syn::custom_keyword!(fields);
     syn::custom_keyword!(skip);

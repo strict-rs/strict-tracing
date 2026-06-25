@@ -1,140 +1,162 @@
 //! Tests for forwarding `log` records into `tracing`.
 
-use std::sync::{Arc, Mutex};
-use tracing::subscriber::with_default;
-use tracing_core::span::{Attributes, Record};
-use tracing_core::{Event, Level, LevelFilter, Metadata, Subscriber, span};
-use tracing_log::{LogTracer, NormalizeEvent};
+#[cfg(test)]
+mod tests {
+    use parking_lot::Mutex;
+    use std::{num::NonZeroU64, sync::Arc};
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_ok, ensure_some};
+    use tracing::subscriber::with_default;
+    use tracing_core::span::{Attributes, Record};
+    use tracing_core::subscriber::SubscriberResult;
+    use tracing_core::{Event, Level, LevelFilter, Metadata, Subscriber, span};
+    use tracing_log::{LogTracer, NormalizeEvent as _};
 
-struct State {
-    normalized_metadata: Mutex<Vec<(bool, Option<OwnedMetadata>)>>,
-}
-
-#[derive(PartialEq, Debug)]
-struct OwnedMetadata {
-    name: String,
-    target: String,
-    level: Level,
-    module_path: Option<String>,
-    file: Option<String>,
-    line: Option<u32>,
-}
-
-struct TestSubscriber(Arc<State>);
-
-impl Subscriber for TestSubscriber {
-    fn enabled(&self, meta: &Metadata<'_>) -> bool {
-        dbg!(meta);
-        true
+    /// Subscriber state captured by the test subscriber.
+    struct State {
+        /// Metadata observed from emitted events.
+        normalized_metadata: Mutex<Vec<(bool, Option<OwnedMetadata>)>>,
     }
 
-    fn max_level_hint(&self) -> Option<LevelFilter> {
-        Some(LevelFilter::from_level(Level::INFO))
+    /// Owned projection of metadata fields used for equality assertions.
+    #[derive(PartialEq, Debug, Clone)]
+    struct OwnedMetadata {
+        /// Metadata name.
+        name: String,
+        /// Event target.
+        target: String,
+        /// Event level.
+        level: Level,
+        /// Optional module path.
+        module_path: Option<String>,
+        /// Optional source file.
+        file: Option<String>,
+        /// Optional source line.
+        line: Option<u32>,
     }
 
-    fn new_span(&self, _span: &Attributes<'_>) -> span::Id {
-        span::Id::from_u64(42)
+    /// Subscriber that stores normalized metadata for every observed event.
+    struct TestSubscriber(Arc<State>);
+
+    impl Subscriber for TestSubscriber {
+        fn enabled(&self, _meta: &Metadata<'_>) -> SubscriberResult<bool> {
+            Ok(true)
+        }
+
+        fn max_level_hint(&self) -> Option<LevelFilter> {
+            Some(LevelFilter::from_level(Level::INFO))
+        }
+
+        fn new_span(&self, _span: &Attributes<'_>) -> SubscriberResult<span::Id> {
+            Ok(span::Id::from_non_zero_u64(NonZeroU64::MIN))
+        }
+
+        fn record(&self, _span: span::Id, _values: &Record<'_>) -> SubscriberResult {
+            Ok(())
+        }
+
+        fn record_follows_from(&self, _span: span::Id, _follows: span::Id) -> SubscriberResult {
+            Ok(())
+        }
+
+        fn event(&self, event: &Event<'_>) -> SubscriberResult {
+            self.0.normalized_metadata.lock().push((
+                event.is_log(),
+                event.normalized_metadata().map(|normalized| OwnedMetadata {
+                    name: String::from(normalized.name()),
+                    target: String::from(normalized.target()),
+                    level: *normalized.level(),
+                    module_path: normalized.module_path().map(String::from),
+                    file: normalized.file().map(String::from),
+                    line: normalized.line(),
+                }),
+            ));
+
+            Ok(())
+        }
+
+        fn enter(&self, _span: span::Id) -> SubscriberResult {
+            Ok(())
+        }
+
+        fn exit(&self, _span: span::Id) -> SubscriberResult {
+            Ok(())
+        }
     }
 
-    fn record(&self, _span: &span::Id, _values: &Record<'_>) {}
+    /// Normalize metadata for log-sourced events and ignore plain tracing events.
+    #[test]
+    fn normalized_metadata() -> Result<(), TestFailure> {
+        ensure_ok(LogTracer::init(), "`LogTracer` should initialize")?;
+        let me = Arc::new(State {
+            normalized_metadata: Mutex::new(Vec::new()),
+        });
+        let state = Arc::clone(&me);
 
-    fn record_follows_from(&self, _span: &span::Id, _follows: &span::Id) {}
+        with_default(TestSubscriber(me), || {
+            log::info!("expected info log");
+            log::debug!("unexpected debug log");
+            let minimal_record = log::Record::builder()
+                .args(format_args!("Error!"))
+                .level(log::Level::Info)
+                .build();
+            log::logger().log(&minimal_record);
+            last(
+                &state,
+                true,
+                Some(&OwnedMetadata {
+                    name: String::from("log event"),
+                    target: String::new(),
+                    level: Level::INFO,
+                    module_path: None,
+                    file: None,
+                    line: None,
+                }),
+            )?;
 
-    fn event(&self, event: &Event<'_>) {
-        dbg!(event);
-        self.0.normalized_metadata.lock().unwrap().push((
-            event.is_log(),
-            event.normalized_metadata().map(|normalized| OwnedMetadata {
-                name: normalized.name().to_string(),
-                target: normalized.target().to_string(),
-                level: *normalized.level(),
-                module_path: normalized.module_path().map(String::from),
-                file: normalized.file().map(String::from),
-                line: normalized.line(),
-            }),
-        ))
+            let metadata_record = log::Record::builder()
+                .args(format_args!("Error!"))
+                .level(log::Level::Info)
+                .target("log_tracer_target")
+                .file(Some("server.rs"))
+                .line(Some(144))
+                .module_path(Some("log_tracer"))
+                .build();
+            log::logger().log(&metadata_record);
+            last(
+                &state,
+                true,
+                Some(&OwnedMetadata {
+                    name: String::from("log event"),
+                    target: String::from("log_tracer_target"),
+                    level: Level::INFO,
+                    module_path: Some(String::from("log_tracer")),
+                    file: Some(String::from("server.rs")),
+                    line: Some(144),
+                }),
+            )?;
+
+            state.normalized_metadata.lock().clear();
+            tracing::info!("test with a tracing info");
+            let found = {
+                let lock = state.normalized_metadata.lock();
+                lock.iter()
+                    .any(|entry| !entry.0 && entry.1.as_ref().is_none())
+            };
+            ensure(found, "expected matching event in observed metadata")
+        })
     }
 
-    fn enter(&self, _span: &span::Id) {}
-
-    fn exit(&self, _span: &span::Id) {}
-}
-
-#[test]
-fn normalized_metadata() {
-    LogTracer::init().unwrap();
-    let me = Arc::new(State {
-        normalized_metadata: Mutex::new(Vec::new()),
-    });
-    let state = me.clone();
-
-    with_default(TestSubscriber(me), || {
-        log::info!("expected info log");
-        log::debug!("unexpected debug log");
-        let log = log::Record::builder()
-            .args(format_args!("Error!"))
-            .level(log::Level::Info)
-            .build();
-        log::logger().log(&log);
-        last(
-            &state,
-            true,
-            Some(OwnedMetadata {
-                name: "log event".to_string(),
-                target: "".to_string(),
-                level: Level::INFO,
-                module_path: None,
-                file: None,
-                line: None,
-            }),
-        );
-
-        let log = log::Record::builder()
-            .args(format_args!("Error!"))
-            .level(log::Level::Info)
-            .target("log_tracer_target")
-            .file(Some("server.rs"))
-            .line(Some(144))
-            .module_path(Some("log_tracer"))
-            .build();
-        log::logger().log(&log);
-        last(
-            &state,
-            true,
-            Some(OwnedMetadata {
-                name: "log event".to_string(),
-                target: "log_tracer_target".to_string(),
-                level: Level::INFO,
-                module_path: Some("log_tracer".to_string()),
-                file: Some("server.rs".to_string()),
-                line: Some(144),
-            }),
-        );
-
-        clear(&state);
-        tracing::info!("test with a tracing info");
-        observed(&state, false, None);
-    })
-}
-
-fn last(state: &State, should_be_log: bool, expected: Option<OwnedMetadata>) {
-    let lock = state.normalized_metadata.lock().unwrap();
-    let (is_log, metadata) = lock.last().expect("expected at least one event");
-    dbg!(&metadata);
-    assert_eq!(dbg!(*is_log), should_be_log);
-    assert_eq!(metadata.as_ref(), expected.as_ref());
-}
-
-fn observed(state: &State, should_be_log: bool, expected: Option<OwnedMetadata>) {
-    let lock = state.normalized_metadata.lock().unwrap();
-    assert!(
-        lock.iter()
-            .any(|(is_log, metadata)| *is_log == should_be_log
-                && metadata.as_ref() == expected.as_ref()),
-        "expected event ({should_be_log:?}, {expected:?}) in {lock:?}"
-    );
-}
-
-fn clear(state: &State) {
-    state.normalized_metadata.lock().unwrap().clear();
+    /// Assert that the last observed event has the expected log classification and metadata.
+    fn last(
+        state: &State,
+        should_be_log: bool,
+        expected: Option<&OwnedMetadata>,
+    ) -> Result<(), TestFailure> {
+        let (is_log, metadata) = {
+            let lock = state.normalized_metadata.lock();
+            ensure_some(lock.last().cloned(), "expected at least one event")?
+        };
+        ensure_eq(&is_log, &should_be_log, "event log classification matches")?;
+        ensure(metadata.as_ref() == expected, "normalized metadata matches")
+    }
 }

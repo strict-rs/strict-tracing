@@ -2,12 +2,14 @@
 //!
 //! [`io::Write`]: std::io::Write
 
-use alloc::{boxed::Box, fmt, string::String, sync::Arc};
+use alloc::{boxed::Box, fmt, sync::Arc};
 use std::{
-    eprint,
+    any::type_name,
+    cmp,
+    fs::File,
     io::{self, Write},
-    print,
-    sync::{Mutex, MutexGuard},
+    str,
+    sync::MutexGuard,
 };
 use tracing_core::Metadata;
 
@@ -206,7 +208,7 @@ pub trait MakeWriter<'a> {
     /// [`WARN`]: tracing_core::Level::WARN
     /// [`ERROR`]: tracing_core::Level::ERROR
     fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Self::Writer {
-        let _ = meta;
+        let _: &Metadata<'_> = meta;
         self.make_writer()
     }
 }
@@ -220,7 +222,7 @@ pub trait MakeWriter<'a> {
 pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     /// Wraps `self` and returns a [`MakeWriter`] that will only write output
     /// for events at or below the provided verbosity [`Level`]. For instance,
-    /// `Level::TRACE` is considered to be _more verbose` than `Level::INFO`.
+    /// `Level::TRACE` is considered to be more verbose than `Level::INFO`.
     ///
     /// Events whose level is more verbose than `level` will be ignored, and no
     /// output will be written.
@@ -231,11 +233,13 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     /// use tracing::Level;
     /// use tracing_subscriber::fmt::writer::MakeWriterExt;
     ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     /// // Construct a writer that outputs events to `stderr` only if the span or
     /// // event's level is <= WARN (WARN and ERROR).
     /// let mk_writer = std::io::stderr.with_max_level(Level::WARN);
     ///
-    /// tracing_subscriber::fmt().with_writer(mk_writer).init();
+    /// tracing_subscriber::fmt().with_writer(mk_writer).try_init()?;
+    /// # Ok(()) }
     /// ```
     ///
     /// Writing the `ERROR` and `WARN` levels to `stderr`, and everything else
@@ -245,22 +249,24 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     /// # use tracing::Level;
     /// # use tracing_subscriber::fmt::writer::MakeWriterExt;
     ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     /// let mk_writer = std::io::stderr
     ///     .with_max_level(Level::WARN)
     ///     .or_else(std::io::stdout);
     ///
-    /// tracing_subscriber::fmt().with_writer(mk_writer).init();
+    /// tracing_subscriber::fmt().with_writer(mk_writer).try_init()?;
+    /// # Ok(()) }
     /// ```
     ///
     /// Writing the `ERROR` level to `stderr`, the `INFO` and `WARN` levels to
-    /// `stdout`, and the `INFO` and DEBUG` levels to a file:
+    /// `stdout`, and the `INFO` and `DEBUG` levels to a file:
     ///
     /// ```
     /// # use tracing::Level;
     /// # use tracing_subscriber::fmt::writer::MakeWriterExt;
     /// use std::{sync::Arc, fs::File};
     /// # // don't actually create the file when running the tests.
-    /// # fn docs() -> std::io::Result<()> {
+    /// # fn docs() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     /// let debug_log = Arc::new(File::create("debug.log")?);
     ///
     /// let mk_writer = std::io::stderr
@@ -270,7 +276,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     ///         .and(debug_log.with_max_level(Level::DEBUG))
     ///     );
     ///
-    /// tracing_subscriber::fmt().with_writer(mk_writer).init();
+    /// tracing_subscriber::fmt().with_writer(mk_writer).try_init()?;
     /// # Ok(()) }
     /// ```
     ///
@@ -295,11 +301,13 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     /// use tracing::Level;
     /// use tracing_subscriber::fmt::writer::MakeWriterExt;
     ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     /// // Construct a writer that outputs events to `stdout` only if the span or
     /// // event's level is >= DEBUG (DEBUG and TRACE).
     /// let mk_writer = std::io::stdout.with_min_level(Level::DEBUG);
     ///
-    /// tracing_subscriber::fmt().with_writer(mk_writer).init();
+    /// tracing_subscriber::fmt().with_writer(mk_writer).try_init()?;
+    /// # Ok(()) }
     /// ```
     /// This can be combined with [`MakeWriterExt::with_max_level`] to write
     /// only within a range of levels:
@@ -307,6 +315,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     /// ```
     /// # use tracing::Level;
     /// # use tracing_subscriber::fmt::writer::MakeWriterExt;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     /// // Only write the `DEBUG` and `INFO` levels to stdout.
     /// let mk_writer = std::io::stdout
     ///     .with_max_level(Level::DEBUG)
@@ -314,7 +323,8 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     ///     // Write the `WARN` and `ERROR` levels to stderr.
     ///     .and(std::io::stderr.with_min_level(Level::WARN));
     ///
-    /// tracing_subscriber::fmt().with_writer(mk_writer).init();
+    /// tracing_subscriber::fmt().with_writer(mk_writer).try_init()?;
+    /// # Ok(()) }
     /// ```
     /// [`Level`]: tracing_core::Level
     /// [`io::Write`]: std::io::Write
@@ -347,7 +357,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     /// use tracing_subscriber::fmt::writer::MakeWriterExt;
     /// use std::{sync::Arc, fs::File};
     /// # // don't actually create the file when running the tests.
-    /// # fn docs() -> std::io::Result<()> {
+    /// # fn docs() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     /// let access_log = Arc::new(File::create("access.log")?);
     ///
     /// let mk_writer = access_log
@@ -357,7 +367,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     ///     // Write events with all other targets to stdout.
     ///     .or_else(std::io::stdout);
     ///
-    /// tracing_subscriber::fmt().with_writer(mk_writer).init();
+    /// tracing_subscriber::fmt().with_writer(mk_writer).try_init()?;
     /// # Ok(())
     /// # }
     /// ```
@@ -373,7 +383,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     /// static DEBUG_LOG_ENABLED: AtomicBool = AtomicBool::new(false);
     ///
     /// # // don't actually create the file when running the tests.
-    /// # fn docs() -> std::io::Result<()> {
+    /// # fn docs() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     /// // Create the debug log file
     /// let debug_file = Arc::new(File::create("debug.log")?)
     ///     // Enable the debug log only if the flag is enabled.
@@ -384,7 +394,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     ///     // Write to the debug file if it's enabled
     ///     .and(debug_file);
     ///
-    /// tracing_subscriber::fmt().with_writer(mk_writer).init();
+    /// tracing_subscriber::fmt().with_writer(mk_writer).try_init()?;
     ///
     /// // ...
     ///
@@ -419,10 +429,12 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     /// ```
     /// use tracing_subscriber::fmt::writer::MakeWriterExt;
     ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     /// // Construct a writer that outputs events to `stdout` *and* `stderr`.
     /// let mk_writer = std::io::stdout.and(std::io::stderr);
     ///
-    /// tracing_subscriber::fmt().with_writer(mk_writer).init();
+    /// tracing_subscriber::fmt().with_writer(mk_writer).try_init()?;
+    /// # Ok(()) }
     /// ```
     ///
     /// `and` can be used in conjunction with filtering combinators. For
@@ -434,7 +446,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     /// # use tracing_subscriber::fmt::writer::MakeWriterExt;
     /// use std::{sync::Arc, fs::File};
     /// # // don't actually create the file when running the tests.
-    /// # fn docs() -> std::io::Result<()> {
+    /// # fn docs() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     /// let debug_log = Arc::new(File::create("debug.log")?);
     ///
     /// // Write everything to the debug log.
@@ -447,7 +459,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     ///         .with_min_level(Level::INFO)
     ///     );
     ///
-    /// tracing_subscriber::fmt().with_writer(mk_writer).init();
+    /// tracing_subscriber::fmt().with_writer(mk_writer).try_init()?;
     /// # Ok(()) }
     /// ```
     ///
@@ -470,6 +482,7 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     /// use tracing::Level;
     /// use tracing_subscriber::fmt::writer::MakeWriterExt;
     ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     /// // Produces a writer that writes to `stderr` if the level is <= WARN,
     /// // or returns `OptionalWriter::none()` otherwise.
     /// let stderr = std::io::stderr.with_max_level(Level::WARN);
@@ -478,7 +491,8 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     /// // write to stdout instead:
     /// let mk_writer = stderr.or_else(std::io::stdout);
     ///
-    /// tracing_subscriber::fmt().with_writer(mk_writer).init();
+    /// tracing_subscriber::fmt().with_writer(mk_writer).try_init()?;
+    /// # Ok(()) }
     /// ```
     ///
     /// [`make_writer`]: MakeWriter::make_writer
@@ -493,14 +507,14 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
     }
 }
 
-/// A writer intended to support [`libtest`'s output capturing][capturing] for use in unit tests.
+/// A writer intended for use in unit tests.
 ///
-/// `TestWriter` is used by [`fmt::Subscriber`] or [`fmt::Layer`] to enable capturing support.
+/// `TestWriter` is used by [`fmt::Subscriber`] or [`fmt::Layer`] to write
+/// formatted output to the process standard streams during tests.
 ///
-/// `cargo test` can only capture output from the standard library's [`print!`] and [`eprint!`]
-/// macros. See [`libtest`'s output capturing][capturing] and
-/// [rust-lang/rust#90785](https://github.com/rust-lang/rust/issues/90785) for more details about
-/// output capturing.
+/// See [`libtest`'s output capturing][capturing] and
+/// [rust-lang/rust#90785](https://github.com/rust-lang/rust/issues/90785)
+/// for more details about output capturing.
 ///
 /// Writing to [`io::stdout`] and [`io::stderr`] produces the same results as using
 /// [`libtest`'s `--nocapture` option][nocapture] which may make the results look unreadable.
@@ -511,7 +525,6 @@ pub trait MakeWriterExt<'a>: MakeWriter<'a> {
 /// [nocapture]: https://doc.rust-lang.org/cargo/commands/cargo-test.html
 /// [`io::stdout`]: std::io::stdout
 /// [`io::stderr`]: std::io::stderr
-/// [`print!`]: std::print!
 #[derive(Copy, Clone, Default, Debug)]
 pub struct TestWriter {
     /// Whether or not to use `stderr` instead of the default `stdout` as
@@ -546,7 +559,9 @@ pub struct TestWriter {
 /// [`Subscriber`]: tracing::Subscriber
 /// [`io::Write`]: std::io::Write
 pub struct BoxMakeWriter {
+    /// The erased writer factory.
     inner: Box<dyn for<'a> MakeWriter<'a, Writer = Box<dyn Write + 'a>> + Send + Sync>,
+    /// The erased writer factory's type name.
     name: &'static str,
 }
 
@@ -556,6 +571,10 @@ pub struct BoxMakeWriter {
 /// return one of two writers.
 ///
 /// [writer]: std::io::Write
+#[expect(
+    clippy::min_ident_chars,
+    reason = "public API compatibility: EitherWriter variants are A and B"
+)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum EitherWriter<A, B> {
     /// A writer of type `A`.
@@ -583,7 +602,9 @@ pub type OptionalWriter<T> = EitherWriter<T, io::Sink>;
 /// [`Level`]: tracing_core::Level
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct WithMaxLevel<M> {
+    /// The wrapped writer factory.
     make: M,
+    /// The least verbose level emitted by this writer.
     level: tracing_core::Level,
 }
 
@@ -597,14 +618,17 @@ pub struct WithMaxLevel<M> {
 /// [`Level`]: tracing_core::Level
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct WithMinLevel<M> {
+    /// The wrapped writer factory.
     make: M,
+    /// The most verbose level emitted by this writer.
     level: tracing_core::Level,
 }
 
-/// A [`MakeWriter`] combinator that wraps a [`MakeWriter`] with a predicate for
-/// span and event [`Metadata`], so that the [`MakeWriter::make_writer_for`]
-/// method returns [`OptionalWriter::some`][ows] when the predicate returns `true`,
-/// and [`OptionalWriter::none`][own] when the predicate returns `false`.
+/// A [`MakeWriter`] combinator that wraps a [`MakeWriter`] with a metadata predicate.
+///
+/// For span and event [`Metadata`], [`MakeWriter::make_writer_for`] returns
+/// [`OptionalWriter::some`][ows] when the predicate returns `true`, and
+/// [`OptionalWriter::none`][own] when the predicate returns `false`.
 ///
 /// This is returned by the [`MakeWriterExt::with_filter`] method. See the
 /// method documentation for details.
@@ -614,21 +638,26 @@ pub struct WithMinLevel<M> {
 /// [own]: EitherWriter::none
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct WithFilter<M, F> {
+    /// The wrapped writer factory.
     make: M,
+    /// The metadata predicate that enables the wrapped writer.
     filter: F,
 }
 
-/// Combines a [`MakeWriter`] that returns an [`OptionalWriter`] with another
-/// [`MakeWriter`], so that the second [`MakeWriter`] is used when the first
-/// [`MakeWriter`] returns [`OptionalWriter::none`][own].
+/// Combines an optional [`MakeWriter`] with a fallback [`MakeWriter`].
 ///
-/// This is returned by the [`MakeWriterExt::or_else] method. See the
+/// The second [`MakeWriter`] is used when the first [`MakeWriter`] returns
+/// [`OptionalWriter::none`][own].
+///
+/// This is returned by the [`MakeWriterExt::or_else`] method. See the
 /// method documentation for details.
 ///
 /// [own]: EitherWriter::none
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct OrElse<A, B> {
+    /// The primary writer factory.
     inner: A,
+    /// The fallback writer factory.
     or_else: B,
 }
 
@@ -639,8 +668,10 @@ pub struct OrElse<A, B> {
 /// documentation for details.
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Tee<A, B> {
-    a: A,
-    b: B,
+    /// The first writer factory.
+    first: A,
+    /// The second writer factory.
+    second: B,
 }
 
 /// A type implementing [`io::Write`] for a [`MutexGuard`] where the type
@@ -675,6 +706,7 @@ pub struct ArcWriter<W>(Arc<W>);
 /// `format_into` methods expect an `io::Write`.
 #[cfg(any(feature = "json", feature = "time"))]
 pub(in crate::fmt) struct WriteAdaptor<'a> {
+    /// The formatter-backed writer that receives decoded UTF-8.
     fmt_write: &'a mut dyn fmt::Write,
 }
 
@@ -700,8 +732,8 @@ where
     }
 }
 
-impl<'a> MakeWriter<'a> for std::fs::File {
-    type Writer = &'a std::fs::File;
+impl<'a> MakeWriter<'a> for File {
+    type Writer = &'a Self;
     fn make_writer(&'a self) -> Self::Writer {
         self
     }
@@ -711,23 +743,24 @@ impl<'a> MakeWriter<'a> for std::fs::File {
 
 impl TestWriter {
     /// Returns a new `TestWriter` with the default configuration.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
     /// Returns a new `TestWriter` that writes to `stderr` instead of `stdout`.
-    pub fn with_stderr() -> Self {
+    #[must_use]
+    pub const fn with_stderr() -> Self {
         Self { use_stderr: true }
     }
 }
 
 impl Write for TestWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let out_str = String::from_utf8_lossy(buf);
         if self.use_stderr {
-            eprint!("{}", out_str)
+            io::stderr().write_all(buf)?;
         } else {
-            print!("{}", out_str)
+            io::stdout().write_all(buf)?;
         }
         Ok(buf.len())
     }
@@ -741,7 +774,7 @@ impl<'a> MakeWriter<'a> for TestWriter {
     type Writer = Self;
 
     fn make_writer(&'a self) -> Self::Writer {
-        Self::default()
+        *self
     }
 }
 
@@ -756,7 +789,7 @@ impl BoxMakeWriter {
     {
         Self {
             inner: Box::new(Boxed(make_writer)),
-            name: std::any::type_name::<M>(),
+            name: type_name::<M>(),
         }
     }
 }
@@ -783,6 +816,7 @@ impl<'a> MakeWriter<'a> for BoxMakeWriter {
     }
 }
 
+/// Erases the concrete writer type produced by a [`MakeWriter`].
 struct Boxed<M>(M);
 
 impl<'a, M> MakeWriter<'a> for Boxed<M>
@@ -792,26 +826,37 @@ where
     type Writer = Box<dyn Write + 'a>;
 
     fn make_writer(&'a self) -> Self::Writer {
-        let w = self.0.make_writer();
-        Box::new(w)
+        let writer = self.0.make_writer();
+        Box::new(writer)
     }
 
     fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Self::Writer {
-        let w = self.0.make_writer_for(meta);
-        Box::new(w)
+        let writer = self.0.make_writer_for(meta);
+        Box::new(writer)
     }
 }
 
 // === impl Mutex/MutexGuardWriter ===
 
-impl<'a, W> MakeWriter<'a> for Mutex<W>
+#[expect(
+    clippy::disallowed_types,
+    reason = "compatibility impl: MakeWriter has historically supported std::sync::Mutex"
+)]
+#[expect(
+    clippy::absolute_paths,
+    reason = "compatibility impl avoids importing the disallowed std::sync::Mutex type"
+)]
+impl<'a, W> MakeWriter<'a> for std::sync::Mutex<W>
 where
     W: Write + 'a,
 {
     type Writer = MutexGuardWriter<'a, W>;
 
     fn make_writer(&'a self) -> Self::Writer {
-        MutexGuardWriter(self.lock().expect("lock poisoned"))
+        match self.lock() {
+            Ok(guard) => MutexGuardWriter(guard),
+            Err(poisoned) => MutexGuardWriter(poisoned.into_inner()),
+        }
     }
 }
 
@@ -854,41 +899,41 @@ where
 {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        match self {
-            EitherWriter::A(a) => a.write(buf),
-            EitherWriter::B(b) => b.write(buf),
+        match *self {
+            Self::A(ref mut writer) => writer.write(buf),
+            Self::B(ref mut writer) => writer.write(buf),
         }
     }
 
     #[inline]
     fn flush(&mut self) -> io::Result<()> {
-        match self {
-            EitherWriter::A(a) => a.flush(),
-            EitherWriter::B(b) => b.flush(),
+        match *self {
+            Self::A(ref mut writer) => writer.flush(),
+            Self::B(ref mut writer) => writer.flush(),
         }
     }
 
     #[inline]
     fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
-        match self {
-            EitherWriter::A(a) => a.write_vectored(bufs),
-            EitherWriter::B(b) => b.write_vectored(bufs),
+        match *self {
+            Self::A(ref mut writer) => writer.write_vectored(bufs),
+            Self::B(ref mut writer) => writer.write_vectored(bufs),
         }
     }
 
     #[inline]
     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        match self {
-            EitherWriter::A(a) => a.write_all(buf),
-            EitherWriter::B(b) => b.write_all(buf),
+        match *self {
+            Self::A(ref mut writer) => writer.write_all(buf),
+            Self::B(ref mut writer) => writer.write_all(buf),
         }
     }
 
     #[inline]
     fn write_fmt(&mut self, fmt: fmt::Arguments<'_>) -> io::Result<()> {
-        match self {
-            EitherWriter::A(a) => a.write_fmt(fmt),
-            EitherWriter::B(b) => b.write_fmt(fmt),
+        match *self {
+            Self::A(ref mut writer) => writer.write_fmt(fmt),
+            Self::B(ref mut writer) => writer.write_fmt(fmt),
         }
     }
 }
@@ -902,26 +947,24 @@ impl<T> OptionalWriter<T> {
     ///
     /// [disabled writer]: std::io::sink
     #[inline]
-    pub fn none() -> Self {
-        EitherWriter::B(io::sink())
+    #[must_use]
+    pub const fn none() -> Self {
+        Self::B(io::sink())
     }
 
     /// Returns an enabled writer of type `T`.
     ///
     /// This is equivalent to returning [`Option::Some`].
     #[inline]
-    pub fn some(t: T) -> Self {
-        EitherWriter::A(t)
+    pub const fn some(writer: T) -> Self {
+        Self::A(writer)
     }
 }
 
 impl<T> From<Option<T>> for OptionalWriter<T> {
     #[inline]
     fn from(opt: Option<T>) -> Self {
-        match opt {
-            Some(writer) => Self::some(writer),
-            None => Self::none(),
-        }
+        opt.map_or_else(Self::none, Self::some)
     }
 }
 
@@ -935,7 +978,11 @@ impl<M> WithMaxLevel<M> {
     /// See [`MakeWriterExt::with_max_level`] for details.
     ///
     /// [`Level`]: tracing_core::Level
-    pub fn new(make: M, level: tracing_core::Level) -> Self {
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public writer-adapter constructor is part of the `MakeWriterExt` API"
+    )]
+    pub const fn new(make: M, level: tracing_core::Level) -> Self {
         Self { make, level }
     }
 }
@@ -968,7 +1015,11 @@ impl<M> WithMinLevel<M> {
     /// See [`MakeWriterExt::with_min_level`] for details.
     ///
     /// [`Level`]: tracing_core::Level
-    pub fn new(make: M, level: tracing_core::Level) -> Self {
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public writer-adapter constructor is part of the `MakeWriterExt` API"
+    )]
+    pub const fn new(make: M, level: tracing_core::Level) -> Self {
         Self { make, level }
     }
 }
@@ -1002,7 +1053,11 @@ impl<M, F> WithFilter<M, F> {
     ///
     /// [`Metadata`]: tracing_core::Metadata
     /// [`sink`]: std::io::sink
-    pub fn new(make: M, filter: F) -> Self
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public writer-adapter constructor is part of the `MakeWriterExt` API"
+    )]
+    pub const fn new(make: M, filter: F) -> Self
     where
         F: Fn(&Metadata<'_>) -> bool,
     {
@@ -1042,8 +1097,8 @@ impl<A, B> Tee<A, B> {
     /// See the documentation for [`MakeWriterExt::and`] for details.
     ///
     /// [writers]: std::io::Write
-    pub fn new(a: A, b: B) -> Self {
-        Self { a, b }
+    pub const fn new(first: A, second: B) -> Self {
+        Self { first, second }
     }
 }
 
@@ -1056,21 +1111,25 @@ where
 
     #[inline]
     fn make_writer(&'a self) -> Self::Writer {
-        Tee::new(self.a.make_writer(), self.b.make_writer())
+        Tee::new(self.first.make_writer(), self.second.make_writer())
     }
 
     #[inline]
     fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Self::Writer {
-        Tee::new(self.a.make_writer_for(meta), self.b.make_writer_for(meta))
+        Tee::new(
+            self.first.make_writer_for(meta),
+            self.second.make_writer_for(meta),
+        )
     }
 }
 
+/// Calls the same [`Write`] method on both tee writers.
 macro_rules! impl_tee {
     ($self_:ident.$f:ident($($arg:ident),*)) => {
         {
-            let res_a = $self_.a.$f($($arg),*);
-            let res_b = $self_.b.$f($($arg),*);
-            (res_a?, res_b?)
+            let first_result = $self_.first.$f($($arg),*);
+            let second_result = $self_.second.$f($($arg),*);
+            (first_result?, second_result?)
         }
     }
 }
@@ -1082,8 +1141,8 @@ where
 {
     #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let (a, b) = impl_tee!(self.write(buf));
-        Ok(std::cmp::max(a, b))
+        let (first_written, second_written) = impl_tee!(self.write(buf));
+        Ok(cmp::max(first_written, second_written))
     }
 
     #[inline]
@@ -1094,8 +1153,8 @@ where
 
     #[inline]
     fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
-        let (a, b) = impl_tee!(self.write_vectored(bufs));
-        Ok(std::cmp::max(a, b))
+        let (first_written, second_written) = impl_tee!(self.write_vectored(bufs));
+        Ok(cmp::max(first_written, second_written))
     }
 
     #[inline]
@@ -1115,7 +1174,11 @@ where
 
 impl<A, B> OrElse<A, B> {
     /// Combines
-    pub fn new<'a, W>(inner: A, or_else: B) -> Self
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public writer-adapter constructor is part of the `MakeWriterExt` API"
+    )]
+    pub const fn new<'a, W>(inner: A, or_else: B) -> Self
     where
         A: MakeWriter<'a, Writer = OptionalWriter<W>>,
         B: MakeWriter<'a>,
@@ -1152,6 +1215,10 @@ where
 
 // === impl ArcWriter ===
 
+#[expect(
+    deprecated,
+    reason = "compatibility impl preserves the deprecated ArcWriter API surface"
+)]
 impl<W> Write for ArcWriter<W>
 where
     for<'a> &'a W: Write,
@@ -1186,6 +1253,7 @@ where
 
 #[cfg(any(feature = "json", feature = "time"))]
 impl<'a> WriteAdaptor<'a> {
+    /// Returns an adapter that forwards UTF-8 bytes to a [`fmt::Write`] value.
     pub(in crate::fmt) fn new(fmt_write: &'a mut dyn fmt::Write) -> Self {
         Self { fmt_write }
     }
@@ -1193,19 +1261,32 @@ impl<'a> WriteAdaptor<'a> {
 #[cfg(any(feature = "json", feature = "time"))]
 impl Write for WriteAdaptor<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        let s =
-            std::str::from_utf8(buf).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let text = str::from_utf8(buf).map_err(|utf8_error| {
+            let _: str::Utf8Error = utf8_error;
+            io::Error::from(io::ErrorKind::InvalidData)
+        })?;
 
         self.fmt_write
-            .write_str(s)
-            .map_err(io::Error::other)?;
+            .write_str(text)
+            .map_err(io_error_from_fmt)?;
 
-        Ok(s.len())
+        Ok(text.len())
     }
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
+}
+
+#[cfg(any(feature = "json", feature = "time"))]
+/// Converts a [`fmt::Error`] from the adapted formatter to an [`io::Error`].
+#[allow(
+    clippy::single_call_fn,
+    reason = "formatter writer adapter centralizes the `fmt::Error` to `io::Error` conversion"
+)]
+fn io_error_from_fmt(fmt_error: fmt::Error) -> io::Error {
+    let _: fmt::Error = fmt_error;
+    io::Error::from(io::ErrorKind::Other)
 }
 
 #[cfg(any(feature = "json", feature = "time"))]
@@ -1223,14 +1304,15 @@ mod test {
     use crate::fmt::format::Format;
     use crate::fmt::test::{MockMakeWriter, MockWriter};
     use crate::fmt::Subscriber;
-    use alloc::vec::Vec;
+    use alloc::{string::String, vec::Vec};
+    use parking_lot::Mutex;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{Arc, Mutex};
-    use std::{format, println};
-    use tracing::{debug, error, info, trace, warn, Level};
+    use std::{format, sync::Arc};
+    use strict_test_support::{TestFailure, ensure, ensure_some};
+    use tracing::{debug, error, info, trace, warn, Level, subscriber};
     use tracing_core::dispatcher::{self, Dispatch};
 
-    fn test_writer<T>(make_writer: T, msg: &str, buf: &Mutex<Vec<u8>>)
+    fn test_writer<T>(make_writer: T, msg: &str, buf: &Mutex<Vec<u8>>) -> Result<(), TestFailure>
     where
         T: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
     {
@@ -1251,62 +1333,76 @@ mod test {
         });
 
         let expected = format!("ERROR {}: {}\n", module_path!(), msg);
-        let actual = String::from_utf8(buf.try_lock().unwrap().to_vec()).unwrap();
-        assert!(actual.contains(expected.as_str()));
+        let actual = String::from_utf8_lossy(&buf.lock()).into_owned();
+        ensure(
+            actual.contains(expected.as_str()),
+            "custom writer output contains expected line",
+        )
     }
 
-    fn has_lines(buf: &Mutex<Vec<u8>>, msgs: &[(Level, &str)]) {
-        let actual = String::from_utf8(buf.try_lock().unwrap().to_vec()).unwrap();
+    fn has_lines(buf: &Mutex<Vec<u8>>, msgs: &[(Level, &str)]) -> Result<(), TestFailure> {
+        let actual = String::from_utf8_lossy(&buf.lock()).into_owned();
         let mut expected_lines = msgs.iter();
-        for line in actual.lines() {
-            let line = line.trim();
-            let (level, msg) = expected_lines
-                .next()
-                .unwrap_or_else(|| panic!("expected no more lines, but got: {:?}", line));
+        for actual_line in actual.lines() {
+            let line = actual_line.trim();
+            let &(level, msg) = ensure_some(
+                expected_lines.next(),
+                "writer emitted no more lines than expected",
+            )?;
             let expected = format!("{} {}: {}", level, module_path!(), msg);
-            assert_eq!(line, expected.as_str());
+            ensure(line == expected.as_str(), "writer emitted expected line")?;
         }
+        ensure(
+            expected_lines.next().is_none(),
+            "writer emitted all expected lines",
+        )
     }
 
     #[test]
-    fn custom_writer_closure() {
+    fn custom_writer_closure() -> Result<(), TestFailure> {
         let buf = Arc::new(Mutex::new(Vec::new()));
-        let buf2 = buf.clone();
-        let make_writer = move || MockWriter::new(buf2.clone());
+        let writer_buf = Arc::clone(&buf);
+        let make_writer = move || MockWriter::new(Arc::clone(&writer_buf));
         let msg = "my custom writer closure error";
-        test_writer(make_writer, msg, &buf);
+        test_writer(make_writer, msg, &buf)
     }
 
     #[test]
-    fn custom_writer_struct() {
+    fn custom_writer_struct() -> Result<(), TestFailure> {
         let buf = Arc::new(Mutex::new(Vec::new()));
-        let make_writer = MockMakeWriter::new(buf.clone());
+        let make_writer = MockMakeWriter::new(Arc::clone(&buf));
         let msg = "my custom writer struct error";
-        test_writer(make_writer, msg, &buf);
+        test_writer(make_writer, msg, &buf)
     }
 
     #[test]
-    fn custom_writer_mutex() {
+    #[allow(
+        clippy::disallowed_types,
+        reason = "this test covers the MakeWriter implementation for std::sync::Mutex<W>"
+    )]
+    fn custom_writer_mutex() -> Result<(), TestFailure> {
+        use std::sync::Mutex as StdMutex;
+
         let buf = Arc::new(Mutex::new(Vec::new()));
-        let writer = MockWriter::new(buf.clone());
-        let make_writer = Mutex::new(writer);
+        let writer = MockWriter::new(Arc::clone(&buf));
+        let make_writer = StdMutex::new(writer);
         let msg = "my mutex writer error";
-        test_writer(make_writer, msg, &buf);
+        test_writer(make_writer, msg, &buf)
     }
 
     #[test]
-    fn combinators_level_filters() {
+    fn combinators_level_filters() -> Result<(), TestFailure> {
         let info_buf = Arc::new(Mutex::new(Vec::new()));
-        let info = MockMakeWriter::new(info_buf.clone());
+        let info = MockMakeWriter::new(Arc::clone(&info_buf));
 
         let debug_buf = Arc::new(Mutex::new(Vec::new()));
-        let debug = MockMakeWriter::new(debug_buf.clone());
+        let debug = MockMakeWriter::new(Arc::clone(&debug_buf));
 
         let warn_buf = Arc::new(Mutex::new(Vec::new()));
-        let warn = MockMakeWriter::new(warn_buf.clone());
+        let warn = MockMakeWriter::new(Arc::clone(&warn_buf));
 
         let err_buf = Arc::new(Mutex::new(Vec::new()));
-        let err = MockMakeWriter::new(err_buf.clone());
+        let err = MockMakeWriter::new(Arc::clone(&err_buf));
 
         let make_writer = info
             .with_max_level(Level::INFO)
@@ -1314,7 +1410,7 @@ mod test {
             .and(warn.with_max_level(Level::WARN))
             .and(err.with_max_level(Level::ERROR));
 
-        let c = {
+        let subscriber = {
             #[cfg(feature = "ansi")]
             let f = Format::default().without_time().with_ansi(false);
             #[cfg(not(feature = "ansi"))]
@@ -1326,7 +1422,7 @@ mod test {
                 .finish()
         };
 
-        let _s = tracing::subscriber::set_default(c);
+        let _guard = subscriber::set_default(subscriber);
 
         trace!("trace");
         debug!("debug");
@@ -1342,37 +1438,33 @@ mod test {
             (Level::ERROR, "error"),
         ];
 
-        println!("max level debug");
-        has_lines(&debug_buf, &all_lines[1..]);
+        has_lines(&debug_buf, &all_lines[1..])?;
 
-        println!("max level info");
-        has_lines(&info_buf, &all_lines[2..]);
+        has_lines(&info_buf, &all_lines[2..])?;
 
-        println!("max level warn");
-        has_lines(&warn_buf, &all_lines[3..]);
+        has_lines(&warn_buf, &all_lines[3..])?;
 
-        println!("max level error");
-        has_lines(&err_buf, &all_lines[4..]);
+        has_lines(&err_buf, &all_lines[4..])
     }
 
     #[test]
-    fn combinators_or_else() {
+    fn combinators_or_else() -> Result<(), TestFailure> {
         let some_buf = Arc::new(Mutex::new(Vec::new()));
-        let some = MockMakeWriter::new(some_buf.clone());
+        let some = MockMakeWriter::new(Arc::clone(&some_buf));
 
         let or_else_buf = Arc::new(Mutex::new(Vec::new()));
-        let or_else = MockMakeWriter::new(or_else_buf.clone());
+        let or_else = MockMakeWriter::new(Arc::clone(&or_else_buf));
 
         let return_some = AtomicBool::new(true);
-        let make_writer = move || {
+        let optional_writer = move || {
             if return_some.swap(false, Ordering::Relaxed) {
                 OptionalWriter::some(some.make_writer())
             } else {
                 OptionalWriter::none()
             }
         };
-        let make_writer = make_writer.or_else(or_else);
-        let c = {
+        let make_writer = optional_writer.or_else(or_else);
+        let subscriber = {
             #[cfg(feature = "ansi")]
             let f = Format::default().without_time().with_ansi(false);
             #[cfg(not(feature = "ansi"))]
@@ -1384,31 +1476,31 @@ mod test {
                 .finish()
         };
 
-        let _s = tracing::subscriber::set_default(c);
+        let _guard = subscriber::set_default(subscriber);
         info!("hello");
         info!("world");
         info!("goodbye");
 
-        has_lines(&some_buf, &[(Level::INFO, "hello")]);
+        has_lines(&some_buf, &[(Level::INFO, "hello")])?;
         has_lines(
             &or_else_buf,
             &[(Level::INFO, "world"), (Level::INFO, "goodbye")],
-        );
+        )
     }
 
     #[test]
-    fn combinators_or_else_chain() {
+    fn combinators_or_else_chain() -> Result<(), TestFailure> {
         let info_buf = Arc::new(Mutex::new(Vec::new()));
-        let info = MockMakeWriter::new(info_buf.clone());
+        let info = MockMakeWriter::new(Arc::clone(&info_buf));
 
         let debug_buf = Arc::new(Mutex::new(Vec::new()));
-        let debug = MockMakeWriter::new(debug_buf.clone());
+        let debug = MockMakeWriter::new(Arc::clone(&debug_buf));
 
         let warn_buf = Arc::new(Mutex::new(Vec::new()));
-        let warn = MockMakeWriter::new(warn_buf.clone());
+        let warn = MockMakeWriter::new(Arc::clone(&warn_buf));
 
         let err_buf = Arc::new(Mutex::new(Vec::new()));
-        let err = MockMakeWriter::new(err_buf.clone());
+        let err = MockMakeWriter::new(Arc::clone(&err_buf));
 
         let make_writer = err.with_max_level(Level::ERROR).or_else(
             warn.with_max_level(Level::WARN).or_else(
@@ -1417,7 +1509,7 @@ mod test {
             ),
         );
 
-        let c = {
+        let subscriber = {
             #[cfg(feature = "ansi")]
             let f = Format::default().without_time().with_ansi(false);
             #[cfg(not(feature = "ansi"))]
@@ -1429,7 +1521,7 @@ mod test {
                 .finish()
         };
 
-        let _s = tracing::subscriber::set_default(c);
+        let _guard = subscriber::set_default(subscriber);
 
         trace!("trace");
         debug!("debug");
@@ -1437,31 +1529,27 @@ mod test {
         warn!("warn");
         error!("error");
 
-        println!("max level debug");
-        has_lines(&debug_buf, &[(Level::DEBUG, "debug")]);
+        has_lines(&debug_buf, &[(Level::DEBUG, "debug")])?;
 
-        println!("max level info");
-        has_lines(&info_buf, &[(Level::INFO, "info")]);
+        has_lines(&info_buf, &[(Level::INFO, "info")])?;
 
-        println!("max level warn");
-        has_lines(&warn_buf, &[(Level::WARN, "warn")]);
+        has_lines(&warn_buf, &[(Level::WARN, "warn")])?;
 
-        println!("max level error");
-        has_lines(&err_buf, &[(Level::ERROR, "error")]);
+        has_lines(&err_buf, &[(Level::ERROR, "error")])
     }
 
     #[test]
-    fn combinators_and() {
-        let a_buf = Arc::new(Mutex::new(Vec::new()));
-        let a = MockMakeWriter::new(a_buf.clone());
+    fn combinators_and() -> Result<(), TestFailure> {
+        let first_buf = Arc::new(Mutex::new(Vec::new()));
+        let first = MockMakeWriter::new(Arc::clone(&first_buf));
 
-        let b_buf = Arc::new(Mutex::new(Vec::new()));
-        let b = MockMakeWriter::new(b_buf.clone());
+        let second_buf = Arc::new(Mutex::new(Vec::new()));
+        let second = MockMakeWriter::new(Arc::clone(&second_buf));
 
         let lines = &[(Level::INFO, "hello"), (Level::INFO, "world")];
 
-        let make_writer = a.and(b);
-        let c = {
+        let make_writer = first.and(second);
+        let subscriber = {
             #[cfg(feature = "ansi")]
             let f = Format::default().without_time().with_ansi(false);
             #[cfg(not(feature = "ansi"))]
@@ -1473,11 +1561,11 @@ mod test {
                 .finish()
         };
 
-        let _s = tracing::subscriber::set_default(c);
+        let _guard = subscriber::set_default(subscriber);
         info!("hello");
         info!("world");
 
-        has_lines(&a_buf, &lines[..]);
-        has_lines(&b_buf, &lines[..]);
+        has_lines(&first_buf, &lines[..])?;
+        has_lines(&second_buf, &lines[..])
     }
 }

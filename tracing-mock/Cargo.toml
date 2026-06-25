@@ -33,6 +33,9 @@ tracing-subscriber = { workspace = true, features = ["registry"], optional = tru
 # Fix minimal-versions; tokio-test fails with otherwise acceptable 0.1.0
 tokio-stream = { workspace = true, optional = true }
 
+[dev-dependencies]
+strict-test-support = { workspace = true, features = ["trybuild"] }
+
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]

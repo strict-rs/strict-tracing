@@ -66,6 +66,7 @@
 //!
 //! ```rust
 //! # use tracing_core::{Subscriber, Metadata, Event};
+//! # use tracing_core::subscriber::SubscriberResult;
 //! # use tracing_core::span::{Attributes, Id, Record};
 //! # use std::sync::atomic::{AtomicUsize, Ordering};
 //! use tracing_serde::AsSerde;
@@ -83,31 +84,36 @@
 //!
 //! impl Subscriber for JsonSubscriber {
 //!
-//!     fn new_span(&self, attrs: &Attributes<'_>) -> Id {
-//!         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-//!         let id = Id::from_u64(id as u64);
+//!     fn new_span(&self, attrs: &Attributes<'_>) -> SubscriberResult<Id> {
+//!         let id = loop {
+//!             let id = self.next_id.fetch_add(1, Ordering::Relaxed) as u64;
+//!             if let Some(id) = Id::try_from_u64(id) {
+//!                 break id;
+//!             }
+//!         };
 //!         let json = json!({
 //!         "new_span": {
 //!             "attributes": attrs.as_serde(),
 //!             "id": id.as_serde(),
 //!         }});
 //!         println!("{}", json);
-//!         id
+//!         Ok(id)
 //!     }
 //!
-//!     fn event(&self, event: &Event<'_>) {
+//!     fn event(&self, event: &Event<'_>) -> SubscriberResult {
 //!         let json = json!({
 //!            "event": event.as_serde(),
 //!         });
 //!         println!("{}", json);
+//!         Ok(())
 //!     }
 //!
 //!     // ...
-//!     # fn enabled(&self, _: &Metadata<'_>) -> bool { true }
-//!     # fn enter(&self, _: &Id) {}
-//!     # fn exit(&self, _: &Id) {}
-//!     # fn record(&self, _: &Id, _: &Record<'_>) {}
-//!     # fn record_follows_from(&self, _: &Id, _: &Id) {}
+//!     # fn enabled(&self, _: &Metadata<'_>) -> SubscriberResult<bool> { Ok(true) }
+//!     # fn enter(&self, _: Id) -> SubscriberResult { Ok(()) }
+//!     # fn exit(&self, _: Id) -> SubscriberResult { Ok(()) }
+//!     # fn record(&self, _: Id, _: &Record<'_>) -> SubscriberResult { Ok(()) }
+//!     # fn record_follows_from(&self, _: Id, _: Id) -> SubscriberResult { Ok(()) }
 //! }
 //! ```
 //!
@@ -172,7 +178,9 @@ use std::fmt;
 
 use serde::{
     Serialize,
-    ser::{SerializeMap, SerializeSeq, SerializeStruct, SerializeTupleStruct, Serializer},
+    ser::{
+        SerializeMap, SerializeSeq as _, SerializeStruct, SerializeTupleStruct as _, Serializer,
+    },
 };
 
 use tracing_core::{
@@ -223,19 +231,7 @@ impl Serialize for SerializeLevel<'_> {
     where
         S: Serializer,
     {
-        if self.0 == &Level::ERROR {
-            serializer.serialize_str("ERROR")
-        } else if self.0 == &Level::WARN {
-            serializer.serialize_str("WARN")
-        } else if self.0 == &Level::INFO {
-            serializer.serialize_str("INFO")
-        } else if self.0 == &Level::DEBUG {
-            serializer.serialize_str("DEBUG")
-        } else if self.0 == &Level::TRACE {
-            serializer.serialize_str("TRACE")
-        } else {
-            unreachable!()
-        }
+        serializer.serialize_str(self.0.as_str())
     }
 }
 
@@ -286,10 +282,10 @@ impl Serialize for SerializeEvent<'_> {
     where
         S: Serializer,
     {
-        let mut serializer = serializer.serialize_struct("Event", 2)?;
-        serializer.serialize_field("metadata", &SerializeMetadata(self.0.metadata()))?;
+        let mut event = serializer.serialize_struct("Event", 2)?;
+        event.serialize_field("metadata", &SerializeMetadata(self.0.metadata()))?;
         let mut visitor = SerdeStructVisitor {
-            serializer,
+            serializer: event,
             state: Ok(()),
         };
         self.0.record(&mut visitor);
@@ -306,13 +302,13 @@ impl Serialize for SerializeAttributes<'_> {
     where
         S: Serializer,
     {
-        let mut serializer = serializer.serialize_struct("Attributes", 3)?;
-        serializer.serialize_field("metadata", &SerializeMetadata(self.0.metadata()))?;
-        serializer.serialize_field("parent", &self.0.parent().map(SerializeId))?;
-        serializer.serialize_field("is_root", &self.0.is_root())?;
+        let mut attributes = serializer.serialize_struct("Attributes", 3)?;
+        attributes.serialize_field("metadata", &SerializeMetadata(self.0.metadata()))?;
+        attributes.serialize_field("parent", &self.0.parent().map(SerializeId))?;
+        attributes.serialize_field("is_root", &self.0.is_root())?;
 
         let mut visitor = SerdeStructVisitor {
-            serializer,
+            serializer: attributes,
             state: Ok(()),
         };
         self.0.record(&mut visitor);
@@ -329,8 +325,8 @@ impl Serialize for SerializeRecord<'_> {
     where
         S: Serializer,
     {
-        let serializer = serializer.serialize_map(None)?;
-        let mut visitor = SerdeMapVisitor::new(serializer);
+        let map = serializer.serialize_map(None)?;
+        let mut visitor = SerdeMapVisitor::new(map);
         self.0.record(&mut visitor);
         visitor.finish()
     }
@@ -339,7 +335,9 @@ impl Serialize for SerializeRecord<'_> {
 /// Implements `tracing_core::field::Visit` for some `serde::ser::SerializeMap`.
 #[derive(Debug)]
 pub struct SerdeMapVisitor<S: SerializeMap> {
+    /// Serializer receiving field entries recorded by the visitor.
     serializer: S,
+    /// First field serialization error, or `Ok(())` while recording can continue.
     state: Result<(), S::Error>,
 }
 
@@ -348,7 +346,7 @@ where
     S: SerializeMap,
 {
     /// Create a new map visitor.
-    pub fn new(serializer: S) -> Self {
+    pub const fn new(serializer: S) -> Self {
         Self {
             serializer,
             state: Ok(()),
@@ -358,6 +356,11 @@ where
     /// Completes serializing the visited object, returning `Ok(())` if all
     /// fields were serialized correctly, or `Error(S::Error)` if a field could
     /// not be serialized.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first field serialization error, or the serializer's final
+    /// map completion error.
     pub fn finish(self) -> Result<S::Ok, S::Error> {
         self.state?;
         self.serializer.end()
@@ -366,6 +369,10 @@ where
     /// Completes serializing the visited object, returning ownership of the underlying serializer
     /// if all fields were serialized correctly, or `Err(S::Error)` if a field could not be
     /// serialized.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first field serialization error.
     pub fn take_serializer(self) -> Result<S, S::Error> {
         self.state?;
         Ok(self.serializer)
@@ -390,7 +397,7 @@ where
         // If previous fields serialized successfully, continue serializing,
         // otherwise, short-circuit and do nothing.
         if self.state.is_ok() {
-            self.state = self.serializer.serialize_entry(field.name(), &value)
+            self.state = self.serializer.serialize_entry(field.name(), &value);
         }
     }
 
@@ -398,31 +405,31 @@ where
         if self.state.is_ok() {
             self.state = self
                 .serializer
-                .serialize_entry(field.name(), &format_args!("{:?}", value))
+                .serialize_entry(field.name(), &format_args!("{value:?}"));
         }
     }
 
     fn record_u64(&mut self, field: &Field, value: u64) {
         if self.state.is_ok() {
-            self.state = self.serializer.serialize_entry(field.name(), &value)
+            self.state = self.serializer.serialize_entry(field.name(), &value);
         }
     }
 
     fn record_i64(&mut self, field: &Field, value: i64) {
         if self.state.is_ok() {
-            self.state = self.serializer.serialize_entry(field.name(), &value)
+            self.state = self.serializer.serialize_entry(field.name(), &value);
         }
     }
 
     fn record_f64(&mut self, field: &Field, value: f64) {
         if self.state.is_ok() {
-            self.state = self.serializer.serialize_entry(field.name(), &value)
+            self.state = self.serializer.serialize_entry(field.name(), &value);
         }
     }
 
     fn record_str(&mut self, field: &Field, value: &str) {
         if self.state.is_ok() {
-            self.state = self.serializer.serialize_entry(field.name(), &value)
+            self.state = self.serializer.serialize_entry(field.name(), &value);
         }
     }
 }
@@ -430,7 +437,9 @@ where
 /// Implements `tracing_core::field::Visit` for some `serde::ser::SerializeStruct`.
 #[derive(Debug)]
 pub struct SerdeStructVisitor<S: SerializeStruct> {
+    /// Serializer receiving struct fields recorded by the visitor.
     serializer: S,
+    /// First field serialization error, or `Ok(())` while recording can continue.
     state: Result<(), S::Error>,
 }
 
@@ -452,7 +461,7 @@ where
         // If previous fields serialized successfully, continue serializing,
         // otherwise, short-circuit and do nothing.
         if self.state.is_ok() {
-            self.state = self.serializer.serialize_field(field.name(), &value)
+            self.state = self.serializer.serialize_field(field.name(), &value);
         }
     }
 
@@ -460,31 +469,31 @@ where
         if self.state.is_ok() {
             self.state = self
                 .serializer
-                .serialize_field(field.name(), &format_args!("{:?}", value))
+                .serialize_field(field.name(), &format_args!("{value:?}"));
         }
     }
 
     fn record_u64(&mut self, field: &Field, value: u64) {
         if self.state.is_ok() {
-            self.state = self.serializer.serialize_field(field.name(), &value)
+            self.state = self.serializer.serialize_field(field.name(), &value);
         }
     }
 
     fn record_i64(&mut self, field: &Field, value: i64) {
         if self.state.is_ok() {
-            self.state = self.serializer.serialize_field(field.name(), &value)
+            self.state = self.serializer.serialize_field(field.name(), &value);
         }
     }
 
     fn record_f64(&mut self, field: &Field, value: f64) {
         if self.state.is_ok() {
-            self.state = self.serializer.serialize_field(field.name(), &value)
+            self.state = self.serializer.serialize_field(field.name(), &value);
         }
     }
 
     fn record_str(&mut self, field: &Field, value: &str) {
         if self.state.is_ok() {
-            self.state = self.serializer.serialize_field(field.name(), &value)
+            self.state = self.serializer.serialize_field(field.name(), &value);
         }
     }
 }
@@ -493,6 +502,11 @@ impl<S: SerializeStruct> SerdeStructVisitor<S> {
     /// Completes serializing the visited object, returning `Ok(())` if all
     /// fields were serialized correctly, or `Error(S::Error)` if a field could
     /// not be serialized.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first field serialization error, or the serializer's final
+    /// struct completion error.
     pub fn finish(self) -> Result<S::Ok, S::Error> {
         self.state?;
         self.serializer.end()
@@ -588,6 +602,8 @@ impl sealed::Sealed for Field {}
 
 impl sealed::Sealed for FieldSet {}
 
+/// Private sealing module for local extension traits.
 mod sealed {
+    /// Marker trait preventing downstream implementations.
     pub trait Sealed {}
 }

@@ -1,8 +1,9 @@
 use super::*;
+use strict_test_support::{TestFailure, ensure_ok};
 use tracing_mock::{expect, layer::MockLayer};
 
 #[test]
-fn filters_span_scopes() {
+fn filters_span_scopes() -> Result<(), TestFailure> {
     let (debug_layer, debug_handle) = layer::named("debug")
         .enter(expect::span().at_level(Level::DEBUG))
         .enter(expect::span().at_level(Level::INFO))
@@ -62,7 +63,7 @@ fn filters_span_scopes() {
         .with(debug_layer.with_filter(LevelFilter::DEBUG))
         .with(info_layer.with_filter(LevelFilter::INFO))
         .with(warn_layer.with_filter(LevelFilter::WARN));
-    let _subscriber = tracing::subscriber::set_default(subscriber);
+    let _subscriber = set_default(subscriber);
 
     {
         let _trace = tracing::trace_span!("my_span").entered();
@@ -71,17 +72,18 @@ fn filters_span_scopes() {
         let _warn = tracing::warn_span!("my_span").entered();
         let _error = tracing::error_span!("my_span").entered();
         tracing::error!("hello world");
-    }
+    };
 
-    debug_handle.assert_finished();
-    info_handle.assert_finished();
-    warn_handle.assert_finished();
+    ensure_ok(debug_handle.finished(), "mock expectations should finish")?;
+    ensure_ok(info_handle.finished(), "mock expectations should finish")?;
+    ensure_ok(warn_handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn filters_interleaved_span_scopes() {
+fn filters_interleaved_span_scopes() -> Result<(), TestFailure> {
     fn target_layer(target: &'static str) -> (MockLayer, subscriber::MockHandle) {
-        layer::named(format!("target_{}", target))
+        layer::named(format!("target_{target}"))
             .enter(expect::span().with_target(target))
             .enter(expect::span().with_target(target))
             .event(
@@ -135,7 +137,7 @@ fn filters_interleaved_span_scopes() {
             let target = meta.target();
             target == "b" || target == module_path!()
         })));
-    let _subscriber = tracing::subscriber::set_default(subscriber);
+    let _subscriber = set_default(subscriber);
 
     {
         let _a1 = tracing::trace_span!(target: "a", "a/trace").entered();
@@ -145,9 +147,10 @@ fn filters_interleaved_span_scopes() {
         tracing::info!("hello world");
         tracing::debug!(target: "a", "hello to my target");
         tracing::debug!(target: "b", "hello to my target");
-    }
+    };
 
-    a_handle.assert_finished();
-    b_handle.assert_finished();
-    all_handle.assert_finished();
+    ensure_ok(a_handle.finished(), "mock expectations should finish")?;
+    ensure_ok(b_handle.finished(), "mock expectations should finish")?;
+    ensure_ok(all_handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }

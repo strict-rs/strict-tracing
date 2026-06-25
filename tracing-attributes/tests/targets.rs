@@ -1,110 +1,133 @@
 //! Example binary for tracing workspace checks.
-use tracing::subscriber::with_default;
+#![cfg(test)]
 use tracing_attributes::instrument;
-use tracing_mock::*;
+
+const ROOT_MODULE_PATH: &str = module_path!();
 
 #[instrument]
+#[allow(
+    clippy::single_call_fn,
+    reason = "target fixture remains a named function item so default target metadata can be asserted"
+)]
 fn default_target() {}
 
 #[instrument(target = "my_target")]
+#[allow(
+    clippy::single_call_fn,
+    reason = "target fixture remains a named function item so custom target metadata can be asserted"
+)]
 fn custom_target() {}
 
-mod my_mod {
+mod nested_target_tests {
+    use super::{ROOT_MODULE_PATH, custom_target, default_target};
+    use strict_test_support::{TestFailure, ensure_ok};
+    use tracing::subscriber::with_default;
     use tracing_attributes::instrument;
+    use tracing_mock::*;
 
-    pub(crate) const MODULE_PATH: &str = module_path!();
+    const MODULE_PATH: &str = module_path!();
 
     #[instrument]
-    pub(crate) fn default_target() {}
+    #[allow(
+        clippy::single_call_fn,
+        reason = "nested target fixture remains a named function item so module-path metadata can be asserted"
+    )]
+    fn nested_default_target() {}
 
     #[instrument(target = "my_other_target")]
-    pub(crate) fn custom_target() {}
-}
+    #[allow(
+        clippy::single_call_fn,
+        reason = "nested target fixture remains a named function item so custom module target metadata can be asserted"
+    )]
+    fn nested_custom_target() {}
 
-#[test]
-fn default_targets() {
-    let (subscriber, handle) = subscriber::mock()
-        .new_span(
-            expect::span()
-                .named("default_target")
-                .with_target(module_path!()),
-        )
-        .enter(
-            expect::span()
-                .named("default_target")
-                .with_target(module_path!()),
-        )
-        .exit(
-            expect::span()
-                .named("default_target")
-                .with_target(module_path!()),
-        )
-        .new_span(
-            expect::span()
-                .named("default_target")
-                .with_target(my_mod::MODULE_PATH),
-        )
-        .enter(
-            expect::span()
-                .named("default_target")
-                .with_target(my_mod::MODULE_PATH),
-        )
-        .exit(
-            expect::span()
-                .named("default_target")
-                .with_target(my_mod::MODULE_PATH),
-        )
-        .only()
-        .run_with_handle();
+    #[test]
+    fn default_targets() -> Result<(), TestFailure> {
+        let (subscriber, handle) = subscriber::mock()
+            .new_span(
+                expect::span()
+                    .named("default_target")
+                    .with_target(ROOT_MODULE_PATH),
+            )
+            .enter(
+                expect::span()
+                    .named("default_target")
+                    .with_target(ROOT_MODULE_PATH),
+            )
+            .exit(
+                expect::span()
+                    .named("default_target")
+                    .with_target(ROOT_MODULE_PATH),
+            )
+            .new_span(
+                expect::span()
+                    .named("nested_default_target")
+                    .with_target(MODULE_PATH),
+            )
+            .enter(
+                expect::span()
+                    .named("nested_default_target")
+                    .with_target(MODULE_PATH),
+            )
+            .exit(
+                expect::span()
+                    .named("nested_default_target")
+                    .with_target(MODULE_PATH),
+            )
+            .only()
+            .run_with_handle();
 
-    let _result = with_default(subscriber, || {
-        default_target();
-        my_mod::default_target();
-    });
+        with_default(subscriber, || {
+            default_target();
+            nested_default_target();
+        });
 
-    handle.assert_finished();
-}
+        ensure_ok(handle.finished(), "mock expectations should finish")?;
+        Ok(())
+    }
 
-#[test]
-fn custom_targets() {
-    let (subscriber, handle) = subscriber::mock()
-        .new_span(
-            expect::span()
-                .named("custom_target")
-                .with_target("my_target"),
-        )
-        .enter(
-            expect::span()
-                .named("custom_target")
-                .with_target("my_target"),
-        )
-        .exit(
-            expect::span()
-                .named("custom_target")
-                .with_target("my_target"),
-        )
-        .new_span(
-            expect::span()
-                .named("custom_target")
-                .with_target("my_other_target"),
-        )
-        .enter(
-            expect::span()
-                .named("custom_target")
-                .with_target("my_other_target"),
-        )
-        .exit(
-            expect::span()
-                .named("custom_target")
-                .with_target("my_other_target"),
-        )
-        .only()
-        .run_with_handle();
+    #[test]
+    fn custom_targets() -> Result<(), TestFailure> {
+        let (subscriber, handle) = subscriber::mock()
+            .new_span(
+                expect::span()
+                    .named("custom_target")
+                    .with_target("my_target"),
+            )
+            .enter(
+                expect::span()
+                    .named("custom_target")
+                    .with_target("my_target"),
+            )
+            .exit(
+                expect::span()
+                    .named("custom_target")
+                    .with_target("my_target"),
+            )
+            .new_span(
+                expect::span()
+                    .named("nested_custom_target")
+                    .with_target("my_other_target"),
+            )
+            .enter(
+                expect::span()
+                    .named("nested_custom_target")
+                    .with_target("my_other_target"),
+            )
+            .exit(
+                expect::span()
+                    .named("nested_custom_target")
+                    .with_target("my_other_target"),
+            )
+            .only()
+            .run_with_handle();
 
-    let _result = with_default(subscriber, || {
-        custom_target();
-        my_mod::custom_target();
-    });
+        with_default(subscriber, || {
+            custom_target();
+            nested_custom_target();
+        });
 
-    handle.assert_finished();
+        ensure_ok(handle.finished(), "mock expectations should finish")?;
+        Ok(())
+    }
 }

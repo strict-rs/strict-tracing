@@ -26,16 +26,17 @@
 //! # pub struct FooSubscriber;
 //! # use tracing_core::{
 //! #   dispatcher, Event, Metadata,
-//! #   span::{Attributes, Id, Record}
+//! #   span::{Attributes, Id, Record},
+//! #   subscriber::SubscriberResult,
 //! # };
 //! # impl tracing_core::Subscriber for FooSubscriber {
-//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(1) }
-//! #   fn record(&self, _: &Id, _: &Record) {}
-//! #   fn event(&self, _: &Event) {}
-//! #   fn record_follows_from(&self, _: &Id, _: &Id) {}
-//! #   fn enabled(&self, _: &Metadata) -> bool { false }
-//! #   fn enter(&self, _: &Id) {}
-//! #   fn exit(&self, _: &Id) {}
+//! #   fn new_span(&self, _: &Attributes) -> SubscriberResult<Id> { Ok(Id::from_non_zero_u64(core::num::NonZeroU64::MIN)) }
+//! #   fn record(&self, _: Id, _: &Record) -> SubscriberResult { Ok(()) }
+//! #   fn event(&self, _: &Event) -> SubscriberResult { Ok(()) }
+//! #   fn record_follows_from(&self, _: Id, _: Id) -> SubscriberResult { Ok(()) }
+//! #   fn enabled(&self, _: &Metadata) -> SubscriberResult<bool> { Ok(false) }
+//! #   fn enter(&self, _: Id) -> SubscriberResult { Ok(()) }
+//! #   fn exit(&self, _: Id) -> SubscriberResult { Ok(()) }
 //! # }
 //! # impl FooSubscriber { fn new() -> Self { FooSubscriber } }
 //! use dispatcher::Dispatch;
@@ -49,16 +50,17 @@
 //! # pub struct FooSubscriber;
 //! # use tracing_core::{
 //! #   dispatcher, Event, Metadata,
-//! #   span::{Attributes, Id, Record}
+//! #   span::{Attributes, Id, Record},
+//! #   subscriber::SubscriberResult,
 //! # };
 //! # impl tracing_core::Subscriber for FooSubscriber {
-//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(1) }
-//! #   fn record(&self, _: &Id, _: &Record) {}
-//! #   fn event(&self, _: &Event) {}
-//! #   fn record_follows_from(&self, _: &Id, _: &Id) {}
-//! #   fn enabled(&self, _: &Metadata) -> bool { false }
-//! #   fn enter(&self, _: &Id) {}
-//! #   fn exit(&self, _: &Id) {}
+//! #   fn new_span(&self, _: &Attributes) -> SubscriberResult<Id> { Ok(Id::from_non_zero_u64(core::num::NonZeroU64::MIN)) }
+//! #   fn record(&self, _: Id, _: &Record) -> SubscriberResult { Ok(()) }
+//! #   fn event(&self, _: &Event) -> SubscriberResult { Ok(()) }
+//! #   fn record_follows_from(&self, _: Id, _: Id) -> SubscriberResult { Ok(()) }
+//! #   fn enabled(&self, _: &Metadata) -> SubscriberResult<bool> { Ok(false) }
+//! #   fn enter(&self, _: Id) -> SubscriberResult { Ok(()) }
+//! #   fn exit(&self, _: Id) -> SubscriberResult { Ok(()) }
 //! # }
 //! # impl FooSubscriber { fn new() -> Self { FooSubscriber } }
 //! # let my_subscriber = FooSubscriber::new();
@@ -84,26 +86,24 @@
 //! # pub struct FooSubscriber;
 //! # use tracing_core::{
 //! #   dispatcher, Event, Metadata,
-//! #   span::{Attributes, Id, Record}
+//! #   span::{Attributes, Id, Record},
+//! #   subscriber::SubscriberResult,
 //! # };
 //! # impl tracing_core::Subscriber for FooSubscriber {
-//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(1) }
-//! #   fn record(&self, _: &Id, _: &Record) {}
-//! #   fn event(&self, _: &Event) {}
-//! #   fn record_follows_from(&self, _: &Id, _: &Id) {}
-//! #   fn enabled(&self, _: &Metadata) -> bool { false }
-//! #   fn enter(&self, _: &Id) {}
-//! #   fn exit(&self, _: &Id) {}
+//! #   fn new_span(&self, _: &Attributes) -> SubscriberResult<Id> { Ok(Id::from_non_zero_u64(core::num::NonZeroU64::MIN)) }
+//! #   fn record(&self, _: Id, _: &Record) -> SubscriberResult { Ok(()) }
+//! #   fn event(&self, _: &Event) -> SubscriberResult { Ok(()) }
+//! #   fn record_follows_from(&self, _: Id, _: Id) -> SubscriberResult { Ok(()) }
+//! #   fn enabled(&self, _: &Metadata) -> SubscriberResult<bool> { Ok(false) }
+//! #   fn enter(&self, _: Id) -> SubscriberResult { Ok(()) }
+//! #   fn exit(&self, _: Id) -> SubscriberResult { Ok(()) }
 //! # }
 //! # impl FooSubscriber { fn new() -> Self { FooSubscriber } }
 //! # let my_subscriber = FooSubscriber::new();
 //! # let my_dispatch = dispatcher::Dispatch::new(my_subscriber);
 //! // no default subscriber
 //!
-//! dispatcher::set_global_default(my_dispatch)
-//!     // `set_global_default` will return an error if the global default
-//!     // subscriber has already been set.
-//!     .expect("global default was already set!");
+//! let _result = dispatcher::set_global_default(my_dispatch);
 //!
 //! // `my_subscriber` is now the default
 //! ```

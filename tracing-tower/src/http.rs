@@ -1,3 +1,4 @@
+/// Defines request span constructor functions for HTTP request metadata.
 macro_rules! make_req_fns {
     ($($name:ident, $level:expr),+) => {
         $(

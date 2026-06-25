@@ -2,11 +2,13 @@
 //! `Layer` filter).
 #![cfg(feature = "registry")]
 use super::*;
+use strict_test_support::{TestFailure, ensure_ok};
+use tracing::subscriber::set_default;
 use tracing_mock::{expect, layer};
 
 #[test]
-fn level_filter_event() {
-    let filter: EnvFilter = "info".parse().expect("filter should parse");
+fn level_filter_event() -> Result<(), TestFailure> {
+    let filter: EnvFilter = ensure_ok("info".parse(), "per-layer level filter parses")?;
     let (layer, handle) = layer::mock()
         .event(expect::event().at_level(Level::INFO))
         .event(expect::event().at_level(Level::WARN))
@@ -15,7 +17,7 @@ fn level_filter_event() {
         .run_with_handle();
 
     let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
-    let _subscriber = tracing::subscriber::set_default(subscriber);
+    let _subscriber = set_default(subscriber);
 
     tracing::trace!("this should be disabled");
     tracing::info!("this shouldn't be");
@@ -23,14 +25,16 @@ fn level_filter_event() {
     tracing::warn!(target: "foo", "this should be enabled");
     tracing::error!("this should be enabled too");
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn same_name_spans() {
-    let filter: EnvFilter = "[foo{bar}]=trace,[foo{baz}]=trace"
-        .parse()
-        .expect("filter should parse");
+fn same_name_spans() -> Result<(), TestFailure> {
+    let filter: EnvFilter = ensure_ok(
+        "[foo{bar}]=trace,[foo{baz}]=trace".parse(),
+        "per-layer same-name span filter parses",
+    )?;
     let (layer, handle) = layer::mock()
         .new_span(
             expect::span()
@@ -48,17 +52,21 @@ fn same_name_spans() {
         .run_with_handle();
 
     let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
-    let _subscriber = tracing::subscriber::set_default(subscriber);
+    let _subscriber = set_default(subscriber);
 
     tracing::trace_span!("foo", bar = 1);
     tracing::trace_span!("foo", baz = 1);
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn level_filter_event_with_target() {
-    let filter: EnvFilter = "info,stuff=debug".parse().expect("filter should parse");
+fn level_filter_event_with_target() -> Result<(), TestFailure> {
+    let filter: EnvFilter = ensure_ok(
+        "info,stuff=debug".parse(),
+        "per-layer targeted level filter parses",
+    )?;
     let (layer, handle) = layer::mock()
         .event(expect::event().at_level(Level::INFO))
         .event(expect::event().at_level(Level::DEBUG).with_target("stuff"))
@@ -69,7 +77,7 @@ fn level_filter_event_with_target() {
         .run_with_handle();
 
     let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
-    let _subscriber = tracing::subscriber::set_default(subscriber);
+    let _subscriber = set_default(subscriber);
 
     tracing::trace!("this should be disabled");
     tracing::info!("this shouldn't be");
@@ -80,14 +88,16 @@ fn level_filter_event_with_target() {
     tracing::error!("this should be enabled too");
     tracing::error!(target: "stuff", "this should be enabled also");
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn level_filter_event_with_target_and_span() {
-    let filter: EnvFilter = "stuff[cool_span]=debug"
-        .parse()
-        .expect("filter should parse");
+fn level_filter_event_with_target_and_span() -> Result<(), TestFailure> {
+    let filter: EnvFilter = ensure_ok(
+        "stuff[cool_span]=debug".parse(),
+        "per-layer target-and-span filter parses",
+    )?;
 
     let cool_span = expect::span().named("cool_span");
     let (layer, handle) = layer::mock()
@@ -102,29 +112,33 @@ fn level_filter_event_with_target_and_span() {
         .run_with_handle();
 
     let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
-    let _subscriber = tracing::subscriber::set_default(subscriber);
+    let _subscriber = set_default(subscriber);
 
     {
         let _span = tracing::info_span!(target: "stuff", "cool_span").entered();
         tracing::debug!("this should be enabled");
-    }
+    };
 
     tracing::debug!("should also be disabled");
 
     {
         let _span = tracing::info_span!("uncool_span").entered();
         tracing::debug!("this should be disabled");
-    }
+    };
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn not_order_dependent() {
+fn not_order_dependent() -> Result<(), TestFailure> {
     // this test reproduces tokio-rs/tracing#623
 
-    let filter: EnvFilter = "stuff=debug,info".parse().expect("filter should parse");
-    let (layer, finished) = layer::mock()
+    let filter: EnvFilter = ensure_ok(
+        "stuff=debug,info".parse(),
+        "per-layer order-independent filter parses",
+    )?;
+    let (layer, mock_handle) = layer::mock()
         .event(expect::event().at_level(Level::INFO))
         .event(expect::event().at_level(Level::DEBUG).with_target("stuff"))
         .event(expect::event().at_level(Level::WARN).with_target("stuff"))
@@ -134,7 +148,7 @@ fn not_order_dependent() {
         .run_with_handle();
 
     let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
-    let _subscriber = tracing::subscriber::set_default(subscriber);
+    let _subscriber = set_default(subscriber);
 
     tracing::trace!("this should be disabled");
     tracing::info!("this shouldn't be");
@@ -145,79 +159,85 @@ fn not_order_dependent() {
     tracing::error!("this should be enabled too");
     tracing::error!(target: "stuff", "this should be enabled also");
 
-    finished.assert_finished();
+    ensure_ok(mock_handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn add_directive_enables_event() {
+fn add_directive_enables_event() -> Result<(), TestFailure> {
     // this test reproduces tokio-rs/tracing#591
 
     // by default, use info level
     let mut filter = EnvFilter::new(LevelFilter::INFO.to_string());
 
     // overwrite with a more specific directive
-    filter = filter.add_directive("hello=trace".parse().expect("directive should parse"));
+    filter = filter.add_directive(ensure_ok(
+        "hello=trace".parse(),
+        "per-layer hello trace directive parses",
+    )?);
 
-    let (layer, finished) = layer::mock()
+    let (layer, mock_handle) = layer::mock()
         .event(expect::event().at_level(Level::INFO).with_target("hello"))
         .event(expect::event().at_level(Level::TRACE).with_target("hello"))
         .only()
         .run_with_handle();
 
     let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
-    let _subscriber = tracing::subscriber::set_default(subscriber);
+    let _subscriber = set_default(subscriber);
 
     tracing::info!(target: "hello", "hello info");
     tracing::trace!(target: "hello", "hello trace");
 
-    finished.assert_finished();
+    ensure_ok(mock_handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn span_name_filter_is_dynamic() {
-    let filter: EnvFilter = "info,[cool_span]=debug"
-        .parse()
-        .expect("filter should parse");
-    let cool_span = expect::span().named("cool_span");
-    let uncool_span = expect::span().named("uncool_span");
-    let (layer, finished) = layer::mock()
+fn span_name_filter_is_dynamic() -> Result<(), TestFailure> {
+    let filter: EnvFilter = ensure_ok(
+        "info,[cool_span]=debug".parse(),
+        "per-layer span-name dynamic filter parses",
+    )?;
+    let expected_cool_span = expect::span().named("cool_span");
+    let expected_uncool_span = expect::span().named("uncool_span");
+    let (layer, mock_handle) = layer::mock()
         .event(expect::event().at_level(Level::INFO))
-        .enter(cool_span.clone())
+        .enter(expected_cool_span.clone())
         .event(
             expect::event()
                 .at_level(Level::DEBUG)
-                .in_scope(vec![cool_span.clone()]),
+                .in_scope(vec![expected_cool_span.clone()]),
         )
-        .enter(uncool_span.clone())
+        .enter(expected_uncool_span.clone())
         .event(
             expect::event()
                 .at_level(Level::WARN)
-                .in_scope(vec![uncool_span.clone()]),
+                .in_scope(vec![expected_uncool_span.clone()]),
         )
         .event(
             expect::event()
                 .at_level(Level::DEBUG)
-                .in_scope(vec![uncool_span.clone()]),
+                .in_scope(vec![expected_uncool_span.clone()]),
         )
-        .exit(uncool_span.clone())
-        .exit(cool_span)
-        .enter(uncool_span.clone())
+        .exit(expected_uncool_span.clone())
+        .exit(expected_cool_span)
+        .enter(expected_uncool_span.clone())
         .event(
             expect::event()
                 .at_level(Level::WARN)
-                .in_scope(vec![uncool_span.clone()]),
+                .in_scope(vec![expected_uncool_span.clone()]),
         )
         .event(
             expect::event()
                 .at_level(Level::ERROR)
-                .in_scope(vec![uncool_span.clone()]),
+                .in_scope(vec![expected_uncool_span.clone()]),
         )
-        .exit(uncool_span)
+        .exit(expected_uncool_span)
         .only()
         .run_with_handle();
 
     let subscriber = tracing_subscriber::registry().with(layer.with_filter(filter));
-    let _subscriber = tracing::subscriber::set_default(subscriber);
+    let _subscriber = set_default(subscriber);
 
     tracing::trace!("this should be disabled");
     tracing::info!("this shouldn't be");
@@ -231,25 +251,29 @@ fn span_name_filter_is_dynamic() {
         let _enter2 = uncool_span.enter();
         tracing::warn!("warning: extremely cool!");
         tracing::debug!("i'm still cool");
-    }
+    };
 
     {
         let _enter = uncool_span.enter();
         tracing::warn!("warning: not that cool");
         tracing::trace!("im not cool enough");
         tracing::error!("uncool error");
-    }
+    };
 
-    finished.assert_finished();
+    ensure_ok(mock_handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn multiple_dynamic_filters() {
+fn multiple_dynamic_filters() -> Result<(), TestFailure> {
     // Test that multiple dynamic (span) filters only apply to the layers
     // they're attached to.
     let (layer1, handle1) = {
         let span = expect::span().named("span1");
-        let filter: EnvFilter = "[span1]=debug".parse().expect("filter 1 should parse");
+        let filter: EnvFilter = ensure_ok(
+            "[span1]=debug".parse(),
+            "first dynamic per-layer filter parses",
+        )?;
         let (layer, handle) = layer::named("layer1")
             .enter(span.clone())
             .event(
@@ -265,7 +289,10 @@ fn multiple_dynamic_filters() {
 
     let (layer2, handle2) = {
         let span = expect::span().named("span2");
-        let filter: EnvFilter = "[span2]=info".parse().expect("filter 2 should parse");
+        let filter: EnvFilter = ensure_ok(
+            "[span2]=info".parse(),
+            "second dynamic per-layer filter parses",
+        )?;
         let (layer, handle) = layer::named("layer2")
             .enter(span.clone())
             .event(
@@ -280,7 +307,7 @@ fn multiple_dynamic_filters() {
     };
 
     let subscriber = tracing_subscriber::registry().with(layer1).with(layer2);
-    let _subscriber = tracing::subscriber::set_default(subscriber);
+    let _subscriber = set_default(subscriber);
 
     tracing::info_span!("span1").in_scope(|| {
         tracing::debug!("hello from span 1");
@@ -292,6 +319,7 @@ fn multiple_dynamic_filters() {
         tracing::debug!("not enabled");
     });
 
-    handle1.assert_finished();
-    handle2.assert_finished();
+    ensure_ok(handle1.finished(), "mock expectations should finish")?;
+    ensure_ok(handle2.finished(), "mock expectations should finish")?;
+    Ok(())
 }

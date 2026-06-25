@@ -1,3 +1,5 @@
+//! JSON event and field formatters.
+
 use super::{Format, FormatEvent, FormatFields, FormatTime, Writer};
 use crate::{
     field::{RecordFields, VisitFmt, VisitOutput},
@@ -9,22 +11,27 @@ use crate::{
     registry::{LookupSpan, SpanRef},
 };
 use alloc::{
+    borrow::ToOwned as _,
     collections::BTreeMap,
     fmt::{self, Debug, Write},
     format,
     string::String,
 };
-use serde::ser::{SerializeMap, Serializer as _};
-use serde_json::Serializer;
+use core::marker::PhantomData;
+use serde::{ser::{Error as _, SerializeMap, SerializeSeq as _, Serializer}, Serialize};
+use serde_json::{Serializer as JsonSerializer, Value};
+use std::thread;
 use tracing_core::{
     field::{Field, Visit},
     span::Record,
     Event, Subscriber,
 };
-use tracing_serde::AsSerde;
+use tracing_serde::AsSerde as _;
+
+use super::FmtThreadId;
 
 #[cfg(feature = "tracing-log")]
-use tracing_log::NormalizeEvent;
+use tracing_log::NormalizeEvent as _;
 
 /// Marker for [`Format`] that indicates that the newline-delimited JSON log
 /// format should be used.
@@ -91,125 +98,153 @@ use tracing_log::NormalizeEvent;
 /// [`valuable::Valuable`]: https://docs.rs/valuable/latest/valuable/trait.Valuable.html
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub struct Json {
-    pub(crate) flatten_event: bool,
-    pub(crate) display_current_span: bool,
-    pub(crate) display_span_list: bool,
+    /// Bitset of enabled JSON output options.
+    bits: u8,
 }
 
 impl Json {
+    /// Event field flattening option.
+    const FLATTEN_EVENT: u8 = 1 << 0;
+    /// Current-span display option.
+    const CURRENT_SPAN: u8 = 1 << 1;
+    /// Span-list display option.
+    const SPAN_LIST: u8 = 1 << 2;
+    /// Default JSON output options.
+    const DEFAULT: Self = Self {
+        bits: Self::CURRENT_SPAN | Self::SPAN_LIST,
+    };
+
+    /// Returns a copy with `flag` set to `enabled`.
+    const fn with_flag(mut self, flag: u8, enabled: bool) -> Self {
+        if enabled {
+            self.bits |= flag;
+        } else {
+            self.bits &= !flag;
+        }
+        self
+    }
+
+    /// Returns whether `flag` is enabled.
+    const fn contains(self, flag: u8) -> bool {
+        self.bits & flag == flag
+    }
+
     /// If set to `true` event metadata will be flattened into the root object.
-    pub fn flatten_event(&mut self, flatten_event: bool) {
-        self.flatten_event = flatten_event;
+    pub const fn flatten_event(&mut self, flatten_event: bool) {
+        *self = self.with_flag(Self::FLATTEN_EVENT, flatten_event);
     }
 
     /// If set to `false`, formatted events won't contain a field for the current span.
-    pub fn with_current_span(&mut self, display_current_span: bool) {
-        self.display_current_span = display_current_span;
+    pub const fn with_current_span(&mut self, display_current_span: bool) {
+        *self = self.with_flag(Self::CURRENT_SPAN, display_current_span);
     }
 
     /// If set to `false`, formatted events won't contain a list of all currently
     /// entered spans. Spans are logged in a list from root to leaf.
-    pub fn with_span_list(&mut self, display_span_list: bool) {
-        self.display_span_list = display_span_list;
+    pub const fn with_span_list(&mut self, display_span_list: bool) {
+        *self = self.with_flag(Self::SPAN_LIST, display_span_list);
+    }
+
+    /// Returns whether event fields are flattened into the root object.
+    pub(crate) const fn flattens_event(self) -> bool {
+        self.contains(Self::FLATTEN_EVENT)
+    }
+
+    /// Returns whether formatted events include the current span.
+    pub(crate) const fn displays_current_span(self) -> bool {
+        self.contains(Self::CURRENT_SPAN)
+    }
+
+    /// Returns whether formatted events include the entered span list.
+    pub(crate) const fn displays_span_list(self) -> bool {
+        self.contains(Self::SPAN_LIST)
     }
 }
 
+/// A serializable view of the current span context.
 struct SerializableContext<'a, 'b, Span, N>(
     &'b Context<'a, Span>,
-    std::marker::PhantomData<N>,
+    PhantomData<N>,
 )
 where
     Span: Subscriber + for<'lookup> LookupSpan<'lookup>,
     N: for<'writer> FormatFields<'writer> + 'static;
 
-impl<Span, N> serde::ser::Serialize for SerializableContext<'_, '_, Span, N>
+impl<Span, N> Serialize for SerializableContext<'_, '_, Span, N>
 where
     Span: Subscriber + for<'lookup> LookupSpan<'lookup>,
     N: for<'writer> FormatFields<'writer> + 'static,
 {
-    fn serialize<Ser>(&self, serializer_o: Ser) -> Result<Ser::Ok, Ser::Error>
+    fn serialize<Ser>(&self, serializer: Ser) -> Result<Ser::Ok, Ser::Error>
     where
-        Ser: serde::ser::Serializer,
+        Ser: Serializer,
     {
-        use serde::ser::SerializeSeq;
-        let mut serializer = serializer_o.serialize_seq(None)?;
+        let mut sequence = serializer.serialize_seq(None)?;
 
         if let Some(leaf_span) = self.0.lookup_current() {
-            for span in leaf_span.scope().from_root() {
-                serializer.serialize_element(&SerializableSpan(&span, self.1))?;
+            for span in leaf_span.scope().root_to_leaf() {
+                sequence.serialize_element(&SerializableSpan(&span, self.1))?;
             }
         }
 
-        serializer.end()
+        sequence.end()
     }
 }
 
+/// A serializable view of a span and its formatted fields.
 struct SerializableSpan<'a, 'b, Span, N>(
     &'b SpanRef<'a, Span>,
-    std::marker::PhantomData<N>,
+    PhantomData<N>,
 )
 where
     Span: for<'lookup> LookupSpan<'lookup>,
     N: for<'writer> FormatFields<'writer> + 'static;
 
-impl<Span, N> serde::ser::Serialize for SerializableSpan<'_, '_, Span, N>
+impl<Span, N> Serialize for SerializableSpan<'_, '_, Span, N>
 where
     Span: for<'lookup> LookupSpan<'lookup>,
     N: for<'writer> FormatFields<'writer> + 'static,
 {
     fn serialize<Ser>(&self, serializer: Ser) -> Result<Ser::Ok, Ser::Error>
     where
-        Ser: serde::ser::Serializer,
+        Ser: Serializer,
     {
-        let mut serializer = serializer.serialize_map(None)?;
+        let mut map = serializer.serialize_map(None)?;
 
-        let ext = self.0.extensions();
-        let data = ext
-            .get::<FormattedFields<N>>()
-            .expect("Unable to find FormattedFields in extensions; this is a bug");
+        let data = {
+            let extensions = self.0.extensions();
+            extensions
+                .get::<FormattedFields<N>>()
+                .ok_or_else(|| Ser::Error::custom("missing formatted span fields"))?
+                .fields()
+                .to_owned()
+        };
 
         // TODO: let's _not_ do this, but this resolves
         // https://github.com/tokio-rs/tracing/issues/391.
-        // We should probably rework this to use a `serde_json::Value` or something
+        // We should probably rework this to use a `Value` or something
         // similar in a JSON-specific layer, but I'd (david)
         // rather have a uglier fix now rather than shipping broken JSON.
-        match serde_json::from_str::<serde_json::Value>(data) {
-            Ok(serde_json::Value::Object(fields)) => {
+        match serde_json::from_str::<Value>(&data) {
+            Ok(Value::Object(fields)) => {
                 for field in fields {
-                    serializer.serialize_entry(&field.0, &field.1)?;
+                    map.serialize_entry(&field.0, &field.1)?;
                 }
             }
-            // We have fields for this span which are valid JSON but not an object.
-            // This is probably a bug, so panic if we're in debug mode
-            Ok(_) if cfg!(debug_assertions) => panic!(
-                "span '{}' had malformed fields! this is a bug.\n  error: invalid JSON object\n  fields: {:?}",
-                self.0.metadata().name(),
-                data
-            ),
             // If we *aren't* in debug mode, it's probably best not to
             // crash the program, let's log the field found but also an
             // message saying it's type  is invalid
             Ok(value) => {
-                serializer.serialize_entry("field", &value)?;
-                serializer.serialize_entry("field_error", "field was no a valid object")?
+                map.serialize_entry("field", &value)?;
+                map.serialize_entry("field_error", "field was no a valid object")?;
             }
-            // We have previously recorded fields for this span
-            // should be valid JSON. However, they appear to *not*
-            // be valid JSON. This is almost certainly a bug, so
-            // panic if we're in debug mode
-            Err(e) if cfg!(debug_assertions) => panic!(
-                "span '{}' had malformed fields! this is a bug.\n  error: {}\n  fields: {:?}",
-                self.0.metadata().name(),
-                e,
-                data
-            ),
             // If we *aren't* in debug mode, it's probably best not
             // crash the program, but let's at least make sure it's clear
             // that the fields are not supposed to be missing.
-            Err(e) => serializer.serialize_entry("field_error", &format!("{}", e))?,
-        };
-        serializer.serialize_entry("name", self.0.metadata().name())?;
-        serializer.end()
+            Err(error) => map.serialize_entry("field_error", &format!("{error}"))?,
+        }
+        map.serialize_entry("name", self.0.metadata().name())?;
+        SerializeMap::end(map)
     }
 }
 
@@ -232,115 +267,118 @@ where
         self.timer.format_time(&mut Writer::new(&mut timestamp))?;
 
         #[cfg(feature = "tracing-log")]
-        let normalized_meta = event.normalized_metadata();
+        let normalized = event.normalized_metadata();
         #[cfg(feature = "tracing-log")]
-        let normalized_meta = normalized_meta.as_ref().map(|meta| meta.as_metadata());
+        let normalized_meta = normalized.as_ref().map(|meta| meta.as_metadata());
         #[cfg(feature = "tracing-log")]
         let meta = normalized_meta.as_ref().unwrap_or_else(|| event.metadata());
         #[cfg(not(feature = "tracing-log"))]
         let meta = event.metadata();
 
         let mut visit = || {
-            let mut serializer = Serializer::new(WriteAdaptor::new(&mut writer));
+            let mut json_serializer = JsonSerializer::new(WriteAdaptor::new(&mut writer));
 
-            let mut serializer = serializer.serialize_map(None)?;
+            let mut serializer = json_serializer.serialize_map(None)?;
 
-            if self.display_timestamp {
+            if self.display.timestamp() {
                 serializer.serialize_entry("timestamp", &timestamp)?;
             }
 
-            if self.display_level {
+            if self.display.level() {
                 serializer.serialize_entry("level", &meta.level().as_serde())?;
             }
 
-            let format_field_marker: std::marker::PhantomData<N> = std::marker::PhantomData;
+            let format_field_marker: PhantomData<N> = PhantomData;
 
-            let current_span = if self.format.display_current_span || self.format.display_span_list
-            {
+            let current_span = if self.kind.displays_current_span() || self.kind.displays_span_list() {
                 event
                     .parent()
+                    .copied()
                     .and_then(|id| ctx.span(id))
                     .or_else(|| ctx.lookup_current())
             } else {
                 None
             };
 
-            if self.format.flatten_event {
+            if self.kind.flattens_event() {
                 let mut visitor = tracing_serde::SerdeMapVisitor::new(serializer);
                 event.record(&mut visitor);
 
                 serializer = visitor.take_serializer()?;
             } else {
-                use tracing_serde::fields::AsMap;
+                use tracing_serde::fields::AsMap as _;
                 serializer.serialize_entry("fields", &event.field_map())?;
-            };
+            }
 
-            if self.display_target {
+            if self.display.target() {
                 serializer.serialize_entry("target", meta.target())?;
             }
 
-            if self.display_filename
+            if self.display.filename()
                 && let Some(filename) = meta.file()
             {
                 serializer.serialize_entry("filename", filename)?;
             }
 
-            if self.display_line_number
+            if self.display.line_number()
                 && let Some(line_number) = meta.line()
             {
                 serializer.serialize_entry("line_number", &line_number)?;
             }
 
-            if self.format.display_current_span
+            if self.kind.displays_current_span()
                 && let Some(ref span) = current_span
             {
                 serializer
                     .serialize_entry("span", &SerializableSpan(span, format_field_marker))
-                    .unwrap_or(());
+                    ?;
             }
 
-            if self.format.display_span_list && current_span.is_some() {
+            if self.kind.displays_span_list() && current_span.is_some() {
                 serializer.serialize_entry(
                     "spans",
                     &SerializableContext(&ctx.ctx, format_field_marker),
                 )?;
             }
 
-            if self.display_thread_name {
-                let current_thread = std::thread::current();
+            if self.display.thread_name() {
+                let current_thread = thread::current();
                 match current_thread.name() {
                     Some(name) => {
                         serializer.serialize_entry("threadName", name)?;
                     }
                     // fall-back to thread id when name is absent and ids are not enabled
-                    None if !self.display_thread_id => {
-                        serializer
-                            .serialize_entry("threadName", &format!("{:?}", current_thread.id()))?;
+                    None if !self.display.thread_id() => {
+                        serializer.serialize_entry(
+                            "threadName",
+                            &format!("{}", FmtThreadId::new(current_thread.id())),
+                        )?;
                     }
                     _ => {}
                 }
             }
 
-            if self.display_thread_id {
-                serializer
-                    .serialize_entry("threadId", &format!("{:?}", std::thread::current().id()))?;
+            if self.display.thread_id() {
+                serializer.serialize_entry(
+                    "threadId",
+                    &format!("{}", FmtThreadId::new(thread::current().id())),
+                )?;
             }
 
-            serializer.end()
+            SerializeMap::end(serializer)
         };
 
-        visit().map_err(|_| fmt::Error)?;
+        visit().map_err(|error| {
+            drop(error);
+            fmt::Error
+        })?;
         writeln!(writer)
     }
 }
 
 impl Default for Json {
-    fn default() -> Json {
-        Json {
-            flatten_event: false,
-            display_current_span: true,
-            display_span_list: true,
-        }
+    fn default() -> Self {
+        Self::DEFAULT
     }
 }
 
@@ -350,13 +388,15 @@ impl Default for Json {
 pub struct JsonFields {
     // reserve the ability to add fields to this without causing a breaking
     // change in the future.
+    /// Prevents external construction and reserves room for future fields.
     _private: (),
 }
 
 impl JsonFields {
     /// Returns a new JSON [`FormatFields`] implementation.
     ///
-    pub fn new() -> Self {
+    #[must_use]
+    pub const fn new() -> Self {
         Self { _private: () }
     }
 }
@@ -370,9 +410,9 @@ impl Default for JsonFields {
 impl<'a> FormatFields<'a> for JsonFields {
     /// Format the provided `fields` to the provided `writer`, returning a result.
     fn format_fields<R: RecordFields>(&self, mut writer: Writer<'_>, fields: R) -> fmt::Result {
-        let mut v = JsonVisitor::new(&mut writer);
-        fields.record(&mut v);
-        v.finish()
+        let mut visitor = JsonVisitor::new(&mut writer);
+        fields.record(&mut visitor);
+        visitor.finish()
     }
 
     /// Record additional field(s) on an existing span.
@@ -389,9 +429,9 @@ impl<'a> FormatFields<'a> for JsonFields {
             // If there are no previously recorded fields, we can just reuse the
             // existing string.
             let mut writer = current.as_writer();
-            let mut v = JsonVisitor::new(&mut writer);
-            fields.record(&mut v);
-            v.finish()?;
+            let mut visitor = JsonVisitor::new(&mut writer);
+            fields.record(&mut visitor);
+            visitor.finish()?;
             return Ok(());
         }
 
@@ -410,13 +450,15 @@ impl<'a> FormatFields<'a> for JsonFields {
         // then, we could store fields as JSON values, and add to them
         // without having to parse and re-serialize.
         let mut new = String::new();
-        let map: BTreeMap<&'_ str, serde_json::Value> =
-            serde_json::from_str(current).map_err(|_| fmt::Error)?;
-        let mut v = JsonVisitor::new(&mut new);
-        v.values = map;
-        fields.record(&mut v);
-        v.finish()?;
-        current.fields = new;
+        let map: BTreeMap<&'_ str, Value> = serde_json::from_str(current).map_err(|error| {
+            drop(error);
+            fmt::Error
+        })?;
+        let mut visitor = JsonVisitor::new(&mut new);
+        visitor.values = map;
+        fields.record(&mut visitor);
+        visitor.finish()?;
+        *current.fields_mut() = new;
 
         Ok(())
     }
@@ -427,7 +469,9 @@ impl<'a> FormatFields<'a> for JsonFields {
 /// [visitor]: crate::field::Visit
 /// [`MakeVisitor`]: crate::field::MakeVisitor
 pub struct JsonVisitor<'a> {
-    values: BTreeMap<&'a str, serde_json::Value>,
+    /// Recorded field values keyed by field name.
+    values: BTreeMap<&'a str, Value>,
+    /// The writer receiving serialized JSON.
     writer: &'a mut dyn Write,
 }
 
@@ -461,14 +505,14 @@ impl VisitFmt for JsonVisitor<'_> {
 impl VisitOutput<fmt::Result> for JsonVisitor<'_> {
     fn finish(self) -> fmt::Result {
         let inner = || {
-            let mut serializer = Serializer::new(WriteAdaptor::new(self.writer));
+            let mut serializer = JsonSerializer::new(WriteAdaptor::new(self.writer));
             let mut ser_map = serializer.serialize_map(None)?;
 
-            for (k, v) in self.values {
-                ser_map.serialize_entry(k, &v)?;
+            for (key, value) in self.values {
+                ser_map.serialize_entry(key, &value)?;
             }
 
-            ser_map.end()
+            SerializeMap::end(ser_map)
         };
 
         if inner().is_err() {
@@ -504,41 +548,41 @@ impl Visit for JsonVisitor<'_> {
     fn record_f64(&mut self, field: &Field, value: f64) {
         let _previous = self
             .values
-            .insert(field.name(), serde_json::Value::from(value));
+            .insert(field.name(), Value::from(value));
     }
 
     /// Visit a signed 64-bit integer value.
     fn record_i64(&mut self, field: &Field, value: i64) {
         let _previous = self
             .values
-            .insert(field.name(), serde_json::Value::from(value));
+            .insert(field.name(), Value::from(value));
     }
 
     /// Visit an unsigned 64-bit integer value.
     fn record_u64(&mut self, field: &Field, value: u64) {
         let _previous = self
             .values
-            .insert(field.name(), serde_json::Value::from(value));
+            .insert(field.name(), Value::from(value));
     }
 
     /// Visit a boolean value.
     fn record_bool(&mut self, field: &Field, value: bool) {
         let _previous = self
             .values
-            .insert(field.name(), serde_json::Value::from(value));
+            .insert(field.name(), Value::from(value));
     }
 
     /// Visit a string value.
     fn record_str(&mut self, field: &Field, value: &str) {
         let _previous = self
             .values
-            .insert(field.name(), serde_json::Value::from(value));
+            .insert(field.name(), Value::from(value));
     }
 
     fn record_bytes(&mut self, field: &Field, value: &[u8]) {
         let _previous = self
             .values
-            .insert(field.name(), serde_json::Value::from(value));
+            .insert(field.name(), Value::from(value));
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
@@ -547,31 +591,33 @@ impl Visit for JsonVisitor<'_> {
             #[cfg(feature = "tracing-log")]
             name if name.starts_with("log.") => (),
             name if name.starts_with("r#") => {
+                let raw_name = name.strip_prefix("r#").unwrap_or(name);
                 let _previous = self
                     .values
-                    .insert(&name[2..], serde_json::Value::from(format!("{:?}", value)));
+                    .insert(raw_name, Value::from(format!("{value:?}")));
             }
             name => {
                 let _previous = self
                     .values
-                    .insert(name, serde_json::Value::from(format!("{:?}", value)));
+                    .insert(name, Value::from(format!("{value:?}")));
             }
-        };
+        }
     }
 }
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::fmt::{format::FmtSpan, test::MockMakeWriter, time::FormatTime, SubscriberBuilder};
-    use tracing::{self, subscriber::with_default};
+    use core::fmt::Result as FmtResult;
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_ok, ensure_some};
+    use tracing::{self, field::Empty, subscriber::with_default};
 
-    use std::fmt;
-    use std::path::Path;
+    use std::{collections::HashMap, path::Path, str};
 
     struct MockTime;
     impl FormatTime for MockTime {
-        fn format_time(&self, w: &mut Writer<'_>) -> fmt::Result {
-            write!(w, "fake time")
+        fn format_time(&self, writer: &mut Writer<'_>) -> FmtResult {
+            write!(writer, "fake time")
         }
     }
 
@@ -580,7 +626,7 @@ mod test {
     }
 
     #[test]
-    fn json() {
+    fn json() -> Result<(), TestFailure> {
         let expected =
         "{\"timestamp\":\"fake time\",\"level\":\"INFO\",\"span\":{\"answer\":42,\"name\":\"json_span\",\"number\":3,\"slice\":[97,98,99]},\"spans\":[{\"answer\":42,\"name\":\"json_span\",\"number\":3,\"slice\":[97,98,99]}],\"target\":\"tracing_subscriber::fmt::format::json::test\",\"fields\":{\"message\":\"some json test\"}}\n";
         let subscriber = subscriber()
@@ -595,27 +641,22 @@ mod test {
                 number = 3,
                 slice = &b"abc"[..]
             );
-            let _guard = span.enter();
+            let _span_guard = span.enter();
             tracing::info!("some json test");
-        });
+        })
     }
 
     #[test]
-    fn json_filename() {
-        let current_path = Path::new("tracing-subscriber")
-            .join("src")
-            .join("fmt")
-            .join("format")
-            .join("json.rs")
-            .to_str()
-            .expect("path must be valid unicode")
+    fn json_filename() -> Result<(), TestFailure> {
+        let current_path = current_path()?
             // escape windows backslashes
             .replace('\\', "\\\\");
-        let expected =
-            &format!("{}{}{}",
-                    "{\"timestamp\":\"fake time\",\"level\":\"INFO\",\"span\":{\"answer\":42,\"name\":\"json_span\",\"number\":3},\"spans\":[{\"answer\":42,\"name\":\"json_span\",\"number\":3}],\"target\":\"tracing_subscriber::fmt::format::json::test\",\"filename\":\"",
-                    current_path,
-                    "\",\"fields\":{\"message\":\"some json test\"}}\n");
+        let expected = &format!(
+            "{}{}{}",
+            "{\"timestamp\":\"fake time\",\"level\":\"INFO\",\"span\":{\"answer\":42,\"name\":\"json_span\",\"number\":3},\"spans\":[{\"answer\":42,\"name\":\"json_span\",\"number\":3}],\"target\":\"tracing_subscriber::fmt::format::json::test\",\"filename\":\"",
+            current_path,
+            "\",\"fields\":{\"message\":\"some json test\"}}\n"
+        );
         let subscriber = subscriber()
             .flatten_event(false)
             .with_current_span(true)
@@ -623,13 +664,13 @@ mod test {
             .with_span_list(true);
         test_json(expected, subscriber, || {
             let span = tracing::span!(tracing::Level::INFO, "json_span", answer = 42, number = 3);
-            let _guard = span.enter();
+            let _span_guard = span.enter();
             tracing::info!("some json test");
-        });
+        })
     }
 
     #[test]
-    fn json_line_number() {
+    fn json_line_number() -> Result<(), TestFailure> {
         let expected =
             "{\"timestamp\":\"fake time\",\"level\":\"INFO\",\"span\":{\"answer\":42,\"name\":\"json_span\",\"number\":3},\"spans\":[{\"answer\":42,\"name\":\"json_span\",\"number\":3}],\"target\":\"tracing_subscriber::fmt::format::json::test\",\"line_number\":42,\"fields\":{\"message\":\"some json test\"}}\n";
         let subscriber = subscriber()
@@ -639,13 +680,13 @@ mod test {
             .with_span_list(true);
         test_json_with_line_number(expected, subscriber, || {
             let span = tracing::span!(tracing::Level::INFO, "json_span", answer = 42, number = 3);
-            let _guard = span.enter();
+            let _span_guard = span.enter();
             tracing::info!("some json test");
-        });
+        })
     }
 
     #[test]
-    fn json_flattened_event() {
+    fn json_flattened_event() -> Result<(), TestFailure> {
         let expected =
         "{\"timestamp\":\"fake time\",\"level\":\"INFO\",\"span\":{\"answer\":42,\"name\":\"json_span\",\"number\":3},\"spans\":[{\"answer\":42,\"name\":\"json_span\",\"number\":3}],\"target\":\"tracing_subscriber::fmt::format::json::test\",\"message\":\"some json test\"}\n";
 
@@ -655,13 +696,13 @@ mod test {
             .with_span_list(true);
         test_json(expected, subscriber, || {
             let span = tracing::span!(tracing::Level::INFO, "json_span", answer = 42, number = 3);
-            let _guard = span.enter();
+            let _span_guard = span.enter();
             tracing::info!("some json test");
-        });
+        })
     }
 
     #[test]
-    fn json_disabled_current_span_event() {
+    fn json_disabled_current_span_event() -> Result<(), TestFailure> {
         let expected =
         "{\"timestamp\":\"fake time\",\"level\":\"INFO\",\"spans\":[{\"answer\":42,\"name\":\"json_span\",\"number\":3}],\"target\":\"tracing_subscriber::fmt::format::json::test\",\"fields\":{\"message\":\"some json test\"}}\n";
         let subscriber = subscriber()
@@ -670,13 +711,13 @@ mod test {
             .with_span_list(true);
         test_json(expected, subscriber, || {
             let span = tracing::span!(tracing::Level::INFO, "json_span", answer = 42, number = 3);
-            let _guard = span.enter();
+            let _span_guard = span.enter();
             tracing::info!("some json test");
-        });
+        })
     }
 
     #[test]
-    fn json_disabled_span_list_event() {
+    fn json_disabled_span_list_event() -> Result<(), TestFailure> {
         let expected =
         "{\"timestamp\":\"fake time\",\"level\":\"INFO\",\"span\":{\"answer\":42,\"name\":\"json_span\",\"number\":3},\"target\":\"tracing_subscriber::fmt::format::json::test\",\"fields\":{\"message\":\"some json test\"}}\n";
         let subscriber = subscriber()
@@ -685,13 +726,13 @@ mod test {
             .with_span_list(false);
         test_json(expected, subscriber, || {
             let span = tracing::span!(tracing::Level::INFO, "json_span", answer = 42, number = 3);
-            let _guard = span.enter();
+            let _span_guard = span.enter();
             tracing::info!("some json test");
-        });
+        })
     }
 
     #[test]
-    fn json_nested_span() {
+    fn json_nested_span() -> Result<(), TestFailure> {
         let expected =
         "{\"timestamp\":\"fake time\",\"level\":\"INFO\",\"span\":{\"answer\":43,\"name\":\"nested_json_span\",\"number\":4},\"spans\":[{\"answer\":42,\"name\":\"json_span\",\"number\":3},{\"answer\":43,\"name\":\"nested_json_span\",\"number\":4}],\"target\":\"tracing_subscriber::fmt::format::json::test\",\"fields\":{\"message\":\"some json test\"}}\n";
         let subscriber = subscriber()
@@ -699,21 +740,22 @@ mod test {
             .with_current_span(true)
             .with_span_list(true);
         test_json(expected, subscriber, || {
-            let span = tracing::span!(tracing::Level::INFO, "json_span", answer = 42, number = 3);
-            let _guard = span.enter();
-            let span = tracing::span!(
+            let parent_span =
+                tracing::span!(tracing::Level::INFO, "json_span", answer = 42, number = 3);
+            let _parent_guard = parent_span.enter();
+            let nested_span = tracing::span!(
                 tracing::Level::INFO,
                 "nested_json_span",
                 answer = 43,
                 number = 4
             );
-            let _guard = span.enter();
+            let _nested_guard = nested_span.enter();
             tracing::info!("some json test");
-        });
+        })
     }
 
     #[test]
-    fn json_no_span() {
+    fn json_no_span() -> Result<(), TestFailure> {
         let expected =
         "{\"timestamp\":\"fake time\",\"level\":\"INFO\",\"target\":\"tracing_subscriber::fmt::format::json::test\",\"fields\":{\"message\":\"some json test\"}}\n";
         let subscriber = subscriber()
@@ -722,11 +764,11 @@ mod test {
             .with_span_list(true);
         test_json(expected, subscriber, || {
             tracing::info!("some json test");
-        });
+        })
     }
 
     #[test]
-    fn record_works() {
+    fn record_works() -> Result<(), TestFailure> {
         // This test reproduces issue #707, where using `Span::record` causes
         // any events inside the span to be ignored.
 
@@ -736,27 +778,31 @@ mod test {
             .with_writer(make_writer.clone())
             .finish();
 
-        with_default(subscriber, || {
+        with_default(subscriber, || -> Result<(), TestFailure> {
             tracing::info!("an event outside the root span");
-            assert_eq!(
-                parse_as_json(&make_writer)["fields"]["message"],
-                "an event outside the root span"
-            );
+            ensure_json_path_eq(
+                &parse_as_json(&make_writer)?,
+                &["fields", "message"],
+                "an event outside the root span",
+                "outside-root event message matches",
+            )?;
 
-            let span = tracing::info_span!("the span", na = tracing::field::Empty);
+            let span = tracing::info_span!("the span", na = Empty);
             let _span = span.record("na", "value");
             let _enter = span.enter();
 
             tracing::info!("an event inside the root span");
-            assert_eq!(
-                parse_as_json(&make_writer)["fields"]["message"],
-                "an event inside the root span"
-            );
-        });
+            ensure_json_path_eq(
+                &parse_as_json(&make_writer)?,
+                &["fields", "message"],
+                "an event inside the root span",
+                "inside-root event message matches",
+            )
+        })
     }
 
     #[test]
-    fn json_span_event_show_correct_context() {
+    fn json_span_event_show_correct_context() -> Result<(), TestFailure> {
         let buffer = MockMakeWriter::default();
         let subscriber = subscriber()
             .with_writer(buffer.clone())
@@ -766,54 +812,38 @@ mod test {
             .with_span_events(FmtSpan::FULL)
             .finish();
 
-        with_default(subscriber, || {
-            let context = "parent";
-            let parent_span = tracing::info_span!("parent_span", context);
+        with_default(subscriber, || -> Result<(), TestFailure> {
+            let parent_context = "parent";
+            let parent_span = tracing::info_span!("parent_span", context = parent_context);
 
-            let event = parse_as_json(&buffer);
-            assert_eq!(event["fields"]["message"], "new");
-            assert_eq!(event["span"]["context"], "parent");
+            ensure_span_event(&buffer, "new", "parent")?;
 
-            let _parent_enter = parent_span.enter();
-            let event = parse_as_json(&buffer);
-            assert_eq!(event["fields"]["message"], "enter");
-            assert_eq!(event["span"]["context"], "parent");
+            let parent_enter = parent_span.enter();
+            ensure_span_event(&buffer, "enter", "parent")?;
 
-            let context = "child";
-            let child_span = tracing::info_span!("child_span", context);
-            let event = parse_as_json(&buffer);
-            assert_eq!(event["fields"]["message"], "new");
-            assert_eq!(event["span"]["context"], "child");
+            let child_context = "child";
+            let child_span = tracing::info_span!("child_span", context = child_context);
+            ensure_span_event(&buffer, "new", "child")?;
 
-            let _child_enter = child_span.enter();
-            let event = parse_as_json(&buffer);
-            assert_eq!(event["fields"]["message"], "enter");
-            assert_eq!(event["span"]["context"], "child");
+            let child_enter = child_span.enter();
+            ensure_span_event(&buffer, "enter", "child")?;
 
-            drop(_child_enter);
-            let event = parse_as_json(&buffer);
-            assert_eq!(event["fields"]["message"], "exit");
-            assert_eq!(event["span"]["context"], "child");
+            drop(child_enter);
+            ensure_span_event(&buffer, "exit", "child")?;
 
             drop(child_span);
-            let event = parse_as_json(&buffer);
-            assert_eq!(event["fields"]["message"], "close");
-            assert_eq!(event["span"]["context"], "child");
+            ensure_span_event(&buffer, "close", "child")?;
 
-            drop(_parent_enter);
-            let event = parse_as_json(&buffer);
-            assert_eq!(event["fields"]["message"], "exit");
-            assert_eq!(event["span"]["context"], "parent");
+            drop(parent_enter);
+            ensure_span_event(&buffer, "exit", "parent")?;
 
             drop(parent_span);
-            let event = parse_as_json(&buffer);
-            assert_eq!(event["fields"]["message"], "close");
-            assert_eq!(event["span"]["context"], "parent");
-        });
+            ensure_span_event(&buffer, "close", "parent")
+        })
     }
 
     #[test]
-    fn json_span_event_with_no_fields() {
+    fn json_span_event_with_no_fields() -> Result<(), TestFailure> {
         // Check span events serialize correctly.
         // Discussion: https://github.com/tokio-rs/tracing/issues/829#issuecomment-661984255
         let buffer = MockMakeWriter::default();
@@ -825,85 +855,169 @@ mod test {
             .with_span_events(FmtSpan::FULL)
             .finish();
 
-        with_default(subscriber, || {
+        with_default(subscriber, || -> Result<(), TestFailure> {
             let span = tracing::info_span!("valid_json");
-            assert_eq!(parse_as_json(&buffer)["fields"]["message"], "new");
+            ensure_json_message(&buffer, "new")?;
 
-            let _enter = span.enter();
-            assert_eq!(parse_as_json(&buffer)["fields"]["message"], "enter");
+            let enter = span.enter();
+            ensure_json_message(&buffer, "enter")?;
 
-            drop(_enter);
-            assert_eq!(parse_as_json(&buffer)["fields"]["message"], "exit");
+            drop(enter);
+            ensure_json_message(&buffer, "exit")?;
 
             drop(span);
-            assert_eq!(parse_as_json(&buffer)["fields"]["message"], "close");
-        });
+            ensure_json_message(&buffer, "close")
+        })
     }
 
-    fn parse_as_json(buffer: &MockMakeWriter) -> serde_json::Value {
-        let buf = String::from_utf8(buffer.buf().to_vec()).unwrap();
-        let json = buf
-            .lines()
-            .last()
-            .expect("expected at least one line to be written!");
-        match serde_json::from_str(json) {
-            Ok(v) => v,
-            Err(e) => panic!(
-                "assertion failed: JSON shouldn't be malformed\n  error: {}\n  json: {}",
-                e, json
-            ),
+    fn parse_as_json(buffer: &MockMakeWriter) -> Result<Value, TestFailure> {
+        let buf = ensure_ok(
+            String::from_utf8(buffer.buf().to_vec()),
+            "json buffer is valid utf8",
+        )?;
+        let json = ensure_some(buf.lines().last(), "json buffer contains a line")?;
+        ensure_ok(serde_json::from_str(json), "json line parses")
+    }
+
+    fn ensure_json_message(buffer: &MockMakeWriter, expected: &'static str) -> Result<(), TestFailure> {
+        ensure_json_path_eq(
+            &parse_as_json(buffer)?,
+            &["fields", "message"],
+            expected,
+            "json span event message matches",
+        )
+    }
+
+    fn ensure_span_event(
+        buffer: &MockMakeWriter,
+        expected_message: &'static str,
+        expected_context: &'static str,
+    ) -> Result<(), TestFailure> {
+        let event = parse_as_json(buffer)?;
+        ensure_json_path_eq(
+            &event,
+            &["fields", "message"],
+            expected_message,
+            "json span event message matches",
+        )?;
+        ensure_json_path_eq(
+            &event,
+            &["span", "context"],
+            expected_context,
+            "json span event context matches",
+        )
+    }
+
+    fn ensure_json_path_eq(
+        value: &Value,
+        path: &'static [&'static str],
+        expected: &'static str,
+        context: &'static str,
+    ) -> Result<(), TestFailure> {
+        let actual = json_path(value, path)?;
+        ensure_eq(actual, &Value::from(expected), context)
+    }
+
+    #[allow(
+        clippy::single_call_fn,
+        reason = "JSON tests keep nested path traversal as a named validation helper"
+    )]
+    fn json_path<'a>(
+        value: &'a Value,
+        path: &'static [&'static str],
+    ) -> Result<&'a Value, TestFailure> {
+        let mut current = value;
+        for segment in path {
+            let object = ensure_some(current.as_object(), "json path segment is an object")?;
+            current = ensure_some(object.get(*segment), "json path segment exists")?;
         }
+        Ok(current)
     }
 
     fn test_json<T>(
         expected: &str,
         builder: SubscriberBuilder<JsonFields, Format<Json>>,
         producer: impl FnOnce() -> T,
-    ) {
+    ) -> Result<(), TestFailure> {
         let make_writer = MockMakeWriter::default();
         let subscriber = builder
             .with_writer(make_writer.clone())
             .with_timer(MockTime)
             .finish();
 
-        let _result = with_default(subscriber, producer);
+        let _producer_output = with_default(subscriber, producer);
 
-        let buf = make_writer.buf();
-        let actual = std::str::from_utf8(&buf[..]).unwrap();
-        assert_eq!(
-            serde_json::from_str::<std::collections::HashMap<&str, serde_json::Value>>(expected)
-                .unwrap(),
-            serde_json::from_str(actual).unwrap()
-        );
+        let actual = {
+            let buf = make_writer.buf();
+            ensure_ok(str::from_utf8(&buf[..]), "json output is valid utf8")?.to_owned()
+        };
+        let expected_json = ensure_ok(
+            serde_json::from_str::<HashMap<String, Value>>(expected),
+            "expected json parses",
+        )?;
+        let actual_json = ensure_ok(
+            serde_json::from_str::<HashMap<String, Value>>(&actual),
+            "actual json parses",
+        )?;
+        ensure(actual_json == expected_json, "actual json matches expected json")
     }
 
+    #[allow(
+        clippy::single_call_fn,
+        reason = "JSON tests isolate line-number normalization from exact-output assertions"
+    )]
     fn test_json_with_line_number<T>(
         expected: &str,
         builder: SubscriberBuilder<JsonFields, Format<Json>>,
         producer: impl FnOnce() -> T,
-    ) {
+    ) -> Result<(), TestFailure> {
         let make_writer = MockMakeWriter::default();
         let subscriber = builder
             .with_writer(make_writer.clone())
             .with_timer(MockTime)
             .finish();
 
-        let _result = with_default(subscriber, producer);
+        let _producer_output = with_default(subscriber, producer);
 
-        let buf = make_writer.buf();
-        let actual = std::str::from_utf8(&buf[..]).unwrap();
-        let mut expected =
-            serde_json::from_str::<std::collections::HashMap<&str, serde_json::Value>>(expected)
-                .unwrap();
-        let expect_line_number = expected.remove("line_number").is_some();
-        let mut actual: std::collections::HashMap<&str, serde_json::Value> =
-            serde_json::from_str(actual).unwrap();
-        let line_number = actual.remove("line_number");
+        let actual = {
+            let buf = make_writer.buf();
+            ensure_ok(str::from_utf8(&buf[..]), "json output is valid utf8")?.to_owned()
+        };
+        let mut expected_json = ensure_ok(
+            serde_json::from_str::<HashMap<String, Value>>(expected),
+            "expected json parses",
+        )?;
+        let expect_line_number = expected_json.remove("line_number").is_some();
+        let mut actual_json = ensure_ok(
+            serde_json::from_str::<HashMap<String, Value>>(&actual),
+            "actual json parses",
+        )?;
+        let line_number = actual_json.remove("line_number");
         if expect_line_number {
-            assert_eq!(line_number.map(|x| x.is_number()), Some(true));
+            ensure(
+                line_number.is_some_and(|value| value.is_number()),
+                "line number is present and numeric",
+            )?;
         } else {
-            assert!(line_number.is_none());
+            ensure(line_number.is_none(), "line number is absent")?;
         }
-        assert_eq!(actual, expected);
+        ensure(
+            actual_json == expected_json,
+            "actual json without line number matches expected json",
+        )
+    }
+
+    #[allow(
+        clippy::single_call_fn,
+        reason = "JSON tests keep platform-specific expected path construction named"
+    )]
+    fn current_path() -> Result<String, TestFailure> {
+        let owned_path = Path::new("tracing-subscriber")
+            .join("src")
+            .join("fmt")
+            .join("format")
+            .join("json.rs");
+        let path_str = ensure_some(owned_path.to_str(), "json test path is valid unicode")?;
+        Ok(path_str.to_owned())
     }
 }

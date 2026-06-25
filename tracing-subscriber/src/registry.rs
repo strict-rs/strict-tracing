@@ -71,13 +71,21 @@ feature! {
 feature! {
     #![all(feature = "registry", feature = "std")]
 
+    /// Sharded slab-backed span storage.
     mod sharded;
+    /// Thread-local current span stack.
     mod stack;
 
     pub use sharded::Data;
     pub use sharded::Registry;
 
     use crate::filter::FilterId;
+
+    /// Marks a registry-backed close operation as ready to remove its span.
+    pub(crate) trait CloseSpan {
+        /// Indicates that the wrapped subscriber accepted the close.
+        fn set_closing(&mut self);
+    }
 }
 
 /// Provides access to stored span data.
@@ -103,7 +111,7 @@ pub trait LookupSpan<'a> {
     /// capable of performing more sophisiticated queries.
     /// </pre>
     ///
-    fn span_data(&'a self, id: &Id) -> Option<Self::Data>;
+    fn span_data(&'a self, id: Id) -> Option<Self::Data>;
 
     /// Returns a [`SpanRef`] for the span with the given `Id`, if it exists.
     ///
@@ -115,7 +123,7 @@ pub trait LookupSpan<'a> {
     /// should only implement `span_data`.
     ///
     /// [`span_data`]: LookupSpan::span_data()
-    fn span(&'a self, id: &Id) -> Option<SpanRef<'a, Self>>
+    fn span(&'a self, id: Id) -> Option<SpanRef<'a, Self>>
     where
         Self: Sized,
     {
@@ -134,9 +142,9 @@ pub trait LookupSpan<'a> {
     /// The [`Filter`] can then use the returned [`FilterId`] to
     /// [check if it previously enabled a span][check].
     ///
-    /// # Panics
-    ///
-    /// If this `Subscriber` does not support [per-layer filtering].
+    /// The default implementation returns a disabled sentinel ID. Registries
+    /// with real per-layer filtering support should override this method and
+    /// allocate a unique filter slot.
     ///
     /// [`Filter`]: crate::layer::Filter
     /// [per-layer filtering]: crate::layer::Layer#per-layer-filtering
@@ -146,10 +154,7 @@ pub trait LookupSpan<'a> {
     #[cfg(feature = "registry")]
     #[cfg_attr(docsrs, doc(cfg(feature = "registry")))]
     fn register_filter(&mut self) -> FilterId {
-        panic!(
-            "{} does not currently support filters",
-            std::any::type_name::<Self>()
-        )
+        FilterId::disabled()
     }
 }
 
@@ -192,8 +197,7 @@ pub trait SpanData<'a> {
     /// [`FilterId`]: crate::filter::FilterId
     #[cfg(feature = "registry")]
     #[cfg_attr(docsrs, doc(cfg(feature = "registry")))]
-    fn is_enabled_for(&self, filter: FilterId) -> bool {
-        let _ = filter;
+    fn is_enabled_for(&self, _: FilterId) -> bool {
         true
     }
 }
@@ -206,10 +210,13 @@ pub trait SpanData<'a> {
 /// [registry]: LookupSpan
 #[derive(Debug)]
 pub struct SpanRef<'a, R: LookupSpan<'a>> {
+    /// The registry that owns the stored span data.
     registry: &'a R,
+    /// The stored data for this span.
     data: R::Data,
 
     #[cfg(feature = "registry")]
+    /// The per-layer filter whose view this reference represents.
     filter: FilterId,
 }
 
@@ -218,10 +225,13 @@ pub struct SpanRef<'a, R: LookupSpan<'a>> {
 /// This is returned by the [`SpanRef::scope`] method.
 #[derive(Debug)]
 pub struct Scope<'a, R> {
+    /// The registry used to look up each parent span.
     registry: &'a R,
+    /// The next span ID to look up while walking toward the root.
     next: Option<Id>,
 
     #[cfg(all(feature = "registry", feature = "std"))]
+    /// The per-layer filter whose view this scope represents.
     filter: FilterId,
 }
 
@@ -235,17 +245,20 @@ feature! {
 
     /// An iterator over the parents of a span, ordered from root to leaf.
     ///
-    /// This is returned by the [`Scope::from_root`] method.
+    /// This is returned by the [`Scope::root_to_leaf`] method.
     pub struct ScopeFromRoot<'a, R>
     where
         R: LookupSpan<'a>,
     {
+        /// Remaining spans in root-to-leaf order, stored in reverse iterator form.
         #[cfg(feature = "smallvec")]
         spans: iter::Rev<smallvec::IntoIter<SpanRefVecArray<'a, R>>>,
+        /// Remaining spans in root-to-leaf order, stored in reverse iterator form.
         #[cfg(not(feature = "smallvec"))]
         spans: iter::Rev<vec::IntoIter<SpanRef<'a, R>>>,
     }
 
+    /// Inline storage used by [`ScopeFromRoot`] before spilling to the heap.
     #[cfg(feature = "smallvec")]
     type SpanRefVecArray<'span, L> = [SpanRef<'span, L>; 16];
 
@@ -263,7 +276,12 @@ feature! {
         ///
         /// **Note**: this will allocate if there are many spans remaining, or if the
         /// "smallvec" feature flag is not enabled.
-        pub fn from_root(self) -> ScopeFromRoot<'a, R> {
+        #[must_use]
+        #[allow(
+            clippy::single_call_fn,
+            reason = "public scope traversal API is intentionally retained for downstream users"
+        )]
+        pub fn root_to_leaf(self) -> ScopeFromRoot<'a, R> {
             #[cfg(feature = "smallvec")]
             type Buf<T> = smallvec::SmallVec<T>;
             #[cfg(not(feature = "smallvec"))]
@@ -308,26 +326,34 @@ where
     type Item = SpanRef<'a, R>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            let curr = self.registry.span(self.next.as_ref()?)?;
+        #[cfg(all(feature = "registry", feature = "std"))]
+        {
+            while let Some(next) = self.next {
+                let span = self.registry.span(next)?;
 
-            #[cfg(all(feature = "registry", feature = "std"))]
-            let curr = curr.with_filter(self.filter);
-            self.next = curr.data.parent().cloned();
+                let current = span.with_filter(self.filter);
+                self.next = current.data.parent().copied();
 
-            // If the `Scope` is filtered, check if the current span is enabled
-            // by the selected filter ID.
-
-            #[cfg(all(feature = "registry", feature = "std"))]
-            {
-                if !curr.is_enabled_for(self.filter) {
+                // If the `Scope` is filtered, check if the current span is enabled
+                // by the selected filter ID.
+                if !current.is_enabled_for(self.filter) {
                     // The current span in the chain is disabled for this
                     // filter. Try its parent.
                     continue;
                 }
+
+                return Some(current);
             }
 
-            return Some(curr);
+            None
+        }
+
+        #[cfg(not(all(feature = "registry", feature = "std")))]
+        {
+            let next = self.next?;
+            let curr = self.registry.span(next)?;
+            self.next = curr.data.parent().copied();
+            Some(curr)
         }
     }
 }
@@ -362,26 +388,26 @@ where
     /// span is the root of its trace tree.
     pub fn parent(&self) -> Option<Self> {
         let id = self.data.parent()?;
-        let data = self.registry.span_data(id)?;
+        let data = self.registry.span_data(*id)?;
 
         #[cfg(all(feature = "registry", feature = "std"))]
         {
             // move these into mut bindings if the registry feature is enabled,
             // since they may be mutated in the loop.
-            let mut data = data;
+            let mut parent_data = data;
             loop {
                 // Is this parent enabled by our filter?
-                if data.is_enabled_for(self.filter) {
+                if parent_data.is_enabled_for(self.filter) {
                     return Some(Self {
                         registry: self.registry,
                         filter: self.filter,
-                        data,
+                        data: parent_data,
                     });
                 }
 
                 // It's not enabled. If the disabled span has a parent, try that!
-                let id = data.parent()?;
-                data = self.registry.span_data(id)?;
+                let parent_id = parent_data.parent()?;
+                parent_data = self.registry.span_data(*parent_id)?;
             }
         }
 
@@ -411,10 +437,16 @@ where
     /// where
     ///     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
     /// {
-    ///     fn on_enter(&self, id: &span::Id, ctx: Context<S>) {
-    ///         let span = ctx.span(id).unwrap();
-    ///         let scope = span.scope().map(|span| span.name()).collect::<Vec<_>>();
-    ///         println!("Entering span: {:?}", scope);
+    ///     fn on_enter(
+    ///         &self,
+    ///         id: span::Id,
+    ///         ctx: Context<'_, S>,
+    ///     ) -> tracing_core::subscriber::SubscriberResult {
+    ///         if let Some(span) = ctx.span(id) {
+    ///             let scope = span.scope().map(|span| span.name()).collect::<Vec<_>>();
+    ///             println!("Entering span: {:?}", scope);
+    ///         }
+    ///         Ok(())
     ///     }
     /// }
     ///
@@ -428,7 +460,7 @@ where
     /// });
     /// ```
     ///
-    /// If the opposite order (from the root to this span) is desired, calling [`Scope::from_root`] on
+    /// If the opposite order (from the root to this span) is desired, calling [`Scope::root_to_leaf`] on
     /// the returned iterator reverses the order.
     ///
     /// ```rust
@@ -443,10 +475,16 @@ where
     /// where
     ///     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
     /// {
-    ///     fn on_enter(&self, id: &span::Id, ctx: Context<S>) {
-    ///         let span = ctx.span(id).unwrap();
-    ///         let scope = span.scope().from_root().map(|span| span.name()).collect::<Vec<_>>();
-    ///         println!("Entering span: {:?}", scope);
+    ///     fn on_enter(
+    ///         &self,
+    ///         id: span::Id,
+    ///         ctx: Context<'_, S>,
+    ///     ) -> tracing_core::subscriber::SubscriberResult {
+    ///         if let Some(span) = ctx.span(id) {
+    ///             let scope = span.scope().root_to_leaf().map(|span| span.name()).collect::<Vec<_>>();
+    ///             println!("Entering span: {:?}", scope);
+    ///         }
+    ///         Ok(())
     ///     }
     /// }
     ///
@@ -490,6 +528,7 @@ where
     }
 
     #[cfg(all(feature = "registry", feature = "std"))]
+    /// Applies a per-layer filter to this span reference.
     pub(crate) fn try_with_filter(self, filter: FilterId) -> Option<Self> {
         if self.is_enabled_for(filter) {
             return Some(self.with_filter(filter));
@@ -500,102 +539,124 @@ where
 
     #[inline]
     #[cfg(all(feature = "registry", feature = "std"))]
+    /// Returns whether this span is enabled for the provided filter.
     pub(crate) fn is_enabled_for(&self, filter: FilterId) -> bool {
         self.data.is_enabled_for(filter)
     }
 
     #[inline]
     #[cfg(all(feature = "registry", feature = "std"))]
+    /// Applies this filter to the span reference without changing enablement.
     fn with_filter(self, filter: FilterId) -> Self {
         Self { filter, ..self }
     }
 }
 
-#[cfg(all(test, feature = "registry", feature = "std"))]
+#[cfg(test)]
 mod tests {
+    #[cfg(all(feature = "registry", feature = "std"))]
+    mod registry_std {
 
-    use crate::{
-        layer::{Context, Layer},
-        prelude::*,
-        registry::LookupSpan,
-    };
-    use std::{
-        sync::{Arc, Mutex},
-        vec::Vec,
-    };
-    use tracing::{Subscriber, span};
+        use crate::{
+            layer::{Context, Layer},
+            prelude::*,
+            registry::LookupSpan,
+        };
+        use parking_lot::Mutex;
+        use std::{sync::Arc, vec::Vec};
+        use strict_test_support::{TestFailure, ensure};
+        use tracing::{Subscriber, span, subscriber};
+        use tracing_core::subscriber::SubscriberResult;
 
-    #[test]
-    fn spanref_scope_iteration_order() {
-        let last_entered_scope = Arc::new(Mutex::new(Vec::new()));
-
-        #[derive(Default)]
-        struct PrintingLayer {
-            last_entered_scope: Arc<Mutex<Vec<&'static str>>>,
-        }
-
-        impl<S> Layer<S> for PrintingLayer
-        where
-            S: Subscriber + for<'lookup> LookupSpan<'lookup>,
-        {
-            fn on_enter(&self, id: &span::Id, ctx: Context<'_, S>) {
-                let span = ctx.span(id).unwrap();
-                let scope = span.scope().map(|span| span.name()).collect::<Vec<_>>();
-                *self.last_entered_scope.lock().unwrap() = scope;
+        #[test]
+        fn spanref_scope_iteration_order() -> Result<(), TestFailure> {
+            #[derive(Default)]
+            struct PrintingLayer {
+                last_entered_scope: Arc<Mutex<Vec<&'static str>>>,
             }
-        }
 
-        let _guard = tracing::subscriber::set_default(crate::registry().with(PrintingLayer {
-            last_entered_scope: last_entered_scope.clone(),
-        }));
-
-        let _root = tracing::info_span!("root").entered();
-        assert_eq!(&*last_entered_scope.lock().unwrap(), &["root"]);
-        let _child = tracing::info_span!("child").entered();
-        assert_eq!(&*last_entered_scope.lock().unwrap(), &["child", "root"]);
-        let _leaf = tracing::info_span!("leaf").entered();
-        assert_eq!(
-            &*last_entered_scope.lock().unwrap(),
-            &["leaf", "child", "root"]
-        );
-    }
-
-    #[test]
-    fn spanref_scope_fromroot_iteration_order() {
-        let last_entered_scope = Arc::new(Mutex::new(Vec::new()));
-
-        #[derive(Default)]
-        struct PrintingLayer {
-            last_entered_scope: Arc<Mutex<Vec<&'static str>>>,
-        }
-
-        impl<S> Layer<S> for PrintingLayer
-        where
-            S: Subscriber + for<'lookup> LookupSpan<'lookup>,
-        {
-            fn on_enter(&self, id: &span::Id, ctx: Context<'_, S>) {
-                let span = ctx.span(id).unwrap();
-                let scope = span
-                    .scope()
-                    .from_root()
-                    .map(|span| span.name())
-                    .collect::<Vec<_>>();
-                *self.last_entered_scope.lock().unwrap() = scope;
+            impl<S> Layer<S> for PrintingLayer
+            where
+                S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+            {
+                fn on_enter(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult {
+                    if let Some(span) = ctx.span(id) {
+                        let scope = span
+                            .scope()
+                            .map(|scope_span| scope_span.name())
+                            .collect::<Vec<_>>();
+                        *self.last_entered_scope.lock() = scope;
+                    }
+                    Ok(())
+                }
             }
+
+            let last_entered_scope = Arc::new(Mutex::new(Vec::new()));
+            let _guard = subscriber::set_default(crate::registry().with(PrintingLayer {
+                last_entered_scope: Arc::clone(&last_entered_scope),
+            }));
+
+            let _root = tracing::info_span!("root").entered();
+            ensure(
+                last_entered_scope.lock().as_slice() == ["root"],
+                "root scope iterates from current span",
+            )?;
+            let _child = tracing::info_span!("child").entered();
+            ensure(
+                last_entered_scope.lock().as_slice() == ["child", "root"],
+                "child scope iterates current to root",
+            )?;
+            let _leaf = tracing::info_span!("leaf").entered();
+            ensure(
+                last_entered_scope.lock().as_slice() == ["leaf", "child", "root"],
+                "leaf scope iterates current to root",
+            )
         }
 
-        let _guard = tracing::subscriber::set_default(crate::registry().with(PrintingLayer {
-            last_entered_scope: last_entered_scope.clone(),
-        }));
+        #[test]
+        fn spanref_scope_fromroot_iteration_order() -> Result<(), TestFailure> {
+            #[derive(Default)]
+            struct PrintingLayer {
+                last_entered_scope: Arc<Mutex<Vec<&'static str>>>,
+            }
 
-        let _root = tracing::info_span!("root").entered();
-        assert_eq!(&*last_entered_scope.lock().unwrap(), &["root"]);
-        let _child = tracing::info_span!("child").entered();
-        assert_eq!(&*last_entered_scope.lock().unwrap(), &["root", "child",]);
-        let _leaf = tracing::info_span!("leaf").entered();
-        assert_eq!(
-            &*last_entered_scope.lock().unwrap(),
-            &["root", "child", "leaf"]
-        );
+            impl<S> Layer<S> for PrintingLayer
+            where
+                S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+            {
+                fn on_enter(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult {
+                    if let Some(span) = ctx.span(id) {
+                        let scope = span
+                            .scope()
+                            .root_to_leaf()
+                            .map(|scope_span| scope_span.name())
+                            .collect::<Vec<_>>();
+                        *self.last_entered_scope.lock() = scope;
+                    }
+                    Ok(())
+                }
+            }
+
+            let last_entered_scope = Arc::new(Mutex::new(Vec::new()));
+            let _guard = subscriber::set_default(crate::registry().with(PrintingLayer {
+                last_entered_scope: Arc::clone(&last_entered_scope),
+            }));
+
+            let _root = tracing::info_span!("root").entered();
+            ensure(
+                last_entered_scope.lock().as_slice() == ["root"],
+                "root scope iterates from root",
+            )?;
+            let _child = tracing::info_span!("child").entered();
+            ensure(
+                last_entered_scope.lock().as_slice() == ["root", "child"],
+                "child scope iterates root to current",
+            )?;
+            let _leaf = tracing::info_span!("leaf").entered();
+            ensure(
+                last_entered_scope.lock().as_slice() == ["root", "child", "leaf"],
+                "leaf scope iterates root to current",
+            )
+        }
     }
 }

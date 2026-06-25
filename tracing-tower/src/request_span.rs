@@ -4,7 +4,8 @@ use futures::future::Future;
 use std::marker::PhantomData;
 use std::pin::Pin;
 use std::task::{Context, Poll};
-use tracing::Instrument;
+use tracing::Instrument as _;
+use tracing::instrument::Instrumented;
 
 #[derive(Debug)]
 /// A service wrapper that creates a new span for each request.
@@ -13,8 +14,11 @@ where
     S: tower_service::Service<R>,
     G: GetSpan<R>,
 {
+    /// Function or span used to create request spans.
     get_span: G,
+    /// Wrapped service.
     inner: S,
+    /// Preserve the request type parameter without storing a request.
     _p: PhantomData<fn(R)>,
 }
 
@@ -24,8 +28,9 @@ pub use self::layer::*;
 
 #[cfg(feature = "tower-layer")]
 #[cfg_attr(docsrs, doc(cfg(feature = "tower-layer")))]
+/// Tower layer support for request-span instrumentation.
 mod layer {
-    use super::*;
+    use super::{GetSpan, PhantomData, Service};
 
     #[derive(Debug)]
     /// A Tower layer that applies request-span instrumentation.
@@ -33,7 +38,9 @@ mod layer {
     where
         G: GetSpan<R> + Clone,
     {
+        /// Function or span used to create request spans.
         get_span: G,
+        /// Preserve the request type parameter without storing a request.
         _p: PhantomData<fn(R)>,
     }
 
@@ -82,14 +89,17 @@ pub use self::make::MakeService;
 #[cfg_attr(docsrs, doc(cfg(feature = "tower-make")))]
 /// Make-service adapters that add request-span instrumentation.
 pub mod make {
-    use super::*;
+    use super::{Context, Future, GetSpan, PhantomData, Pin, Poll, Service};
     use pin_project_lite::pin_project;
 
     #[derive(Debug)]
     /// A make-service wrapper that instruments produced services by request.
     pub struct MakeService<S, R, G = fn(&R) -> tracing::Span> {
+        /// Function or span cloned into each produced request-instrumenting service.
         get_span: G,
+        /// Wrapped make-service.
         inner: S,
+        /// Preserve the request type parameter without storing a request.
         _p: PhantomData<fn(R)>,
     }
 
@@ -101,14 +111,16 @@ pub mod make {
     where
         G: GetSpan<R> + Clone,
     {
+        /// Function or span cloned into each produced request-instrumenting service.
         get_span: G,
+        /// Preserve the target and request type parameters without storing either value.
         _p: PhantomData<fn(T, R)>,
     }
 
     pin_project! {
-        #[derive(Debug)]
         /// Future returned by [`MakeService`].
-        pub struct MakeFuture<F, R, G = fn(&R) -> tracing::Span> {
+        #[derive(Debug)]
+        pub struct MakeFuture<F, R, G> {
             get_span: Option<G>,
             #[pin]
             inner: F,
@@ -190,6 +202,10 @@ pub mod make {
         G: GetSpan<R> + Clone,
     {
         /// Creates a new request-instrumenting make-service.
+        #[allow(
+            clippy::single_call_fn,
+            reason = "public constructor is shared by direct make-service users and the tower Layer adapter"
+        )]
         pub fn new<T>(inner: S, get_span: G) -> Self
         where
             S: tower_make::MakeService<T, R>,
@@ -226,11 +242,13 @@ pub mod make {
 
         fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
             let this = self.project();
-            let inner = futures::ready!(this.inner.poll(cx));
-            let get_span = this.get_span.take().expect("polled after ready");
-            Poll::Ready(inner.map(|inner| Service {
-                inner,
+            let result = futures::ready!(this.inner.poll(cx));
+            let Some(get_span) = this.get_span.take() else {
+                return Poll::Pending;
+            };
+            Poll::Ready(result.map(|inner| Service {
                 get_span,
+                inner,
                 _p: PhantomData,
             }))
         }
@@ -246,7 +264,7 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = tracing::instrument::Instrumented<S::Future>;
+    type Future = Instrumented<S::Future>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -265,7 +283,7 @@ where
     G: GetSpan<R> + Clone,
 {
     fn clone(&self) -> Self {
-        Service {
+        Self {
             get_span: self.get_span.clone(),
             inner: self.inner.clone(),
             _p: PhantomData,
@@ -280,7 +298,7 @@ where
 {
     /// Creates a new request-instrumenting service.
     pub fn new(inner: S, get_span: G) -> Self {
-        Service {
+        Self {
             get_span,
             inner,
             _p: PhantomData,

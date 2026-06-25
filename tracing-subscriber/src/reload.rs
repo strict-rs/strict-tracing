@@ -17,19 +17,21 @@
 //! ```rust
 //! # use tracing::info;
 //! use tracing_subscriber::{filter, fmt, reload, prelude::*};
+//! # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! let filter = filter::LevelFilter::WARN;
 //! let (filter, reload_handle) = reload::Layer::new(filter);
 //! tracing_subscriber::registry()
 //!   .with(filter)
 //!   .with(fmt::Layer::default())
-//!   .init();
+//!   .try_init()?;
 //! #
 //! # // specifying the Registry type is required
 //! # let _: &reload::Handle<filter::LevelFilter, tracing_subscriber::Registry> = &reload_handle;
 //! #
 //! info!("This will be ignored");
-//! reload_handle.modify(|filter| *filter = filter::LevelFilter::INFO);
+//! reload_handle.modify(|filter| *filter = filter::LevelFilter::INFO)?;
 //! info!("This will be logged");
+//! # Ok(()) }
 //! ```
 //!
 //! Reloading a [`Filtered`](crate::filter::Filtered) layer:
@@ -37,6 +39,7 @@
 //! ```rust
 //! # use tracing::info;
 //! use tracing_subscriber::{filter, fmt, reload, prelude::*};
+//! # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 //! let filtered_layer = fmt::Layer::default().with_filter(filter::LevelFilter::WARN);
 //! let (filtered_layer, reload_handle) = reload::Layer::new(filtered_layer);
 //! #
@@ -47,10 +50,11 @@
 //! #
 //! tracing_subscriber::registry()
 //!   .with(filtered_layer)
-//!   .init();
+//!   .try_init()?;
 //! info!("This will be ignored");
-//! reload_handle.modify(|layer| *layer.filter_mut() = filter::LevelFilter::INFO);
+//! reload_handle.modify(|layer| *layer.filter_mut() = filter::LevelFilter::INFO)?;
 //! info!("This will be logged");
+//! # Ok(()) }
 //! ```
 //!
 //! ## Note
@@ -65,7 +69,7 @@
 //! [`Layer` type]: Layer
 //! [`Layer` trait]: super::layer::Layer
 use crate::layer;
-use crate::sync::RwLock;
+use crate::RwLock;
 
 use core::any::{Any, TypeId};
 use std::{
@@ -75,7 +79,7 @@ use std::{
 };
 use tracing_core::{
     callsite, span,
-    subscriber::{Interest, Subscriber},
+    subscriber::{Interest, Subscriber, SubscriberResult},
     Dispatch, Event, LevelFilter, Metadata,
 };
 #[cfg(feature = "tracing-log")]
@@ -88,28 +92,40 @@ pub struct Layer<L, S> {
     // eventually wish to replace it with a sharded lock implementation on top
     // of our internal `RwLock` wrapper type. If possible, we should profile
     // this first to determine if it's necessary.
+    /// The reloadable layer or filter state.
     inner: Arc<RwLock<L>>,
+    /// Connects this reload layer to the wrapped subscriber type.
     _s: PhantomData<fn(S)>,
 }
 
 /// Allows reloading the state of an associated [`Layer`](crate::layer::Layer).
 #[derive(Debug)]
 pub struct Handle<L, S> {
+    /// Weak reference to the reloadable layer or filter state.
     inner: Weak<RwLock<L>>,
+    /// Connects this handle to the wrapped subscriber type.
     _s: PhantomData<fn(S)>,
 }
 
 /// Indicates that an error occurred when reloading a layer.
 #[derive(Debug)]
-pub struct Error {
+pub struct ReloadError {
+    /// The specific reload failure.
     kind: ErrorKind,
 }
 
+/// Failure modes for reload operations.
 #[derive(Debug)]
 enum ErrorKind {
+    /// The subscriber containing the reload layer has been dropped.
     SubscriberGone,
+    /// The standard-library lock was poisoned by a panic while locked.
+    #[cfg(not(feature = "parking_lot"))]
     Poisoned,
 }
+
+/// Error returned by reload operations.
+pub use ReloadError as Error;
 
 // ===== impl Layer =====
 
@@ -118,8 +134,8 @@ where
     L: crate::Layer<S> + 'static,
     S: Subscriber,
 {
-    fn on_register_dispatch(&self, subscriber: &Dispatch) {
-        try_lock!(self.inner.read()).on_register_dispatch(subscriber);
+    fn on_register_dispatch(&self, subscriber: &Dispatch) -> SubscriberResult {
+        try_lock_subscriber!(self.inner.read()).on_register_dispatch(subscriber)
     }
 
     fn on_layer(&mut self, subscriber: &mut S) {
@@ -127,63 +143,63 @@ where
     }
 
     #[inline]
-    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
-        try_lock!(self.inner.read(), else return Interest::sometimes()).register_callsite(metadata)
+    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> SubscriberResult<Interest> {
+        try_lock_subscriber!(self.inner.read()).register_callsite(metadata)
     }
 
     #[inline]
-    fn enabled(&self, metadata: &Metadata<'_>, ctx: layer::Context<'_, S>) -> bool {
-        try_lock!(self.inner.read(), else return false).enabled(metadata, ctx)
+    fn enabled(&self, metadata: &Metadata<'_>, ctx: layer::Context<'_, S>) -> SubscriberResult<bool> {
+        try_lock_subscriber!(self.inner.read()).enabled(metadata, ctx)
     }
 
     #[inline]
-    fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: layer::Context<'_, S>) {
-        try_lock!(self.inner.read()).on_new_span(attrs, id, ctx)
+    fn on_new_span(&self, attrs: &span::Attributes<'_>, id: span::Id, ctx: layer::Context<'_, S>) -> SubscriberResult {
+        try_lock_subscriber!(self.inner.read()).on_new_span(attrs, id, ctx)
     }
 
     #[inline]
-    fn on_record(&self, span: &span::Id, values: &span::Record<'_>, ctx: layer::Context<'_, S>) {
-        try_lock!(self.inner.read()).on_record(span, values, ctx)
+    fn on_record(&self, span: span::Id, values: &span::Record<'_>, ctx: layer::Context<'_, S>) -> SubscriberResult {
+        try_lock_subscriber!(self.inner.read()).on_record(span, values, ctx)
     }
 
     #[inline]
-    fn on_follows_from(&self, span: &span::Id, follows: &span::Id, ctx: layer::Context<'_, S>) {
-        try_lock!(self.inner.read()).on_follows_from(span, follows, ctx)
+    fn on_follows_from(&self, span: span::Id, follows: span::Id, ctx: layer::Context<'_, S>) -> SubscriberResult {
+        try_lock_subscriber!(self.inner.read()).on_follows_from(span, follows, ctx)
     }
 
     #[inline]
-    fn event_enabled(&self, event: &Event<'_>, ctx: layer::Context<'_, S>) -> bool {
-        try_lock!(self.inner.read(), else return false).event_enabled(event, ctx)
+    fn event_enabled(&self, event: &Event<'_>, ctx: layer::Context<'_, S>) -> SubscriberResult<bool> {
+        try_lock_subscriber!(self.inner.read()).event_enabled(event, ctx)
     }
 
     #[inline]
-    fn on_event(&self, event: &Event<'_>, ctx: layer::Context<'_, S>) {
-        try_lock!(self.inner.read()).on_event(event, ctx)
+    fn on_event(&self, event: &Event<'_>, ctx: layer::Context<'_, S>) -> SubscriberResult {
+        try_lock_subscriber!(self.inner.read()).on_event(event, ctx)
     }
 
     #[inline]
-    fn on_enter(&self, id: &span::Id, ctx: layer::Context<'_, S>) {
-        try_lock!(self.inner.read()).on_enter(id, ctx)
+    fn on_enter(&self, id: span::Id, ctx: layer::Context<'_, S>) -> SubscriberResult {
+        try_lock_subscriber!(self.inner.read()).on_enter(id, ctx)
     }
 
     #[inline]
-    fn on_exit(&self, id: &span::Id, ctx: layer::Context<'_, S>) {
-        try_lock!(self.inner.read()).on_exit(id, ctx)
+    fn on_exit(&self, id: span::Id, ctx: layer::Context<'_, S>) -> SubscriberResult {
+        try_lock_subscriber!(self.inner.read()).on_exit(id, ctx)
     }
 
     #[inline]
-    fn on_close(&self, id: span::Id, ctx: layer::Context<'_, S>) {
-        try_lock!(self.inner.read()).on_close(id, ctx)
+    fn on_close(&self, id: span::Id, ctx: layer::Context<'_, S>) -> SubscriberResult {
+        try_lock_subscriber!(self.inner.read()).on_close(id, ctx)
     }
 
     #[inline]
-    fn on_id_change(&self, old: &span::Id, new: &span::Id, ctx: layer::Context<'_, S>) {
-        try_lock!(self.inner.read()).on_id_change(old, new, ctx)
+    fn on_id_change(&self, old: span::Id, new: span::Id, ctx: layer::Context<'_, S>) -> SubscriberResult {
+        try_lock_subscriber!(self.inner.read()).on_id_change(old, new, ctx)
     }
 
     #[inline]
-    fn max_level_hint(&self) -> Option<LevelFilter> {
-        try_lock!(self.inner.read(), else return None).max_level_hint()
+    fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
+        try_lock_subscriber!(self.inner.read()).max_level_hint()
     }
 
     #[doc(hidden)]
@@ -215,43 +231,43 @@ where
     S: Subscriber,
 {
     #[inline]
-    fn callsite_enabled(&self, metadata: &'static Metadata<'static>) -> Interest {
-        try_lock!(self.inner.read(), else return Interest::sometimes()).callsite_enabled(metadata)
+    fn callsite_enabled(&self, metadata: &'static Metadata<'static>) -> SubscriberResult<Interest> {
+        try_lock_subscriber!(self.inner.read()).callsite_enabled(metadata)
     }
 
     #[inline]
-    fn enabled(&self, metadata: &Metadata<'_>, ctx: &layer::Context<'_, S>) -> bool {
-        try_lock!(self.inner.read(), else return false).enabled(metadata, ctx)
+    fn enabled(&self, metadata: &Metadata<'_>, ctx: &layer::Context<'_, S>) -> SubscriberResult<bool> {
+        try_lock_subscriber!(self.inner.read()).enabled(metadata, ctx)
     }
 
     #[inline]
-    fn on_new_span(&self, attrs: &span::Attributes<'_>, id: &span::Id, ctx: layer::Context<'_, S>) {
-        try_lock!(self.inner.read()).on_new_span(attrs, id, ctx)
+    fn on_new_span(&self, attrs: &span::Attributes<'_>, id: span::Id, ctx: layer::Context<'_, S>) -> SubscriberResult {
+        try_lock_subscriber!(self.inner.read()).on_new_span(attrs, id, ctx)
     }
 
     #[inline]
-    fn on_record(&self, span: &span::Id, values: &span::Record<'_>, ctx: layer::Context<'_, S>) {
-        try_lock!(self.inner.read()).on_record(span, values, ctx)
+    fn on_record(&self, span: span::Id, values: &span::Record<'_>, ctx: layer::Context<'_, S>) -> SubscriberResult {
+        try_lock_subscriber!(self.inner.read()).on_record(span, values, ctx)
     }
 
     #[inline]
-    fn on_enter(&self, id: &span::Id, ctx: layer::Context<'_, S>) {
-        try_lock!(self.inner.read()).on_enter(id, ctx)
+    fn on_enter(&self, id: span::Id, ctx: layer::Context<'_, S>) -> SubscriberResult {
+        try_lock_subscriber!(self.inner.read()).on_enter(id, ctx)
     }
 
     #[inline]
-    fn on_exit(&self, id: &span::Id, ctx: layer::Context<'_, S>) {
-        try_lock!(self.inner.read()).on_exit(id, ctx)
+    fn on_exit(&self, id: span::Id, ctx: layer::Context<'_, S>) -> SubscriberResult {
+        try_lock_subscriber!(self.inner.read()).on_exit(id, ctx)
     }
 
     #[inline]
-    fn on_close(&self, id: span::Id, ctx: layer::Context<'_, S>) {
-        try_lock!(self.inner.read()).on_close(id, ctx)
+    fn on_close(&self, id: span::Id, ctx: layer::Context<'_, S>) -> SubscriberResult {
+        try_lock_subscriber!(self.inner.read()).on_close(id, ctx)
     }
 
     #[inline]
-    fn max_level_hint(&self) -> Option<LevelFilter> {
-        try_lock!(self.inner.read(), else return None).max_level_hint()
+    fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
+        try_lock_subscriber!(self.inner.read()).max_level_hint()
     }
 }
 
@@ -261,6 +277,10 @@ impl<L, S> Layer<L, S> {
     ///
     /// [`Layer`]: crate::layer::Layer
     /// [`Filter`]: crate::layer::Filter
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public reload constructor is called by downstream layer and filter users"
+    )]
     pub fn new(inner: L) -> (Self, Handle<L, S>) {
         let this = Self {
             inner: Arc::new(RwLock::new(inner)),
@@ -274,6 +294,7 @@ impl<L, S> Layer<L, S> {
     ///
     /// [`Layer`]: crate::layer::Layer
     /// [`Filter`]: crate::layer::Filter
+    #[must_use]
     pub fn handle(&self) -> Handle<L, S> {
         Handle {
             inner: Arc::downgrade(&self.inner),
@@ -298,6 +319,12 @@ impl<L, S> Handle<L, S> {
     /// [`Filtered`]: crate::filter::Filtered
     ///
     /// [this issue]: https://github.com/tokio-rs/tracing/issues/1629
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the subscriber containing this reloadable value has
+    /// been dropped, or if the backing lock is poisoned when using the standard
+    /// library lock backend.
     pub fn reload(&self, new_value: impl Into<L>) -> Result<(), Error> {
         self.modify(|layer| {
             *layer = new_value.into();
@@ -306,6 +333,12 @@ impl<L, S> Handle<L, S> {
 
     /// Invokes a closure with a mutable reference to the current layer or filter,
     /// allowing it to be modified in place.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the subscriber containing this reloadable value has
+    /// been dropped, or if the backing lock is poisoned when using the standard
+    /// library lock backend.
     pub fn modify(&self, f: impl FnOnce(&mut L)) -> Result<(), Error> {
         let inner = self.inner.upgrade().ok_or(Error {
             kind: ErrorKind::SubscriberGone,
@@ -331,6 +364,7 @@ impl<L, S> Handle<L, S> {
 
     /// Returns a clone of the layer or filter's current value if it still exists.
     /// Otherwise, if the subscriber has been dropped, returns `None`.
+    #[must_use]
     pub fn clone_current(&self) -> Option<L>
     where
         L: Clone,
@@ -340,19 +374,25 @@ impl<L, S> Handle<L, S> {
 
     /// Invokes a closure with a borrowed reference to the current layer or filter,
     /// returning the result (or an error if the subscriber no longer exists).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error`] if the subscriber containing this reloadable value has
+    /// been dropped, or if the backing lock is poisoned when using the standard
+    /// library lock backend.
     pub fn with_current<T>(&self, f: impl FnOnce(&L) -> T) -> Result<T, Error> {
         let inner = self.inner.upgrade().ok_or(Error {
             kind: ErrorKind::SubscriberGone,
         })?;
-        let inner = try_lock!(inner.read(), else return Err(Error::poisoned()));
-        Ok(f(&*inner))
+        let lock = try_lock!(inner.read(), else return Err(Error::poisoned()));
+        Ok(f(&*lock))
     }
 }
 
 impl<L, S> Clone for Handle<L, S> {
     fn clone(&self) -> Self {
-        Handle {
-            inner: self.inner.clone(),
+        Self {
+            inner: Weak::clone(&self.inner),
             _s: PhantomData,
         }
     }
@@ -360,7 +400,8 @@ impl<L, S> Clone for Handle<L, S> {
 
 // ===== impl Error =====
 
-impl Error {
+impl ReloadError {
+    #[cfg(not(feature = "parking_lot"))]
     fn poisoned() -> Self {
         Self {
             kind: ErrorKind::Poisoned,
@@ -369,25 +410,37 @@ impl Error {
 
     /// Returns `true` if this error occurred because the layer was poisoned by
     /// a panic on another thread.
-    pub fn is_poisoned(&self) -> bool {
-        matches!(self.kind, ErrorKind::Poisoned)
+    #[must_use]
+    pub const fn is_poisoned(&self) -> bool {
+        #[cfg(not(feature = "parking_lot"))]
+        {
+            matches!(self.kind, ErrorKind::Poisoned)
+        }
+        #[cfg(feature = "parking_lot")]
+        {
+            match self.kind {
+                ErrorKind::SubscriberGone => false,
+            }
+        }
     }
 
     /// Returns `true` if this error occurred because the `Subscriber`
     /// containing the reloadable layer was dropped.
-    pub fn is_dropped(&self) -> bool {
+    #[must_use]
+    pub const fn is_dropped(&self) -> bool {
         matches!(self.kind, ErrorKind::SubscriberGone)
     }
 }
 
-impl fmt::Display for Error {
+impl fmt::Display for ReloadError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let msg = match self.kind {
             ErrorKind::SubscriberGone => "subscriber no longer exists",
+            #[cfg(not(feature = "parking_lot"))]
             ErrorKind::Poisoned => "lock poisoned",
         };
         f.pad(msg)
     }
 }
 
-impl error::Error for Error {}
+impl error::Error for ReloadError {}

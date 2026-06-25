@@ -4,7 +4,7 @@
 
 ## Architecture
 
-- `subscriber.rs` — the `Subscriber` trait, the contract every collector implements (`new_span`/`record`/`event`/`enter`/`exit`/`enabled`/`register_callsite`/`event_enabled`/`clone_span`/`try_close`). Many methods have default impls; `register_callsite` defaults to delegating to `enabled`. Also defines `Interest` (`always`/`sometimes`/`never`) and `NoSubscriber` (the `Copy` no-op default).
+- `subscriber.rs` — the `Subscriber` trait, the contract every collector implements (`new_span`/`record`/`event`/`enter`/`exit`/`enabled`/`register_callsite`/`event_enabled`/`clone_span`/`try_close`). Notification and query methods return `SubscriberResult<T>` with the core-owned `SubscriberError`; pure downcast helpers stay infallible. Many methods have default impls; `register_callsite` defaults to delegating to `enabled`. Also defines `Interest` (`always`/`sometimes`/`never`) and `NoSubscriber` (the `Copy` no-op default).
 - `dispatcher.rs` — `Dispatch`, a cloneable type-erased `Arc<dyn Subscriber>`, plus the machinery to install one: `with_default` (thread-local, scoped, **std-only**), `set_global_default` (process-wide, once), and `get_default`. `WeakDispatch`/`Dispatch::downgrade` exist so a `Subscriber` can hold a back-reference without a refcount cycle.
 - `callsite.rs` — the `Callsite` trait, `Identifier`, `DefaultCallsite` (the ready-made impl macros generate), and the **global callsite registry**. Each callsite caches a combined `Interest` so per-event filtering avoids calling `enabled`; `rebuild_interest_cache` invalidates it (also triggered automatically when a `Dispatch` is created/dropped). `dispatchers::Dispatchers` tracks active subscribers under `sync::Mutex`.
 - `metadata.rs` — `Metadata` (static name/target/level/fields/file/line/module/`Kind`), the `Level`/`LevelFilter` ordering types, and `Kind` (bit-flag consts `SPAN`/`EVENT`/`HINT`).
@@ -28,6 +28,6 @@ Data flow: instrumentation builds a static `Callsite`+`Metadata`; first use regi
 
 ## Gotchas
 
-- This is the workspace's stability anchor: changing the `Subscriber`/`Callsite` trait surface or `Metadata`/`Field` layout breaks every downstream crate and external implementors. Treat additions as default-method/additive only unless a break is intended.
+- This is the workspace's stability anchor: changing the `Subscriber`/`Callsite` trait surface or `Metadata`/`Field` layout breaks every downstream crate and external implementors. Treat additions as default-method/additive only unless a break is intended. Errors that represent failure to process core tracing notifications belong in `SubscriberError`; crate-specific configuration, I/O, parsing, and test-helper failures stay in their owning crates unless they describe shared tracing behavior.
 - `Subscriber` extends the hidden `subscriber::AsAny` helper and exposes `downcast_ref_by_id` as the object-safe component downcast hook. Composition wrappers should forward safe `&dyn Any` references; do not add raw-pointer downcast paths.
 - `lib.rs` enables crate-level warnings and the manifest inherits `[lints] workspace = true`: every new public item needs docs, `Debug`/visibility need to satisfy the workspace lint policy, and intentionally ignored return values should use named `_foo` bindings rather than bare `let _ = ...`.

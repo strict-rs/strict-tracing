@@ -16,7 +16,7 @@
 //! [`hello_world`]: https://github.com/tokio-rs/tokio/blob/132e9f1da5965530b63554d7a1c59824c3de4e30/tokio/examples/hello_world.rs
 #![deny(rust_2018_idioms)]
 
-use tokio::io::AsyncWriteExt;
+use tokio::io::AsyncWriteExt as _;
 use tokio::net::TcpStream;
 
 use tracing::info;
@@ -24,13 +24,23 @@ use tracing_attributes::instrument;
 
 use std::{error::Error, io, net::SocketAddr};
 
+/// Open a TCP stream to the example server address.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps the connection span separate from the write span in the async demo"
+)]
 #[instrument]
 async fn connect(addr: &SocketAddr) -> io::Result<TcpStream> {
-    let stream = TcpStream::connect(&addr).await;
-    tracing::info!("created stream");
+    let stream = TcpStream::connect(addr).await;
+    info!("created stream");
     stream
 }
 
+/// Write the example payload to the connected stream.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps the write span separate from the connection span in the async demo"
+)]
 #[instrument]
 async fn write(stream: &mut TcpStream) -> io::Result<usize> {
     let result = stream.write(b"hello world\n").await;

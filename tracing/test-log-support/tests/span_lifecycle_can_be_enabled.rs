@@ -1,74 +1,86 @@
-use test_log_support::Test;
-use tracing::{error, info, span, trace, warn, Level};
+//! Verifies span lifecycle logs are emitted when the lifecycle target is enabled.
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
-fn span_lifecycle_can_be_enabled() {
-    let test = Test::with_filters(&[
-        (module_path!(), log::LevelFilter::Trace),
-        ("tracing::span", log::LevelFilter::Trace),
-    ]);
+#[cfg(test)]
+mod tests {
+    use strict_test_support::{TestFailure, ensure_eq};
+    use test_log_support::Test;
+    use tracing::{Level, error, info, span, trace, warn};
 
-    error!(foo = 5);
-    test.assert_logged("foo=5");
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn span_lifecycle_can_be_enabled() -> Result<(), TestFailure> {
+        let test = Test::try_with_filters(&[
+            (module_path!(), log::LevelFilter::Trace),
+            ("tracing::span", log::LevelFilter::Trace),
+        ])?;
 
-    warn!("hello {};", "world");
-    test.assert_logged("hello world;");
+        error!(foo = 5);
+        test.try_assert_logged("foo=5")?;
 
-    info!(message = "hello world;", thingy = 42, other_thingy = 666);
-    test.assert_logged("hello world; thingy=42 other_thingy=666");
+        warn!("hello {};", "world");
+        test.try_assert_logged("hello world;")?;
 
-    let foo = span!(Level::TRACE, "foo");
-    test.assert_logged("foo;");
+        info!(message = "hello world;", thingy = 42, other_thingy = 666);
+        test.try_assert_logged("hello world; thingy=42 other_thingy=666")?;
 
-    foo.in_scope(|| {
-        // enter should be logged
-        test.assert_logged("-> foo;");
+        let lifecycle_span = span!(Level::TRACE, "foo");
+        test.try_assert_logged("foo;")?;
 
-        trace!({foo = 3, bar = 4}, "hello {};", "san francisco");
-        test.assert_logged("hello san francisco; foo=3 bar=4");
-    });
-    // exit should be logged
-    test.assert_logged("<- foo;");
+        lifecycle_span.in_scope(|| -> Result<(), TestFailure> {
+            // enter should be logged
+            test.try_assert_logged("-> foo;")?;
 
-    drop(foo);
-    // drop should be logged
-    test.assert_logged("-- foo;");
+            trace!({foo = 3, bar = 4}, "hello {};", "san francisco");
+            test.try_assert_logged("hello san francisco; foo=3 bar=4")
+        })?;
+        // exit should be logged
+        test.try_assert_logged("<- foo;")?;
 
-    trace!(foo = 1, bar = 2, "hello world");
-    test.assert_logged("hello world foo=1 bar=2");
+        drop(lifecycle_span);
+        // drop should be logged
+        test.try_assert_logged("-- foo;")?;
 
-    let foo = span!(Level::TRACE, "foo", bar = 3, baz = false);
-    // creating a span with fields _should_ be logged.
-    test.assert_logged("foo; bar=3 baz=false");
+        trace!(foo = 1, bar = 2, "hello world");
+        test.try_assert_logged("hello world foo=1 bar=2")?;
 
-    foo.in_scope(|| {
-        // entering the span should be logged
-        test.assert_logged("-> foo;");
-    });
-    // exiting the span should be logged
-    test.assert_logged("<- foo;");
+        let field_span = span!(Level::TRACE, "foo", bar = 3, baz = false);
+        // creating a span with fields _should_ be logged.
+        test.try_assert_logged("foo; bar=3 baz=false")?;
 
-    foo.record("baz", &true);
-    // recording a field should be logged
-    test.assert_logged("foo; baz=true");
+        field_span.in_scope(|| -> Result<(), TestFailure> {
+            // entering the span should be logged
+            test.try_assert_logged("-> foo;")
+        })?;
+        // exiting the span should be logged
+        test.try_assert_logged("<- foo;")?;
 
-    let bar = span!(Level::INFO, "bar");
-    // lifecycles for INFO spans should be logged
-    test.assert_logged("bar;");
+        ensure_eq(
+            &field_span.record("baz", true).is_disabled(),
+            &field_span.is_disabled(),
+            "span record disabled state matches span disabled state",
+        )?;
+        // recording a field should be logged
+        test.try_assert_logged("foo; baz=true")?;
 
-    bar.in_scope(|| {
-        // entering the INFO span should be logged
-        test.assert_logged("-> bar;");
-    });
-    // exiting the INFO span should be logged
-    test.assert_logged("<- bar;");
+        let bar = span!(Level::INFO, "bar");
+        // lifecycles for INFO spans should be logged
+        test.try_assert_logged("bar;")?;
 
-    drop(foo);
-    // drop should be logged.
-    test.assert_logged("-- foo;");
+        bar.in_scope(|| -> Result<(), TestFailure> {
+            // entering the INFO span should be logged
+            test.try_assert_logged("-> bar;")
+        })?;
+        // exiting the INFO span should be logged
+        test.try_assert_logged("<- bar;")?;
 
-    drop(bar);
-    // dropping the INFO should be logged.
-    test.assert_logged("-- bar;");
+        drop(field_span);
+        // drop should be logged.
+        test.try_assert_logged("-- foo;")?;
+
+        drop(bar);
+        // dropping the INFO should be logged.
+        test.try_assert_logged("-- bar;")?;
+
+        Ok(())
+    }
 }

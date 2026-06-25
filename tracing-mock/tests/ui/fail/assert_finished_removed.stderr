@@ -1,0 +1,11 @@
+error[E0599]: no associated function or constant named `assert_finished` found for struct `MockHandle` in the current scope
+ --> tests/ui/fail/assert_finished_removed.rs:8:44
+  |
+8 |     let _removed = subscriber::MockHandle::assert_finished;
+  |                                            ^^^^^^^^^^^^^^^ associated function or constant not found in `MockHandle`
+  |
+help: there is a method `finished` with a similar name
+ --> src/subscriber.rs
+  |
+  |     pub fn finished(&self) -> SubscriberResult {
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

@@ -1,4 +1,4 @@
-use crate::{Instrument, Instrumented, WithDispatch};
+use crate::{Instrument as _, Instrumented, WithDispatch};
 use futures_task::{FutureObj, LocalFutureObj, LocalSpawn, Spawn, SpawnError};
 
 impl<T> Spawn for Instrumented<T>
@@ -13,12 +13,12 @@ where
     /// represent relatively rare scenarios, such as the executor
     /// having been shut down so that it is no longer able to accept
     /// tasks.
-    fn spawn_obj(&self, future: FutureObj<'static, ()>) -> Result<(), SpawnError> {
+    fn spawn_obj(&self, task: FutureObj<'static, ()>) -> Result<(), SpawnError> {
         let Some(inner) = self.inner.as_ref() else {
             return Err(SpawnError::shutdown());
         };
-        let future = future.instrument(self.span.clone());
-        inner.spawn_obj(FutureObj::new(Box::new(future)))
+        let instrumented_task = task.instrument(self.span.clone());
+        inner.spawn_obj(FutureObj::new(Box::new(instrumented_task)))
     }
 
     /// Determines whether the executor is able to spawn new tasks.
@@ -48,9 +48,9 @@ where
     /// represent relatively rare scenarios, such as the executor
     /// having been shut down so that it is no longer able to accept
     /// tasks.
-    fn spawn_obj(&self, future: FutureObj<'static, ()>) -> Result<(), SpawnError> {
+    fn spawn_obj(&self, task: FutureObj<'static, ()>) -> Result<(), SpawnError> {
         self.inner
-            .spawn_obj(FutureObj::new(Box::new(self.with_dispatch(future))))
+            .spawn_obj(FutureObj::new(Box::new(self.with_dispatch(task))))
     }
 
     /// Determines whether the executor is able to spawn new tasks.
@@ -77,12 +77,12 @@ where
     /// represent relatively rare scenarios, such as the executor
     /// having been shut down so that it is no longer able to accept
     /// tasks.
-    fn spawn_local_obj(&self, future: LocalFutureObj<'static, ()>) -> Result<(), SpawnError> {
+    fn spawn_local_obj(&self, task: LocalFutureObj<'static, ()>) -> Result<(), SpawnError> {
         let Some(inner) = self.inner.as_ref() else {
             return Err(SpawnError::shutdown());
         };
-        let future = future.instrument(self.span.clone());
-        inner.spawn_local_obj(LocalFutureObj::new(Box::new(future)))
+        let instrumented_task = task.instrument(self.span.clone());
+        inner.spawn_local_obj(LocalFutureObj::new(Box::new(instrumented_task)))
     }
 
     /// Determines whether the executor is able to spawn new tasks.
@@ -112,9 +112,9 @@ where
     /// represent relatively rare scenarios, such as the executor
     /// having been shut down so that it is no longer able to accept
     /// tasks.
-    fn spawn_local_obj(&self, future: LocalFutureObj<'static, ()>) -> Result<(), SpawnError> {
+    fn spawn_local_obj(&self, task: LocalFutureObj<'static, ()>) -> Result<(), SpawnError> {
         self.inner
-            .spawn_local_obj(LocalFutureObj::new(Box::new(self.with_dispatch(future))))
+            .spawn_local_obj(LocalFutureObj::new(Box::new(self.with_dispatch(task))))
     }
 
     /// Determines whether the executor is able to spawn new tasks.

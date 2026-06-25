@@ -1,24 +1,27 @@
 use sharded_slab::{pool::Ref, Clear, Pool};
 use thread_local::ThreadLocal;
 
-use super::stack::SpanStack;
+use super::{CloseSpan, stack::SpanStack};
 use crate::{
-    filter::{FilterId, FilterMap, FilterState},
+    filter::{FILTERING, FilterId, FilterMap, FilterState},
     registry::{
         extensions::{Extensions, ExtensionsInner, ExtensionsMut},
-        LookupSpan, SpanData,
+        LookupSpan, SpanData, SpanRef,
     },
-    sync::RwLock,
+    RwLock,
 };
 use core::{
-    cell::{self, Cell, RefCell},
+    cell::{Cell, RefCell},
+    num::NonZeroU64,
     sync::atomic::{fence, AtomicUsize, Ordering},
 };
 use std::thread_local;
 use tracing_core::{
+    callsite::Callsite,
     dispatcher::{self, Dispatch},
+    metadata::Kind,
     span::{self, Current, Id},
-    Event, Interest, Metadata, Subscriber,
+    Event, Interest, Metadata, Subscriber, SubscriberResult,
 };
 
 /// A shared, reusable store for spans.
@@ -91,8 +94,11 @@ use tracing_core::{
 #[cfg_attr(docsrs, doc(cfg(all(feature = "registry", feature = "std"))))]
 #[derive(Debug)]
 pub struct Registry {
+    /// Shared span storage keyed by generated span IDs.
     spans: Pool<DataInner>,
+    /// Thread-local stack of currently entered span IDs.
     current_spans: ThreadLocal<RefCell<SpanStack>>,
+    /// The next per-layer filter ID to allocate.
     next_filter_id: u8,
 }
 
@@ -122,13 +128,19 @@ pub struct Data<'a> {
 /// load-bearing.
 #[derive(Debug)]
 struct DataInner {
+    /// Per-layer filter enablement bitmap for this span.
     filter_map: FilterMap,
+    /// Static metadata for the span callsite.
     metadata: &'static Metadata<'static>,
+    /// Parent span ID, if this span has a parent.
     parent: Option<Id>,
+    /// Number of outstanding references to this span.
     ref_count: AtomicUsize,
-    // The span's `Extensions` typemap. Allocations for the `HashMap` backing
-    // this are pooled and reused in place.
-    pub(crate) extensions: RwLock<ExtensionsInner>,
+    /// The span's `Extensions` typemap.
+    ///
+    /// Allocations for the `HashMap` backing this are pooled and reused in
+    /// place.
+    pub(super) extensions: RwLock<ExtensionsInner>,
 }
 
 // === impl Registry ===
@@ -144,13 +156,22 @@ impl Default for Registry {
 }
 
 #[inline]
+/// Converts a slab index into a span ID.
 fn idx_to_id(idx: usize) -> Id {
-    Id::from_u64(idx as u64 + 1)
+    let id = u64::try_from(idx)
+        .ok()
+        .and_then(|index| index.checked_add(1))
+        .and_then(NonZeroU64::new)
+        .unwrap_or(NonZeroU64::MIN);
+    Id::from_non_zero_u64(id)
 }
 
 #[inline]
-fn id_to_idx(id: &Id) -> usize {
-    id.into_u64() as usize - 1
+/// Converts a span ID into a slab index.
+fn id_to_idx(id: Id) -> Option<usize> {
+    id.into_u64()
+        .checked_sub(1)
+        .and_then(|idx| usize::try_from(idx).ok())
 }
 
 /// A guard that tracks how many [`Registry`]-backed `Layer`s have
@@ -174,39 +195,66 @@ fn id_to_idx(id: &Id) -> usize {
 ///    greater than 0, `CloseGuard` decrements the counter by one and
 ///    _does not_ remove the span from the [`Registry`].
 ///
-pub(crate) struct CloseGuard<'a> {
+#[derive(Debug)]
+struct CloseGuard<'a> {
+    /// Span ID that may be removed when all close callbacks finish.
     id: Id,
+    /// Registry that owns the closing span.
     registry: &'a Registry,
+    /// Whether the inner subscriber reported that the span is ready to close.
     is_closing: bool,
 }
 
+/// A close lifecycle handle owned by `Layered` while it runs `on_close`.
+#[derive(Debug)]
+struct CloseHandle<'a> {
+    /// Inner guard for stacks rooted in a `Registry`.
+    guard: Option<CloseGuard<'a>>,
+}
+
 impl Registry {
-    fn get(&self, id: &Id) -> Option<Ref<'_, DataInner>> {
-        self.spans.get(id_to_idx(id))
+    /// Returns pooled span data for the provided span ID.
+    fn get(&self, id: Id) -> Option<Ref<'_, DataInner>> {
+        self.spans.get(id_to_idx(id)?)
     }
 
     /// Returns a guard which tracks how many `Layer`s have
     /// processed an `on_close` notification via the `CLOSE_COUNT` thread-local.
     /// For additional details, see [`CloseGuard`].
     ///
-    pub(crate) fn start_close(&self, id: Id) -> CloseGuard<'_> {
+    pub(crate) fn start_close(&self, id: Id) -> impl CloseSpan + '_ {
         CLOSE_COUNT.with(|count| {
-            let c = count.get();
-            count.set(c + 1);
+            let current_count = count.get();
+            count.set(current_count.checked_add(1).unwrap_or(current_count));
         });
-        CloseGuard {
-            id,
-            registry: self,
-            is_closing: false,
+        CloseHandle {
+            guard: Some(CloseGuard {
+                id,
+                registry: self,
+                is_closing: false,
+            }),
         }
     }
 
-    pub(crate) fn has_per_layer_filters(&self) -> bool {
+    /// Returns whether any per-layer filters have been registered.
+    pub(crate) const fn has_per_layer_filters(&self) -> bool {
         self.next_filter_id > 0
     }
 
-    pub(crate) fn span_stack(&self) -> cell::Ref<'_, SpanStack> {
-        self.current_spans.get_or_default().borrow()
+    /// Finds the newest current span enabled for the provided per-layer filter.
+    pub(crate) fn lookup_current_filtered<'lookup, S>(
+        &self,
+        subscriber: &'lookup S,
+        filter: FilterId,
+    ) -> Option<SpanRef<'lookup, S>>
+    where
+        S: LookupSpan<'lookup>,
+    {
+        let stack_cell = self.current_spans.get()?;
+        let current_stack = stack_cell.try_borrow().ok()?;
+        current_stack
+            .iter()
+            .find_map(|id| subscriber.span(*id)?.try_with_filter(filter))
     }
 }
 
@@ -219,32 +267,38 @@ thread_local! {
 }
 
 impl Subscriber for Registry {
-    fn register_callsite(&self, _: &'static Metadata<'static>) -> Interest {
+    fn register_callsite(&self, _: &'static Metadata<'static>) -> SubscriberResult<Interest> {
         if self.has_per_layer_filters() {
-            return FilterState::take_interest().unwrap_or_else(Interest::always);
+            return Ok(FilterState::take_interest().unwrap_or_else(Interest::always));
         }
 
-        Interest::always()
+        Ok(Interest::always())
     }
 
-    fn enabled(&self, _: &Metadata<'_>) -> bool {
+    fn enabled(&self, _: &Metadata<'_>) -> SubscriberResult<bool> {
         if self.has_per_layer_filters() {
-            return FilterState::event_enabled();
+            return Ok(FilterState::event_enabled());
         }
-        true
+        Ok(true)
     }
 
     #[inline]
-    fn new_span(&self, attrs: &span::Attributes<'_>) -> Id {
+    fn new_span(&self, attrs: &span::Attributes<'_>) -> SubscriberResult<Id> {
         let parent = if attrs.is_root() {
             None
         } else if attrs.is_contextual() {
-            self.current_span().id().map(|id| self.clone_span(id))
+            match self.current_span()?.id() {
+                Some(id) => Some(self.clone_span(*id)?),
+                None => None,
+            }
         } else {
-            attrs.parent().map(|id| self.clone_span(id))
+            match attrs.parent() {
+                Some(id) => Some(self.clone_span(*id)?),
+                None => None,
+            }
         };
 
-        let id = self
+        let Some(index) = self
             .spans
             // Check out a `DataInner` entry from the pool for the new span. If
             // there are free entries already allocated in the pool, this will
@@ -253,139 +307,135 @@ impl Subscriber for Registry {
             .create_with(|data| {
                 data.metadata = attrs.metadata();
                 data.parent = parent;
-                data.filter_map = crate::filter::FILTERING.with(|filtering| filtering.filter_map());
-                #[cfg(debug_assertions)]
-                {
-                    if data.filter_map != FilterMap::new() {
-                        debug_assert!(self.has_per_layer_filters());
-                    }
-                }
+                data.filter_map = FILTERING.with(FilterState::filter_map);
 
                 let refs = data.ref_count.get_mut();
-                debug_assert_eq!(*refs, 0);
                 *refs = 1;
             })
-            .expect("Unable to allocate another span");
-        idx_to_id(id)
+        else {
+            if let Some(parent_id) = parent {
+                let _parent_closed = self.try_close(parent_id);
+            }
+            return Ok(Id::from_non_zero_u64(NonZeroU64::MAX));
+        };
+        Ok(idx_to_id(index))
     }
 
     /// This is intentionally not implemented, as recording fields
     /// on a span is the responsibility of layers atop of this registry.
     #[inline]
-    fn record(&self, _: &Id, _: &span::Record<'_>) {}
+    fn record(&self, _: Id, _: &span::Record<'_>) -> SubscriberResult {
+        Ok(())
+    }
 
-    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
+    fn record_follows_from(&self, _span: Id, _follows: Id) -> SubscriberResult {
+        Ok(())
+    }
 
-    fn event_enabled(&self, _event: &Event<'_>) -> bool {
+    fn event_enabled(&self, _event: &Event<'_>) -> SubscriberResult<bool> {
         if self.has_per_layer_filters() {
-            return FilterState::event_enabled();
+            return Ok(FilterState::event_enabled());
         }
-        true
+        Ok(true)
     }
 
     /// This is intentionally not implemented, as recording events
     /// is the responsibility of layers atop of this registry.
-    fn event(&self, _: &Event<'_>) {}
-
-    fn enter(&self, id: &Id) {
-        self.current_spans
-            .get_or_default()
-            .borrow_mut()
-            .push(id.clone());
+    fn event(&self, _: &Event<'_>) -> SubscriberResult {
+        Ok(())
     }
 
-    fn exit(&self, id: &Id) {
-        if let Some(spans) = self.current_spans.get() {
-            let _popped = spans.borrow_mut().pop(id);
+    fn enter(&self, id: Id) -> SubscriberResult {
+        if let Ok(mut current_spans) = self.current_spans.get_or_default().try_borrow_mut() {
+            current_spans.push(id);
         }
+        Ok(())
     }
 
-    fn clone_span(&self, id: &Id) -> Id {
-        let span = self
-            .get(id)
-            .unwrap_or_else(|| panic!(
-                "tried to clone {:?}, but no span exists with that ID\n\
-                This may be caused by consuming a parent span (`parent: span`) rather than borrowing it (`parent: &span`).",
-                id,
-            ));
+    fn exit(&self, id: Id) -> SubscriberResult {
+        if let Some(spans) = self.current_spans.get()
+            && let Ok(mut current_spans) = spans.try_borrow_mut()
+        {
+            let _span_was_current = current_spans.pop(id);
+        }
+        Ok(())
+    }
+
+    fn clone_span(&self, id: Id) -> SubscriberResult<Id> {
+        let Some(span) = self.get(id) else {
+            return Ok(id);
+        };
         // Like `std::sync::Arc`, adds to the ref count (on clone) don't require
         // a strong ordering; if we call` clone_span`, the reference count must
         // always at least 1. The only synchronization necessary is between
         // calls to `try_close`: we have to ensure that all threads have
         // dropped their refs to the span before the span is closed.
-        let refs = span.ref_count.fetch_add(1, Ordering::Relaxed);
-        assert_ne!(
-            refs, 0,
-            "tried to clone a span ({:?}) that already closed.\n\
-             This error message may indicate that a Span was held open across an \
-             await point.\nSee the documentation \
-             (https://docs.rs/tracing/latest/tracing/span/struct.EnteredSpan.html#in-asynchronous-code) \
-             for more details.\n\
-            ",
-            id
-        );
-        id.clone()
+        let _span_is_open = increment_ref_count(&span.ref_count);
+        Ok(id)
     }
 
-    fn current_span(&self) -> Current {
-        self.current_spans
+    fn current_span(&self) -> SubscriberResult<Current> {
+        Ok(self
+            .current_spans
             .get()
-            .and_then(|spans| {
-                let spans = spans.borrow();
-                let id = spans.current()?;
+            .and_then(|stack_cell| {
+                let current_stack = stack_cell.try_borrow().ok()?;
+                let id = *current_stack.current()?;
                 let span = self.get(id)?;
-                Some(Current::new(id.clone(), span.metadata))
+                Some(Current::new(id, span.metadata))
             })
-            .unwrap_or_else(Current::none)
+            .unwrap_or_else(Current::none))
     }
 
     /// Decrements the reference count of the span with the given `id`, and
     /// removes the span if it is zero.
     ///
     /// The allocated span slot will be reused when a new span is created.
-    fn try_close(&self, id: Id) -> bool {
-        let span = match self.get(&id) {
-            Some(span) => span,
-            None if std::thread::panicking() => return false,
-            None => panic!("tried to drop a ref to {:?}, but no such span exists!", id),
+    fn try_close(&self, id: Id) -> SubscriberResult<bool> {
+        let Some(span) = self.get(id) else {
+            return Ok(false);
         };
 
-        let refs = span.ref_count.fetch_sub(1, Ordering::Release);
-        if !std::thread::panicking() {
-            assert!(refs < usize::MAX, "reference count overflow!");
-        }
+        let Some(refs) = decrement_ref_count(&span.ref_count) else {
+            return Ok(false);
+        };
         if refs > 1 {
-            return false;
+            return Ok(false);
         }
 
         // Synchronize if we are actually removing the span (stolen
         // from std::Arc); this ensures that all other `try_close` calls on
         // other threads happen-before we actually remove the span.
         fence(Ordering::Acquire);
-        true
+        Ok(true)
     }
 }
 
 impl<'a> LookupSpan<'a> for Registry {
     type Data = Data<'a>;
 
-    fn span_data(&'a self, id: &Id) -> Option<Self::Data> {
+    fn span_data(&'a self, id: Id) -> Option<Self::Data> {
         let inner = self.get(id)?;
         Some(Data { inner })
     }
 
     fn register_filter(&mut self) -> FilterId {
         let id = FilterId::new(self.next_filter_id);
-        self.next_filter_id += 1;
+        self.next_filter_id = self
+            .next_filter_id
+            .checked_add(1)
+            .unwrap_or(self.next_filter_id);
         id
     }
 }
 
-// === impl CloseGuard ===
+// === impl CloseHandle ===
 
-impl CloseGuard<'_> {
-    pub(crate) fn set_closing(&mut self) {
-        self.is_closing = true;
+impl CloseSpan for CloseHandle<'_> {
+    fn set_closing(&mut self) {
+        if let Some(guard) = self.guard.as_mut() {
+            guard.is_closing = true;
+        }
     }
 }
 
@@ -394,23 +444,27 @@ impl Drop for CloseGuard<'_> {
         // If this returns with an error, we are already panicking. At
         // this point, there's nothing we can really do to recover
         // except by avoiding a double-panic.
-        let _ = CLOSE_COUNT.try_with(|count| {
-            let c = count.get();
+        let _close_count_unavailable = CLOSE_COUNT.try_with(|count| {
+            let current_count = count.get();
             // Decrement the count to indicate that _this_ guard's
             // `on_close` callback has completed.
             //
             // Note that we *must* do this before we actually remove the span
             // from the registry, since dropping the `DataInner` may trigger a
             // new close, if this span is the last reference to a parent span.
-            count.set(c - 1);
+            count.set(current_count.checked_sub(1).unwrap_or(current_count));
 
             // If the current close count is 1, this stack frame is the last
             // `on_close` call. If the span is closing, it's okay to remove the
             // span.
-            if c == 1 && self.is_closing {
-                let _cleared = self.registry.spans.clear(id_to_idx(&self.id));
+            if current_count == 1
+                && self.is_closing
+                && let Some(index) = id_to_idx(self.id)
+            {
+                let _span_was_present = self.registry.spans.clear(index);
             }
-        });
+        })
+        .is_err();
     }
 }
 
@@ -430,11 +484,11 @@ impl<'a> SpanData<'a> for Data<'a> {
     }
 
     fn extensions(&self) -> Extensions<'_> {
-        Extensions::new(self.inner.extensions.read().expect("Mutex poisoned"))
+        Extensions::new(try_lock!(self.inner.extensions.read()))
     }
 
     fn extensions_mut(&self) -> ExtensionsMut<'_> {
-        ExtensionsMut::new(self.inner.extensions.write().expect("Mutex poisoned"))
+        ExtensionsMut::new(try_lock!(self.inner.extensions.write()))
     }
 
     #[inline]
@@ -452,21 +506,12 @@ impl Default for DataInner {
         // Since we can't access a `DataInner` until it has had actual span data
         // inserted into it, the null metadata will never actually be accessed.
         struct NullCallsite;
-        impl tracing_core::callsite::Callsite for NullCallsite {
+        impl Callsite for NullCallsite {
             fn set_interest(&self, _: Interest) {
-                unreachable!(
-                    "/!\\ Tried to register the null callsite /!\\\n \
-                    This should never have happened and is definitely a bug. \
-                    A `tracing` bug report would be appreciated."
-                )
             }
 
             fn metadata(&self) -> &Metadata<'_> {
-                unreachable!(
-                    "/!\\ Tried to access the null callsite's metadata /!\\\n \
-                    This should never have happened and is definitely a bug. \
-                    A `tracing` bug report would be appreciated."
-                )
+                &NULL_METADATA
             }
         }
 
@@ -477,7 +522,7 @@ impl Default for DataInner {
             level: tracing_core::Level::TRACE,
             fields: &[],
             callsite: &NULL_CALLSITE,
-            kind: tracing_core::metadata::Kind::SPAN,
+            kind: Kind::SPAN,
         };
 
         Self {
@@ -503,7 +548,7 @@ impl Clear for DataInner {
         // closure, since it is a `FnMut`, but testing that there _is_ a value
         // here lets us avoid the thread-local access if we don't need the
         // dispatcher at all.
-        if self.parent.is_some() {
+        if let Some(parent) = self.parent.take() {
             // Note that --- because `Layered::try_close` works by calling
             // `try_close` on the inner subscriber and using the return value to
             // determine whether to call the `Layer`'s `on_close` callback ---
@@ -511,22 +556,54 @@ impl Clear for DataInner {
             // than just on the registry. If the registry called `try_close` on
             // itself directly, the layers wouldn't see the close notification.
             let subscriber = dispatcher::get_default(Dispatch::clone);
-            if let Some(parent) = self.parent.take() {
-                let _ = subscriber.try_close(parent);
-            }
+            let _parent_closed = subscriber.try_close(parent);
         }
 
         // Clear (but do not deallocate!) the pooled `HashMap` for the span's extensions.
-        self.extensions
-            .get_mut()
-            .unwrap_or_else(|l| {
-                // This function can be called in a `Drop` impl, such as while
-                // panicking, so ignore lock poisoning.
-                l.into_inner()
-            })
-            .clear();
+        try_lock!(self.extensions.write(), else {
+            self.filter_map = FilterMap::new();
+            return;
+        })
+        .clear();
 
         self.filter_map = FilterMap::new();
+    }
+}
+
+/// Attempts to increment a non-zero span reference count.
+#[allow(
+    clippy::single_call_fn,
+    reason = "reference-count transition helper keeps registry clone semantics isolated"
+)]
+fn increment_ref_count(ref_count: &AtomicUsize) -> bool {
+    let mut current = ref_count.load(Ordering::Relaxed);
+    loop {
+        if current == 0 {
+            return false;
+        }
+        let Some(next) = current.checked_add(1) else {
+            return false;
+        };
+        match ref_count.compare_exchange(current, next, Ordering::Relaxed, Ordering::Relaxed) {
+            Ok(_) => return true,
+            Err(actual) => current = actual,
+        }
+    }
+}
+
+/// Attempts to decrement a non-zero span reference count.
+#[allow(
+    clippy::single_call_fn,
+    reason = "reference-count transition helper keeps registry close semantics isolated"
+)]
+fn decrement_ref_count(ref_count: &AtomicUsize) -> Option<usize> {
+    let mut current = ref_count.load(Ordering::Acquire);
+    loop {
+        let next = current.checked_sub(1)?;
+        match ref_count.compare_exchange(current, next, Ordering::Release, Ordering::Relaxed) {
+            Ok(previous) => return Some(previous),
+            Err(actual) => current = actual,
+        }
     }
 }
 
@@ -535,49 +612,83 @@ mod tests {
 
     use super::*;
     use crate::{layer::Context, registry::LookupSpan, Layer};
+    use parking_lot::Mutex;
     use std::{
         collections::HashMap,
-        println,
-        sync::{Arc, Mutex, Weak},
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc, Weak,
+        },
         vec::Vec,
     };
+    use strict_test_support::{TestFailure, ensure, ensure_some};
     use tracing::{self, subscriber::with_default};
     use tracing_core::{
         dispatcher,
         span::{Attributes, Id},
+        subscriber::SubscriberResult,
         Subscriber,
     };
 
-    struct AssertionLayer;
+    #[derive(Clone, Default)]
+    struct AssertionLayer {
+        missing_closed_span: Arc<AtomicBool>,
+    }
+
+    impl AssertionLayer {
+        fn saw_missing_closed_span(&self) -> bool {
+            self.missing_closed_span.load(Ordering::Acquire)
+        }
+    }
+
     impl<S> Layer<S> for AssertionLayer
     where
         S: Subscriber + for<'a> LookupSpan<'a>,
     {
-        fn on_close(&self, id: Id, ctx: Context<'_, S>) {
-            assert!(&ctx.span(&id).is_some());
+        fn on_close(&self, id: Id, ctx: Context<'_, S>) -> SubscriberResult {
+            if ctx.span(id).is_none() {
+                self.missing_closed_span.store(true, Ordering::Release);
+            }
+            Ok(())
         }
     }
 
     #[test]
-    fn single_layer_can_access_closed_span() {
-        let subscriber = AssertionLayer.with_subscriber(Registry::default());
+    fn single_layer_can_access_closed_span() -> Result<(), TestFailure> {
+        let assertion_layer = AssertionLayer::default();
+        let subscriber = assertion_layer.clone().with_subscriber(Registry::default());
 
         with_default(subscriber, || {
             let span = tracing::debug_span!("span");
             drop(span);
         });
+        ensure(
+            !assertion_layer.saw_missing_closed_span(),
+            "single layer can access closed span",
+        )
     }
 
     #[test]
-    fn multiple_layers_can_access_closed_span() {
-        let subscriber = AssertionLayer
-            .and_then(AssertionLayer)
+    fn multiple_layers_can_access_closed_span() -> Result<(), TestFailure> {
+        let first_assertion_layer = AssertionLayer::default();
+        let second_assertion_layer = AssertionLayer::default();
+        let subscriber = first_assertion_layer
+            .clone()
+            .and_then(second_assertion_layer.clone())
             .with_subscriber(Registry::default());
 
         with_default(subscriber, || {
             let span = tracing::debug_span!("span");
             drop(span);
         });
+        ensure(
+            !first_assertion_layer.saw_missing_closed_span(),
+            "outer layer can access closed span",
+        )?;
+        ensure(
+            !second_assertion_layer.saw_missing_closed_span(),
+            "inner layer can access closed span",
+        )
     }
 
     struct CloseLayer {
@@ -594,44 +705,38 @@ mod tests {
         closed: Vec<(&'static str, Weak<()>)>,
     }
 
-    struct SetRemoved(Arc<()>);
-
     impl<S> Layer<S> for CloseLayer
     where
         S: Subscriber + for<'a> LookupSpan<'a>,
     {
-        fn on_new_span(&self, _: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
-            let span = ctx.span(id).expect("Missing span; this is a bug");
-            let mut lock = self.inner.lock().unwrap();
+        fn on_new_span(&self, _: &Attributes<'_>, id: Id, ctx: Context<'_, S>) -> SubscriberResult {
+            let Some(span) = ctx.span(id) else {
+                return Ok(());
+            };
             let is_removed = Arc::new(());
-            assert!(
-                lock.open
-                    .insert(span.name(), Arc::downgrade(&is_removed))
-                    .is_none(),
-                "test layer saw multiple spans with the same name, the test is probably messed up"
-            );
-            let mut extensions = span.extensions_mut();
-            extensions.insert(SetRemoved(is_removed));
+            {
+                let mut lock = self.inner.lock();
+                let _open_previous = lock.open.insert(span.name(), Arc::downgrade(&is_removed));
+            }
+            {
+                let mut extensions = span.extensions_mut();
+                let _extension_previous = extensions.insert(is_removed);
+            }
+            Ok(())
         }
 
-        fn on_close(&self, id: Id, ctx: Context<'_, S>) {
-            let span = if let Some(span) = ctx.span(&id) {
-                span
-            } else {
-                println!(
-                    "span {:?} did not exist in `on_close`, are we panicking?",
-                    id
-                );
-                return;
+        fn on_close(&self, id: Id, ctx: Context<'_, S>) -> SubscriberResult {
+            let Some(span) = ctx.span(id) else {
+                return Ok(());
             };
             let name = span.name();
-            println!("close {} ({:?})", name, id);
-            if let Ok(mut lock) = self.inner.lock()
-                && let Some(is_removed) = lock.open.remove(name)
             {
-                assert!(is_removed.upgrade().is_some());
-                lock.closed.push((name, is_removed));
+                let mut lock = self.inner.lock();
+                if let Some(is_removed) = lock.open.remove(name) {
+                    lock.closed.push((name, is_removed));
+                }
             }
+            Ok(())
         }
     }
 
@@ -640,7 +745,7 @@ mod tests {
             let state = Arc::new(Mutex::new(CloseState::default()));
             (
                 Self {
-                    inner: state.clone(),
+                    inner: Arc::clone(&state),
                 },
                 CloseHandle { state },
             )
@@ -653,104 +758,82 @@ mod tests {
         }
 
         fn is_closed(&self, span: &str) -> bool {
-            self.closed.iter().any(|(name, _)| name == &span)
+            self.closed.iter().any(|&(name, _)| name == span)
         }
     }
 
     impl CloseHandle {
-        fn assert_closed(&self, span: &str) {
-            let lock = self.state.lock().unwrap();
-            assert!(
+        fn assert_closed(&self, span: &str) -> Result<(), TestFailure> {
+            let lock = self.state.lock();
+            ensure(
                 lock.is_closed(span),
-                "expected {} to be closed{}",
-                span,
-                if lock.is_open(span) {
-                    " (it was still open)"
-                } else {
-                    ", but it never existed (is there a problem with the test?)"
-                }
+                "expected span to be closed",
             )
         }
 
-        fn assert_open(&self, span: &str) {
-            let lock = self.state.lock().unwrap();
-            assert!(
-                lock.is_open(span),
-                "expected {} to be open{}",
-                span,
-                if lock.is_closed(span) {
-                    " (it was still open)"
-                } else {
-                    ", but it never existed (is there a problem with the test?)"
-                }
-            )
+        fn assert_open(&self, span: &str) -> Result<(), TestFailure> {
+            let lock = self.state.lock();
+            ensure(lock.is_open(span), "expected span to be open")
         }
 
-        fn assert_removed(&self, span: &str) {
-            let lock = self.state.lock().unwrap();
-            let is_removed = match lock.closed.iter().find(|(name, _)| name == &span) {
-                Some((_, is_removed)) => is_removed,
-                None => panic!(
-                    "expected {} to be removed from the registry, but it was not closed {}",
-                    span,
-                    if lock.is_closed(span) {
-                        " (it was still open)"
-                    } else {
-                        ", but it never existed (is there a problem with the test?)"
-                    }
-                ),
+        fn assert_removed(&self, span: &str) -> Result<(), TestFailure> {
+            let is_removed = {
+                let lock = self.state.lock();
+                ensure_some(
+                    lock.closed
+                        .iter()
+                        .find(|entry| entry.0 == span)
+                        .map(|entry| entry.1.upgrade().is_none()),
+                    "span should be closed before removal check",
+                )?
             };
-            assert!(
-                is_removed.upgrade().is_none(),
-                "expected {} to have been removed from the registry",
-                span
+            ensure(
+                is_removed,
+                "expected span to have been removed from the registry",
             )
         }
 
-        fn assert_not_removed(&self, span: &str) {
-            let lock = self.state.lock().unwrap();
-            let is_removed = match lock.closed.iter().find(|(name, _)| name == &span) {
-                Some((_, is_removed)) => is_removed,
-                None if lock.is_open(span) => return,
-                None => unreachable!(),
+        fn assert_not_removed(&self, span: &str) -> Result<(), TestFailure> {
+            let still_present = {
+                let lock = self.state.lock();
+                lock.closed
+                    .iter()
+                    .find(|entry| entry.0 == span)
+                    .map_or_else(|| lock.is_open(span), |entry| entry.1.upgrade().is_some())
             };
-            assert!(
-                is_removed.upgrade().is_some(),
-                "expected {} to have been removed from the registry",
-                span
-            )
+            ensure(still_present, "expected span to remain in the registry")
         }
 
-        fn assert_last_closed(&self, span: Option<&str>) {
-            let lock = self.state.lock().unwrap();
-            let last = lock.closed.last().map(|(span, _)| span);
-            assert_eq!(
-                last,
-                span.as_ref(),
-                "expected {:?} to have closed last",
-                span
-            );
+        fn assert_last_closed(&self, span: Option<&str>) -> Result<(), TestFailure> {
+            let last = {
+                let lock = self.state.lock();
+                lock.closed.last().map(|entry| entry.0)
+            };
+            ensure(last == span, "expected span to have closed last")
         }
 
-        fn assert_closed_in_order(&self, order: impl AsRef<[&'static str]>) {
-            let lock = self.state.lock().unwrap();
-            let order = order.as_ref();
-            for (i, name) in order.iter().enumerate() {
-                assert_eq!(
-                    lock.closed.get(i).map(|(span, _)| span),
-                    Some(name),
-                    "expected close order: {:?}, actual: {:?}",
-                    order,
-                    lock.closed.iter().map(|(name, _)| name).collect::<Vec<_>>()
-                );
-            }
+        fn assert_closed_in_order(
+            &self,
+            order: impl AsRef<[&'static str]>,
+        ) -> Result<(), TestFailure> {
+            let closed_in_order = {
+                let lock = self.state.lock();
+                order.as_ref().iter().enumerate().all(|(index, name)| {
+                    lock.closed
+                        .get(index)
+                        .is_some_and(|entry| entry.0 == *name)
+                })
+            };
+            ensure(closed_in_order, "span closed in expected order")
         }
     }
 
     #[test]
-    fn spans_are_removed_from_registry() {
+    fn spans_are_removed_from_registry() -> Result<(), TestFailure> {
         let (close_layer, state) = CloseLayer::new();
-        let subscriber = AssertionLayer
+        let assertion_layer = AssertionLayer::default();
+        let subscriber = assertion_layer
+            .clone()
             .and_then(close_layer)
             .with_subscriber(Registry::default());
 
@@ -764,21 +847,28 @@ mod tests {
         dispatcher::with_default(&dispatch, || {
             let span = tracing::debug_span!("span1");
             drop(span);
-            let span = tracing::info_span!("span2");
-            drop(span);
+            let second_span = tracing::info_span!("span2");
+            drop(second_span);
         });
 
-        state.assert_removed("span1");
-        state.assert_removed("span2");
+        state.assert_removed("span1")?;
+        state.assert_removed("span2")?;
+        state.assert_last_closed(Some("span2"))?;
 
         // Ensure the registry itself outlives the span.
         drop(dispatch);
+        ensure(
+            !assertion_layer.saw_missing_closed_span(),
+            "assertion layer can access closed spans during removal",
+        )
     }
 
     #[test]
-    fn spans_are_only_closed_when_the_last_ref_drops() {
+    fn spans_are_only_closed_when_the_last_ref_drops() -> Result<(), TestFailure> {
         let (close_layer, state) = CloseLayer::new();
-        let subscriber = AssertionLayer
+        let assertion_layer = AssertionLayer::default();
+        let subscriber = assertion_layer
+            .clone()
             .and_then(close_layer)
             .with_subscriber(Registry::default());
 
@@ -798,20 +888,26 @@ mod tests {
             span2_clone
         });
 
-        state.assert_removed("span1");
-        state.assert_not_removed("span2");
+        state.assert_removed("span1")?;
+        state.assert_not_removed("span2")?;
 
         drop(span2);
-        state.assert_removed("span1");
+        state.assert_removed("span1")?;
 
         // Ensure the registry itself outlives the span.
         drop(dispatch);
+        ensure(
+            !assertion_layer.saw_missing_closed_span(),
+            "assertion layer can access closed spans after last ref drops",
+        )
     }
 
     #[test]
-    fn span_enter_guards_are_dropped_out_of_order() {
+    fn span_enter_guards_are_dropped_out_of_order() -> Result<(), TestFailure> {
         let (close_layer, state) = CloseLayer::new();
-        let subscriber = AssertionLayer
+        let assertion_layer = AssertionLayer::default();
+        let subscriber = assertion_layer
+            .clone()
             .and_then(close_layer)
             .with_subscriber(Registry::default());
 
@@ -822,7 +918,7 @@ mod tests {
         // registry.
         let dispatch = Dispatch::new(subscriber);
 
-        dispatcher::with_default(&dispatch, || {
+        dispatcher::with_default(&dispatch, || -> Result<(), TestFailure> {
             let span1 = tracing::debug_span!("span1");
             let span2 = tracing::info_span!("span2");
 
@@ -832,20 +928,25 @@ mod tests {
             drop(enter1);
             drop(span1);
 
-            state.assert_removed("span1");
-            state.assert_not_removed("span2");
+            state.assert_removed("span1")?;
+            state.assert_not_removed("span2")?;
 
             drop(enter2);
-            state.assert_not_removed("span2");
+            state.assert_not_removed("span2")?;
 
             drop(span2);
-            state.assert_removed("span1");
-            state.assert_removed("span2");
-        });
+            state.assert_removed("span1")?;
+            state.assert_removed("span2")?;
+            state.assert_last_closed(Some("span2"))
+        })?;
+        ensure(
+            !assertion_layer.saw_missing_closed_span(),
+            "assertion layer can access closed spans with out-of-order guards",
+        )
     }
 
     #[test]
-    fn child_closes_parent() {
+    fn child_closes_parent() -> Result<(), TestFailure> {
         // This test asserts that if a parent span's handle is dropped before
         // a child span's handle, the parent will remain open until child
         // closes, and will then be closed.
@@ -855,25 +956,25 @@ mod tests {
 
         let dispatch = Dispatch::new(subscriber);
 
-        dispatcher::with_default(&dispatch, || {
+        dispatcher::with_default(&dispatch, || -> Result<(), TestFailure> {
             let span1 = tracing::info_span!("parent");
             let span2 = tracing::info_span!(parent: &span1, "child");
 
-            state.assert_open("parent");
-            state.assert_open("child");
+            state.assert_open("parent")?;
+            state.assert_open("child")?;
 
             drop(span1);
-            state.assert_open("parent");
-            state.assert_open("child");
+            state.assert_open("parent")?;
+            state.assert_open("child")?;
 
             drop(span2);
-            state.assert_closed("parent");
-            state.assert_closed("child");
-        });
+            state.assert_closed("parent")?;
+            state.assert_closed("child")
+        })
     }
 
     #[test]
-    fn child_closes_grandparent() {
+    fn child_closes_grandparent() -> Result<(), TestFailure> {
         // This test asserts that, when a span is kept open by a child which
         // is *itself* kept open by a child, closing the grandchild will close
         // both the parent *and* the grandparent.
@@ -882,24 +983,24 @@ mod tests {
 
         let dispatch = Dispatch::new(subscriber);
 
-        dispatcher::with_default(&dispatch, || {
+        dispatcher::with_default(&dispatch, || -> Result<(), TestFailure> {
             let span1 = tracing::info_span!("grandparent");
             let span2 = tracing::info_span!(parent: &span1, "parent");
             let span3 = tracing::info_span!(parent: &span2, "child");
 
-            state.assert_open("grandparent");
-            state.assert_open("parent");
-            state.assert_open("child");
+            state.assert_open("grandparent")?;
+            state.assert_open("parent")?;
+            state.assert_open("child")?;
 
             drop(span1);
             drop(span2);
-            state.assert_open("grandparent");
-            state.assert_open("parent");
-            state.assert_open("child");
+            state.assert_open("grandparent")?;
+            state.assert_open("parent")?;
+            state.assert_open("child")?;
 
             drop(span3);
 
-            state.assert_closed_in_order(["child", "parent", "grandparent"]);
-        });
+            state.assert_closed_in_order(["child", "parent", "grandparent"])
+        })
     }
 }

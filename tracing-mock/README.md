@@ -32,7 +32,7 @@ Utilities for testing [`tracing`] and crates that uses it.
 
 [`tracing`] is a framework for instrumenting Rust programs to collect
 structured, event-based diagnostic information. `tracing-mock` provides
-tools for making assertions about what `tracing` diagnostics are emitted
+tools for making expectations about what `tracing` diagnostics are emitted
 by code under test.
 
 *Compiler support: [requires `rustc` 1.96+][msrv]*
@@ -74,20 +74,23 @@ Below is an example that checks that an event contains a message:
 use tracing::subscriber::with_default;
 use tracing_mock::{expect, subscriber};
 
-fn yak_shaving() {
-    tracing::info!("preparing to shave yaks");
+fn main() -> Result<(), tracing_core::subscriber::SubscriberError> {
+    fn yak_shaving() {
+        tracing::info!("preparing to shave yaks");
+    }
+
+    let (subscriber, handle) = subscriber::mock()
+        .event(expect::event().with_fields(expect::msg("preparing to shave yaks")))
+        .only()
+        .run_with_handle();
+
+    with_default(subscriber, || {
+        yak_shaving();
+    });
+
+    handle.finished()?;
+    Ok(())
 }
-
-let (subscriber, handle) = subscriber::mock()
-    .event(expect::event().with_fields(expect::msg("preparing to shave yaks")))
-    .only()
-    .run_with_handle();
-
-with_default(subscriber, || {
-    yak_shaving();
-});
-
-handle.assert_finished();
 ```
 
 Below is a slightly more complex example. `tracing-mock` asserts that, in order:
@@ -104,51 +107,54 @@ Below is a slightly more complex example. `tracing-mock` asserts that, in order:
 use tracing::subscriber::with_default;
 use tracing_mock::{expect, subscriber};
 
-#[tracing::instrument]
-fn yak_shaving(number_of_yaks: u32) {
-    tracing::info!(number_of_yaks, "preparing to shave yaks");
+fn main() -> Result<(), tracing_core::subscriber::SubscriberError> {
+    #[tracing::instrument]
+    fn yak_shaving(number_of_yaks: u32) {
+        tracing::info!(number_of_yaks, "preparing to shave yaks");
 
-    let number_shaved = number_of_yaks; // shave_all
-    tracing::info!(
-        all_yaks_shaved = number_shaved == number_of_yaks,
-        "yak shaving completed."
-    );
+        let number_shaved = number_of_yaks; // shave_all
+        tracing::info!(
+            all_yaks_shaved = number_shaved == number_of_yaks,
+            "yak shaving completed."
+        );
+    }
+
+    let yak_count: u32 = 3;
+    let span = expect::span().named("yak_shaving");
+
+    let (subscriber, handle) = subscriber::mock()
+        .new_span(
+            span.clone()
+                .with_fields(expect::field("number_of_yaks").with_value(&yak_count).only()),
+        )
+        .enter(span.clone())
+        .event(
+            expect::event().with_fields(
+                expect::field("number_of_yaks")
+                    .with_value(&yak_count)
+                    .and(expect::msg("preparing to shave yaks"))
+                    .only(),
+            ),
+        )
+        .event(
+            expect::event().with_fields(
+                expect::field("all_yaks_shaved")
+                    .with_value(&true)
+                    .and(expect::msg("yak shaving completed."))
+                    .only(),
+            ),
+        )
+        .exit(span.clone())
+        .only()
+        .run_with_handle();
+
+    with_default(subscriber, || {
+        yak_shaving(yak_count);
+    });
+
+    handle.finished()?;
+    Ok(())
 }
-
-let yak_count: u32 = 3;
-let span = expect::span().named("yak_shaving");
-
-let (subscriber, handle) = subscriber::mock()
-    .new_span(
-        span.clone()
-            .with_fields(expect::field("number_of_yaks").with_value(&yak_count).only()),
-    )
-    .enter(span.clone())
-    .event(
-        expect::event().with_fields(
-            expect::field("number_of_yaks")
-                .with_value(&yak_count)
-                .and(expect::msg("preparing to shave yaks"))
-                .only(),
-        ),
-    )
-    .event(
-        expect::event().with_fields(
-            expect::field("all_yaks_shaved")
-                .with_value(&true)
-                .and(expect::msg("yak shaving completed."))
-                .only(),
-        ),
-    )
-    .exit(span.clone())
-    .only()
-    .run_with_handle();
-
-with_default(subscriber, || {
-    yak_shaving(yak_count);
-});
-
-handle.assert_finished();
 ```
 
 ## Supported Rust Versions

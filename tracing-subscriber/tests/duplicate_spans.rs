@@ -1,48 +1,48 @@
 //! Tests duplicate span filtering behavior.
 #![cfg(all(feature = "env-filter", feature = "fmt"))]
-use tracing::{self, Span, subscriber::with_default};
-use tracing_subscriber::{FmtSubscriber, filter::EnvFilter};
 
-#[test]
-fn duplicate_spans() {
-    let subscriber = FmtSubscriber::builder()
-        .with_env_filter(EnvFilter::new("[root]=debug"))
-        .finish();
+#[cfg(test)]
+mod tests {
+    use strict_test_support::{TestFailure, ensure};
+    use tracing::{self, Span, subscriber::with_default};
+    use tracing_subscriber::{FmtSubscriber, filter::EnvFilter};
 
-    with_default(subscriber, || {
-        let root = tracing::debug_span!("root");
-        root.in_scope(|| {
-            // root:
-            assert_eq!(root, Span::current(), "Current span must be 'root'");
-            let leaf = tracing::debug_span!("leaf");
-            leaf.in_scope(|| {
-                // root:leaf:
-                assert_eq!(leaf, Span::current(), "Current span must be 'leaf'");
-                root.in_scope(|| {
+    #[test]
+    fn duplicate_spans() -> Result<(), TestFailure> {
+        let subscriber = FmtSubscriber::builder()
+            .with_env_filter(EnvFilter::new("[root]=debug"))
+            .finish();
+
+        with_default(subscriber, || -> Result<(), TestFailure> {
+            let root = tracing::debug_span!("root");
+            root.in_scope(|| -> Result<(), TestFailure> {
+                // root:
+                ensure(root == Span::current(), "current span is root")?;
+                let leaf = tracing::debug_span!("leaf");
+                leaf.in_scope(|| -> Result<(), TestFailure> {
                     // root:leaf:
-                    assert_eq!(
-                        leaf,
-                        Span::current(),
-                        "Current span must be 'leaf' after entering twice the 'root' span"
-                    );
-                })
-            });
-            // root:
-            assert_eq!(
-                root,
-                Span::current(),
-                "Current span must be root ('leaf' exited, nested 'root' exited)"
-            );
+                    ensure(leaf == Span::current(), "current span is leaf")?;
+                    root.in_scope(|| -> Result<(), TestFailure> {
+                        // root:leaf:
+                        ensure(
+                            leaf == Span::current(),
+                            "current span remains leaf after entering root twice",
+                        )
+                    })
+                })?;
+                // root:
+                ensure(
+                    root == Span::current(),
+                    "current span returns to root after exiting leaf and nested root",
+                )?;
 
-            root.in_scope(|| {
-                assert_eq!(root, Span::current(), "Current span must be root");
-            });
-            // root:
-            assert_eq!(
-                root,
-                Span::current(),
-                "Current span must still be root after exiting nested 'root'"
-            );
-        });
-    });
+                root.in_scope(|| ensure(root == Span::current(), "current span is root"))?;
+                // root:
+                ensure(
+                    root == Span::current(),
+                    "current span remains root after exiting nested root",
+                )
+            })
+        })
+    }
 }

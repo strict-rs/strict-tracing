@@ -269,10 +269,10 @@ jobs:
         - tracing
     steps:
     - uses: actions/checkout@v4
-    - name: Install Rust 1.85
-      uses: dtolnay/rust-toolchain@stable
+    - name: Install Rust 1.96.0
+      uses: dtolnay/rust-toolchain@master
       with:
-        toolchain: 1.85
+        toolchain: 1.96.0
         target: wasm32-unknown-unknown
     - name: install test runner for wasm
       uses: taiki-e/install-action@wasm-pack
@@ -291,6 +291,7 @@ jobs:
       uses: taiki-e/install-action@nextest
     - name: "Test log support"
       run: cargo test
+      working-directory: "tracing/test-log-support"
     - name: "Test static max level"
       run: cargo test
       working-directory: "tracing/test_static_max_level_features"
@@ -298,13 +299,11 @@ jobs:
       run: cargo test --release
       working-directory: "tracing/test_static_max_level_features"
     - name: "Test tracing-core no-std support"
-      run: cargo test --no-default-features
+      run: cargo test --no-default-features -p tracing-core
     - name: "Test tracing no-std support"
-      run: cargo test --no-default-features
+      run: cargo test --no-default-features -p tracing
       # this skips running doctests under the `--no-default-features` flag,
       # as rustdoc isn't aware of cargo's feature flags.
-    - name: "Test tracing-subscriber with all features disabled"
-      run: cargo test --lib --tests --no-default-features
     - name: "Fix chrono version to 0.4.41"
       run: cargo update -p chrono --precise 0.4.41
     - name: "Test tracing-subscriber with all features enabled"

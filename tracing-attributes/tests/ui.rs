@@ -1,4 +1,5 @@
 //! Example binary for tracing workspace checks.
+#![cfg(test)]
 
 // Only test on stable, since UI tests are bound to change over time
 

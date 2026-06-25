@@ -1,9 +1,14 @@
 //! Example binary for tracing workspace checks.
 #![deny(rust_2018_idioms)]
 
-use tracing::{debug, span, Level};
+use tracing::{Level, debug, span, subscriber::with_default};
 use tracing_attributes::instrument;
 
+/// Return a sample band recommendation while recording an instrumented span.
+#[allow(
+    clippy::single_call_fn,
+    reason = "the named function is the minimal instrumented span demonstrated by this example"
+)]
 #[instrument]
 #[inline]
 fn suggest_band() -> String {
@@ -15,7 +20,7 @@ fn main() {
     let subscriber = tracing_subscriber::fmt()
         .with_env_filter("attrs_literal_field_names=trace")
         .finish();
-    tracing::subscriber::with_default(subscriber, || {
+    with_default(subscriber, || {
         let span = span!(Level::TRACE, "get_band_rec", "guid:x-request-id" = "abcdef");
         let _enter = span.enter();
         let _band = suggest_band();

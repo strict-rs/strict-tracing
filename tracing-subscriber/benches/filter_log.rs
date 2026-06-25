@@ -1,138 +1,251 @@
 //! Benchmarks log filtering paths.
 
-use criterion::{Criterion, criterion_group, criterion_main};
-use std::time::Duration;
-use tracing::{Event, Id, Metadata, dispatcher::Dispatch, span};
+use core::num::NonZeroU64;
+use criterion::{BenchmarkGroup, Criterion, measurement::WallTime};
+use std::{error::Error, fmt, time::Duration};
+use tracing::{
+    Event, Id, Metadata,
+    dispatcher::{Dispatch, with_default},
+    span,
+};
+use tracing_core::subscriber::SubscriberResult;
 use tracing_subscriber::{EnvFilter, prelude::*};
 
-mod support;
+/// Benchmark support shared with the formatting benchmarks.
+#[path = "support/support.rs"]
+pub mod support;
 use support::MultithreadedBench;
+
+/// The fixed span ID returned by the no-op benchmark subscriber.
+const ENABLED_SPAN_ID: Id = match Id::try_from_u64(0xDEAD_FACE) {
+    Some(id) => id,
+    None => Id::from_non_zero_u64(NonZeroU64::MIN),
+};
+
+/// The `Criterion` group type used by these benchmarks.
+type Group<'a> = BenchmarkGroup<'a, WallTime>;
+
+/// A setup error from static benchmark definitions.
+#[derive(Debug)]
+struct BenchSetupError {
+    /// The failing setup operation.
+    operation: &'static str,
+    /// The input that could not be configured.
+    input: &'static str,
+    /// The concrete error message returned by the setup API.
+    source: String,
+}
+
+impl fmt::Display for BenchSetupError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "failed to {} `{}`: {}",
+            self.operation, self.input, self.source
+        )
+    }
+}
+
+impl Error for BenchSetupError {}
+
+/// Parses an `EnvFilter` directive used to define a benchmark.
+///
+/// # Errors
+///
+/// Returns an error if the static directive is no longer accepted by
+/// `EnvFilter`.
+fn parse_filter(directive: &'static str) -> Result<EnvFilter, BenchSetupError> {
+    directive
+        .parse::<EnvFilter>()
+        .map_err(|source| BenchSetupError {
+            operation: "parse EnvFilter directive",
+            input: directive,
+            source: source.to_string(),
+        })
+}
+
+/// Preserves the historical best-effort global `LogTracer` initialization.
+fn initialize_log_tracer() {
+    let _already_initialized = tracing_log::LogTracer::init().is_err();
+}
+
+/// Adds one elapsed worker run to a Criterion custom-iteration total.
+const fn add_elapsed(total: Duration, elapsed: Duration) -> Duration {
+    total.saturating_add(elapsed)
+}
+
+/// Consumes Criterion's fluent group return value after registering a benchmark.
+const fn register_benchmark(_group: &mut Group<'_>) {}
 
 /// A subscriber that is enabled but otherwise does nothing.
 struct EnabledSubscriber;
 
 impl tracing::Subscriber for EnabledSubscriber {
-    fn new_span(&self, span: &span::Attributes<'_>) -> Id {
-        let _ = span;
-        Id::from_u64(0xDEAD_FACE)
+    fn new_span(&self, _span: &span::Attributes<'_>) -> SubscriberResult<Id> {
+        Ok(ENABLED_SPAN_ID)
     }
 
-    fn event(&self, event: &Event<'_>) {
-        let _ = event;
+    fn event(&self, _event: &Event<'_>) -> SubscriberResult {
+        Ok(())
     }
 
-    fn record(&self, span: &Id, values: &span::Record<'_>) {
-        let _ = (span, values);
+    fn record(&self, _span: Id, _values: &span::Record<'_>) -> SubscriberResult {
+        Ok(())
     }
 
-    fn record_follows_from(&self, span: &Id, follows: &Id) {
-        let _ = (span, follows);
+    fn record_follows_from(&self, _span: Id, _follows: Id) -> SubscriberResult {
+        Ok(())
     }
 
-    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        let _ = metadata;
-        true
+    fn enabled(&self, _metadata: &Metadata<'_>) -> SubscriberResult<bool> {
+        Ok(true)
     }
 
-    fn enter(&self, span: &Id) {
-        let _ = span;
+    fn enter(&self, _span: Id) -> SubscriberResult {
+        Ok(())
     }
 
-    fn exit(&self, span: &Id) {
-        let _ = span;
+    fn exit(&self, _span: Id) -> SubscriberResult {
+        Ok(())
     }
 }
 
-fn bench_static(c: &mut Criterion) {
-    let _ = tracing_log::LogTracer::init();
+/// Benchmarks static target-and-level filters for `log` records.
+///
+/// # Errors
+///
+/// Returns an error if any static `EnvFilter` directive used by the benchmark no
+/// longer parses.
+#[allow(
+    clippy::single_call_fn,
+    reason = "Criterion benchmark group function preserves the static log-filter benchmark matrix"
+)]
+fn bench_static(criterion: &mut Criterion) -> Result<(), BenchSetupError> {
+    initialize_log_tracer();
+    {
+        let mut group = criterion.benchmark_group("log/static");
+        bench_static_single_threaded(&mut group)?;
+        bench_static_multithreaded(&mut group)?;
+        group.finish();
+    };
+    Ok(())
+}
 
-    let mut group = c.benchmark_group("log/static");
-
-    let _bench = group.bench_function("baseline_single_threaded", |b| {
-        tracing::subscriber::with_default(EnabledSubscriber, || {
-            b.iter(|| {
+/// Registers single-threaded static filter benchmarks.
+///
+/// # Errors
+///
+/// Returns an error if any static `EnvFilter` directive used by the benchmark no
+/// longer parses.
+#[allow(
+    clippy::single_call_fn,
+    reason = "Criterion benchmark registration keeps single-threaded static log-filter cases grouped"
+)]
+fn bench_static_single_threaded(group: &mut Group<'_>) -> Result<(), BenchSetupError> {
+    let baseline = Dispatch::new(EnabledSubscriber);
+    register_benchmark(group.bench_function("baseline_single_threaded", |bencher| {
+        with_default(&baseline, || {
+            bencher.iter(|| {
                 log::info!(target: "static_filter", "hi");
                 log::debug!(target: "static_filter", "hi");
                 log::warn!(target: "static_filter", "hi");
                 log::trace!(target: "foo", "hi");
-            })
+            });
         });
-    });
-    let _bench = group.bench_function("single_threaded", |b| {
-        let filter = "static_filter=info"
-            .parse::<EnvFilter>()
-            .expect("should parse");
-        tracing::subscriber::with_default(EnabledSubscriber.with(filter), || {
-            b.iter(|| {
+    }));
+
+    let single_threaded =
+        Dispatch::new(EnabledSubscriber.with(parse_filter("static_filter=info")?));
+    register_benchmark(group.bench_function("single_threaded", |bencher| {
+        with_default(&single_threaded, || {
+            bencher.iter(|| {
                 log::info!(target: "static_filter", "hi");
                 log::debug!(target: "static_filter", "hi");
                 log::warn!(target: "static_filter", "hi");
                 log::trace!(target: "foo", "hi");
-            })
+            });
         });
-    });
-    let _bench = group.bench_function("enabled_one", |b| {
-        let filter = "static_filter=info"
-            .parse::<EnvFilter>()
-            .expect("should parse");
-        tracing::subscriber::with_default(EnabledSubscriber.with(filter), || {
-            b.iter(|| {
+    }));
+
+    let enabled_one = Dispatch::new(EnabledSubscriber.with(parse_filter("static_filter=info")?));
+    register_benchmark(group.bench_function("enabled_one", |bencher| {
+        with_default(&enabled_one, || {
+            bencher.iter(|| {
                 log::info!(target: "static_filter", "hi");
-            })
+            });
         });
-    });
-    let _bench = group.bench_function("enabled_many", |b| {
-        let filter = "foo=debug,bar=trace,baz=error,quux=warn,static_filter=info"
-            .parse::<EnvFilter>()
-            .expect("should parse");
-        tracing::subscriber::with_default(EnabledSubscriber.with(filter), || {
-            b.iter(|| {
+    }));
+
+    let enabled_many = Dispatch::new(EnabledSubscriber.with(parse_filter(
+        "foo=debug,bar=trace,baz=error,quux=warn,static_filter=info",
+    )?));
+    register_benchmark(group.bench_function("enabled_many", |bencher| {
+        with_default(&enabled_many, || {
+            bencher.iter(|| {
                 log::info!(target: "static_filter", "hi");
-            })
+            });
         });
-    });
-    let _bench = group.bench_function("disabled_level_one", |b| {
-        let filter = "static_filter=info"
-            .parse::<EnvFilter>()
-            .expect("should parse");
-        tracing::subscriber::with_default(EnabledSubscriber.with(filter), || {
-            b.iter(|| {
+    }));
+
+    let disabled_level_one =
+        Dispatch::new(EnabledSubscriber.with(parse_filter("static_filter=info")?));
+    register_benchmark(group.bench_function("disabled_level_one", |bencher| {
+        with_default(&disabled_level_one, || {
+            bencher.iter(|| {
                 log::debug!(target: "static_filter", "hi");
-            })
+            });
         });
-    });
-    let _bench = group.bench_function("disabled_level_many", |b| {
-        let filter = "foo=debug,bar=info,baz=error,quux=warn,static_filter=info"
-            .parse::<EnvFilter>()
-            .expect("should parse");
-        tracing::subscriber::with_default(EnabledSubscriber.with(filter), || {
-            b.iter(|| {
+    }));
+
+    let disabled_level_many = Dispatch::new(EnabledSubscriber.with(parse_filter(
+        "foo=debug,bar=info,baz=error,quux=warn,static_filter=info",
+    )?));
+    register_benchmark(group.bench_function("disabled_level_many", |bencher| {
+        with_default(&disabled_level_many, || {
+            bencher.iter(|| {
                 log::trace!(target: "static_filter", "hi");
-            })
+            });
         });
-    });
-    let _bench = group.bench_function("disabled_one", |b| {
-        let filter = "foo=info".parse::<EnvFilter>().expect("should parse");
-        tracing::subscriber::with_default(EnabledSubscriber.with(filter), || {
-            b.iter(|| {
+    }));
+
+    let disabled_one = Dispatch::new(EnabledSubscriber.with(parse_filter("foo=info")?));
+    register_benchmark(group.bench_function("disabled_one", |bencher| {
+        with_default(&disabled_one, || {
+            bencher.iter(|| {
                 log::info!(target: "static_filter", "hi");
-            })
+            });
         });
-    });
-    let _bench = group.bench_function("disabled_many", |b| {
-        let filter = "foo=debug,bar=trace,baz=error,quux=warn,whibble=info"
-            .parse::<EnvFilter>()
-            .expect("should parse");
-        tracing::subscriber::with_default(EnabledSubscriber.with(filter), || {
-            b.iter(|| {
+    }));
+
+    let disabled_many = Dispatch::new(EnabledSubscriber.with(parse_filter(
+        "foo=debug,bar=trace,baz=error,quux=warn,whibble=info",
+    )?));
+    register_benchmark(group.bench_function("disabled_many", |bencher| {
+        with_default(&disabled_many, || {
+            bencher.iter(|| {
                 log::info!(target: "static_filter", "hi");
-            })
+            });
         });
-    });
-    let _bench = group.bench_function("baseline_multithreaded", |b| {
+    }));
+
+    Ok(())
+}
+
+/// Registers multithreaded static filter benchmarks.
+///
+/// # Errors
+///
+/// Returns an error if any static `EnvFilter` directive used by the benchmark no
+/// longer parses.
+#[allow(
+    clippy::single_call_fn,
+    reason = "Criterion benchmark registration keeps multithreaded static log-filter cases grouped"
+)]
+fn bench_static_multithreaded(group: &mut Group<'_>) -> Result<(), BenchSetupError> {
+    register_benchmark(group.bench_function("baseline_multithreaded", |bencher| {
         let dispatch = Dispatch::new(EnabledSubscriber);
-        b.iter_custom(|iters| {
-            let mut total = Duration::from_secs(0);
+        bencher.iter_custom(|iters| {
+            let mut total = Duration::ZERO;
             for _ in 0..iters {
                 let bench = MultithreadedBench::new(dispatch.clone());
                 let elapsed = bench
@@ -149,18 +262,16 @@ fn bench_static(c: &mut Criterion) {
                         log::warn!(target: "foo", "hi");
                     })
                     .run();
-                total += elapsed;
+                total = add_elapsed(total, elapsed);
             }
             total
-        })
-    });
-    let _bench = group.bench_function("multithreaded", |b| {
-        let filter = "static_filter=info"
-            .parse::<EnvFilter>()
-            .expect("should parse");
-        let dispatch = Dispatch::new(EnabledSubscriber.with(filter));
-        b.iter_custom(|iters| {
-            let mut total = Duration::from_secs(0);
+        });
+    }));
+
+    let dispatch = Dispatch::new(EnabledSubscriber.with(parse_filter("static_filter=info")?));
+    register_benchmark(group.bench_function("multithreaded", |bencher| {
+        bencher.iter_custom(|iters| {
+            let mut total = Duration::ZERO;
             for _ in 0..iters {
                 let bench = MultithreadedBench::new(dispatch.clone());
                 let elapsed = bench
@@ -177,141 +288,181 @@ fn bench_static(c: &mut Criterion) {
                         log::warn!(target: "foo", "hi");
                     })
                     .run();
-                total += elapsed;
+                total = add_elapsed(total, elapsed);
             }
             total
         });
-    });
-    group.finish();
+    }));
+
+    Ok(())
 }
 
-fn bench_dynamic(c: &mut Criterion) {
-    let _ = tracing_log::LogTracer::init();
-
-    let mut group = c.benchmark_group("log/dynamic");
-
-    let _bench = group.bench_function("baseline_single_threaded", |b| {
-        tracing::subscriber::with_default(EnabledSubscriber, || {
-            b.iter(|| {
-                tracing::info_span!("foo").in_scope(|| {
-                    log::info!("hi");
-                    log::debug!("hi");
-                });
-                tracing::info_span!("bar").in_scope(|| {
-                    log::warn!("hi");
-                });
-                log::trace!("hi");
-            })
-        });
-    });
-    let _bench = group.bench_function("single_threaded", |b| {
-        let filter = "[foo]=trace".parse::<EnvFilter>().expect("should parse");
-        tracing::subscriber::with_default(EnabledSubscriber.with(filter), || {
-            b.iter(|| {
-                tracing::info_span!("foo").in_scope(|| {
-                    log::info!("hi");
-                    log::debug!("hi");
-                });
-                tracing::info_span!("bar").in_scope(|| {
-                    log::warn!("hi");
-                });
-                log::trace!("hi");
-            })
-        });
-    });
-    let _bench = group.bench_function("baseline_multithreaded", |b| {
-        let dispatch = Dispatch::new(EnabledSubscriber);
-        b.iter_custom(|iters| {
-            let mut total = Duration::from_secs(0);
-            for _ in 0..iters {
-                let bench = MultithreadedBench::new(dispatch.clone());
-                let elapsed = bench
-                    .thread(|| {
-                        let span = tracing::info_span!("foo");
-                        let _entered = span.enter();
+/// Benchmarks dynamic span-context filters for `log` records.
+///
+/// # Errors
+///
+/// Returns an error if any static `EnvFilter` directive used by the benchmark no
+/// longer parses.
+#[allow(
+    clippy::single_call_fn,
+    reason = "Criterion benchmark group function preserves the dynamic log-filter benchmark matrix"
+)]
+fn bench_dynamic(criterion: &mut Criterion) -> Result<(), BenchSetupError> {
+    initialize_log_tracer();
+    {
+        let mut group = criterion.benchmark_group("log/dynamic");
+        let baseline = Dispatch::new(EnabledSubscriber);
+        register_benchmark(group.bench_function("baseline_single_threaded", |bencher| {
+            with_default(&baseline, || {
+                bencher.iter(|| {
+                    tracing::info_span!("foo").in_scope(|| {
                         log::info!("hi");
-                    })
-                    .thread(|| {
-                        let span = tracing::info_span!("foo");
-                        let _entered = span.enter();
                         log::debug!("hi");
-                    })
-                    .thread(|| {
-                        let span = tracing::info_span!("bar");
-                        let _entered = span.enter();
-                        log::debug!("hi");
-                    })
-                    .thread(|| {
-                        log::trace!("hi");
-                    })
-                    .run();
-                total += elapsed;
-            }
-            total
-        })
-    });
-    let _bench = group.bench_function("multithreaded", |b| {
-        let filter = "[foo]=trace".parse::<EnvFilter>().expect("should parse");
-        let dispatch = Dispatch::new(EnabledSubscriber.with(filter));
-        b.iter_custom(|iters| {
-            let mut total = Duration::from_secs(0);
-            for _ in 0..iters {
-                let bench = MultithreadedBench::new(dispatch.clone());
-                let elapsed = bench
-                    .thread(|| {
-                        let span = tracing::info_span!("foo");
-                        let _entered = span.enter();
+                    });
+                    tracing::info_span!("bar").in_scope(|| {
+                        log::warn!("hi");
+                    });
+                    log::trace!("hi");
+                });
+            });
+        }));
+
+        let single_threaded = Dispatch::new(EnabledSubscriber.with(parse_filter("[foo]=trace")?));
+        register_benchmark(group.bench_function("single_threaded", |bencher| {
+            with_default(&single_threaded, || {
+                bencher.iter(|| {
+                    tracing::info_span!("foo").in_scope(|| {
                         log::info!("hi");
-                    })
-                    .thread(|| {
-                        let span = tracing::info_span!("foo");
-                        let _entered = span.enter();
                         log::debug!("hi");
-                    })
-                    .thread(|| {
-                        let span = tracing::info_span!("bar");
-                        let _entered = span.enter();
-                        log::debug!("hi");
-                    })
-                    .thread(|| {
-                        log::trace!("hi");
-                    })
-                    .run();
-                total += elapsed;
-            }
-            total
-        })
-    });
+                    });
+                    tracing::info_span!("bar").in_scope(|| {
+                        log::warn!("hi");
+                    });
+                    log::trace!("hi");
+                });
+            });
+        }));
+        register_benchmark(group.bench_function("baseline_multithreaded", |bencher| {
+            let dispatch = Dispatch::new(EnabledSubscriber);
+            bencher.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                for _ in 0..iters {
+                    let bench = MultithreadedBench::new(dispatch.clone());
+                    let elapsed = bench
+                        .thread(|| {
+                            let span = tracing::info_span!("foo");
+                            let _entered = span.enter();
+                            log::info!("hi");
+                        })
+                        .thread(|| {
+                            let span = tracing::info_span!("foo");
+                            let _entered = span.enter();
+                            log::debug!("hi");
+                        })
+                        .thread(|| {
+                            let span = tracing::info_span!("bar");
+                            let _entered = span.enter();
+                            log::debug!("hi");
+                        })
+                        .thread(|| {
+                            log::trace!("hi");
+                        })
+                        .run();
+                    total = add_elapsed(total, elapsed);
+                }
+                total
+            });
+        }));
 
-    group.finish();
+        let dispatch = Dispatch::new(EnabledSubscriber.with(parse_filter("[foo]=trace")?));
+        register_benchmark(group.bench_function("multithreaded", |bencher| {
+            bencher.iter_custom(|iters| {
+                let mut total = Duration::ZERO;
+                for _ in 0..iters {
+                    let bench = MultithreadedBench::new(dispatch.clone());
+                    let elapsed = bench
+                        .thread(|| {
+                            let span = tracing::info_span!("foo");
+                            let _entered = span.enter();
+                            log::info!("hi");
+                        })
+                        .thread(|| {
+                            let span = tracing::info_span!("foo");
+                            let _entered = span.enter();
+                            log::debug!("hi");
+                        })
+                        .thread(|| {
+                            let span = tracing::info_span!("bar");
+                            let _entered = span.enter();
+                            log::debug!("hi");
+                        })
+                        .thread(|| {
+                            log::trace!("hi");
+                        })
+                        .run();
+                    total = add_elapsed(total, elapsed);
+                }
+                total
+            });
+        }));
+
+        group.finish();
+    };
+    Ok(())
 }
 
-fn bench_mixed(c: &mut Criterion) {
-    let _ = tracing_log::LogTracer::init();
+/// Benchmarks mixed static and dynamic filters for `log` records.
+///
+/// # Errors
+///
+/// Returns an error if any static `EnvFilter` directive used by the benchmark no
+/// longer parses.
+#[allow(
+    clippy::single_call_fn,
+    reason = "Criterion benchmark group function preserves the mixed log-filter benchmark matrix"
+)]
+fn bench_mixed(criterion: &mut Criterion) -> Result<(), BenchSetupError> {
+    initialize_log_tracer();
+    {
+        let mut group = criterion.benchmark_group("log/mixed");
+        let disabled = Dispatch::new(EnabledSubscriber.with(parse_filter(
+            "[foo]=trace,bar[quux]=debug,[{baz}]=debug,asdf=warn,wibble=info",
+        )?));
+        register_benchmark(group.bench_function("disabled", |bencher| {
+            with_default(&disabled, || {
+                bencher.iter(|| {
+                    log::info!(target: "static_filter", "hi");
+                });
+            });
+        }));
 
-    let mut group = c.benchmark_group("log/mixed");
-
-    let _bench = group.bench_function("disabled", |b| {
-        let filter = "[foo]=trace,bar[quux]=debug,[{baz}]=debug,asdf=warn,wibble=info"
-            .parse::<EnvFilter>()
-            .expect("should parse");
-        tracing::subscriber::with_default(EnabledSubscriber.with(filter), || {
-            b.iter(|| {
-                log::info!(target: "static_filter", "hi");
-            })
-        });
-    });
-    let _bench = group.bench_function("disabled_by_level", |b| {
-        let filter = "[foo]=info,bar[quux]=debug,asdf=warn,static_filter=info"
-            .parse::<EnvFilter>()
-            .expect("should parse");
-        tracing::subscriber::with_default(EnabledSubscriber.with(filter), || {
-            b.iter(|| {
-                log::trace!(target: "static_filter", "hi");
-            })
-        });
-    });
+        let disabled_by_level = Dispatch::new(EnabledSubscriber.with(parse_filter(
+            "[foo]=info,bar[quux]=debug,asdf=warn,static_filter=info",
+        )?));
+        register_benchmark(group.bench_function("disabled_by_level", |bencher| {
+            with_default(&disabled_by_level, || {
+                bencher.iter(|| {
+                    log::trace!(target: "static_filter", "hi");
+                });
+            });
+        }));
+        group.finish();
+    };
+    Ok(())
 }
 
-criterion_group!(benches, bench_static, bench_dynamic, bench_mixed);
-criterion_main!(benches);
+/// Runs the `log` filter benchmarks.
+///
+/// # Errors
+///
+/// Returns an error if any static benchmark setup no longer succeeds.
+fn main() -> Result<(), BenchSetupError> {
+    {
+        let mut criterion = Criterion::default().configure_from_args();
+        bench_static(&mut criterion)?;
+        bench_dynamic(&mut criterion)?;
+        bench_mixed(&mut criterion)?;
+        criterion.final_summary();
+    };
+    Ok(())
+}

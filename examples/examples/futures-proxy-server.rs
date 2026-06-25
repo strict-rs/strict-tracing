@@ -21,28 +21,34 @@
 //! the echo server, and you'll be able to see data flowing between them.
 //!
 //! This example has been taken and modified from here :
-//! https://raw.githubusercontent.com/tokio-rs/tokio/master/tokio/examples/proxy.rs
+//! <https://raw.githubusercontent.com/tokio-rs/tokio/master/tokio/examples/proxy.rs>
 #![deny(rust_2018_idioms)]
 
 use argh::FromArgs;
-use futures::{future::try_join, prelude::*};
+use futures::future::{FutureExt as _, TryFutureExt as _, try_join};
+use std::error::Error as StdError;
 use std::net::SocketAddr;
-use tokio::{
-    self, io,
-    net::{TcpListener, TcpStream},
-};
-use tracing::{debug, debug_span, info, instrument, warn, Instrument as _};
+use std::str::FromStr;
+use tokio::io;
+use tokio::net::{TcpListener, TcpStream};
+use tracing::{Instrument as _, debug, debug_span, info, instrument, warn};
 
-type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+/// Error type returned by the proxy example.
+type Error = Box<dyn StdError + Send + Sync + 'static>;
 
+/// Transfer bytes between one inbound client and the configured upstream server.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps the instrumented connection transfer workflow named"
+)]
 #[instrument]
-async fn transfer(mut inbound: TcpStream, proxy_addr: SocketAddr) -> Result<(), Error> {
-    let mut outbound = TcpStream::connect(&proxy_addr).await?;
+async fn transfer(mut inbound: TcpStream, proxy_addr: &SocketAddr) -> Result<(), Error> {
+    let mut outbound = TcpStream::connect(proxy_addr).await?;
 
     let (mut ri, mut wi) = inbound.split();
     let (mut ro, mut wo) = outbound.split();
 
-    let client_to_server = io::copy(&mut ri, &mut wo)
+    let client_to_server_copy = io::copy(&mut ri, &mut wo)
         .map_ok(|bytes_copied| {
             info!(bytes_copied);
             bytes_copied
@@ -52,7 +58,7 @@ async fn transfer(mut inbound: TcpStream, proxy_addr: SocketAddr) -> Result<(), 
             error
         })
         .instrument(debug_span!("client_to_server"));
-    let server_to_client = io::copy(&mut ro, &mut wi)
+    let server_to_client_copy = io::copy(&mut ro, &mut wi)
         .map_ok(|bytes_copied| {
             info!(bytes_copied);
             bytes_copied
@@ -63,12 +69,17 @@ async fn transfer(mut inbound: TcpStream, proxy_addr: SocketAddr) -> Result<(), 
         })
         .instrument(debug_span!("server_to_client"));
 
-    let (client_to_server, server_to_client) = try_join(client_to_server, server_to_client).await?;
-    info!(client_to_server, server_to_client, "transfer completed",);
+    let (client_to_server_bytes, server_to_client_bytes) =
+        try_join(client_to_server_copy, server_to_client_copy).await?;
+    info!(
+        client_to_server_bytes,
+        server_to_client_bytes, "transfer completed",
+    );
 
     Ok(())
 }
 
+/// Command-line arguments for the proxy example.
 #[derive(Debug, FromArgs)]
 #[argh(description = "Proxy server example")]
 struct Args {
@@ -85,16 +96,29 @@ struct Args {
     server_addr: SocketAddr,
 }
 
+/// Supported tracing output formats.
 #[derive(Copy, Clone, Eq, PartialEq, Debug)]
 enum LogFormat {
+    /// Plain text logs.
     Plain,
+    /// JSON structured logs.
     Json,
 }
 
+/// Default address the proxy listens on.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps the `argh` default callback named for listen address metadata"
+)]
 fn default_listen_addr() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 8081))
 }
 
+/// Default upstream echo-server address.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps the `argh` default callback named for upstream address metadata"
+)]
 fn default_server_addr() -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], 3000))
 }
@@ -106,20 +130,21 @@ async fn main() -> Result<(), Error> {
 
     let listener = TcpListener::bind(&args.listen_addr).await?;
 
-    info!("Listening on: {}", args.listen_addr);
-    info!("Proxying to: {}", args.server_addr);
+    let listen_addr = args.listen_addr;
+    let server_addr = args.server_addr;
+    info!("Listening on: {listen_addr}");
+    info!("Proxying to: {server_addr}");
 
     loop {
-        let accepted = listener.accept().await;
-        let (inbound, client_addr) = match accepted {
-            Ok(accepted) => accepted,
-            Err(_) => break,
+        let Ok((inbound, client_addr)) = listener.accept().await else {
+            break;
         };
 
         info!(client.addr = %client_addr, "client connected");
 
-        let transfer = transfer(inbound, args.server_addr).map(|r| {
-            if let Err(err) = r {
+        let proxy_addr = server_addr;
+        let transfer = async move { transfer(inbound, &proxy_addr).await }.map(|result| {
+            if let Err(err) = result {
                 // Don't panic, maybe the client just disconnected too soon
                 debug!(error = %err);
             }
@@ -131,6 +156,11 @@ async fn main() -> Result<(), Error> {
     Ok(())
 }
 
+/// Install the global tracing subscriber for the selected output format.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps subscriber installation separate from proxy accept-loop setup"
+)]
 fn set_global_default(format: LogFormat) -> Result<(), Error> {
     let filter = tracing_subscriber::EnvFilter::from_default_env()
         .add_directive(concat!(module_path!(), "=trace").parse()?);
@@ -146,13 +176,16 @@ fn set_global_default(format: LogFormat) -> Result<(), Error> {
     Ok(())
 }
 
-impl std::str::FromStr for LogFormat {
+impl FromStr for LogFormat {
     type Err = &'static str;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim() {
-            s if s.eq_ignore_ascii_case("plain") => Ok(Self::Plain),
-            s if s.eq_ignore_ascii_case("json") => Ok(Self::Json),
-            _ => Err("expected either `plain` or `json`"),
+    fn from_str(input: &str) -> Result<Self, Self::Err> {
+        let format = input.trim();
+        if format.eq_ignore_ascii_case("plain") {
+            Ok(Self::Plain)
+        } else if format.eq_ignore_ascii_case("json") {
+            Ok(Self::Json)
+        } else {
+            Err("expected either `plain` or `json`")
         }
     }
 }

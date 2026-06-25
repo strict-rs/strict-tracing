@@ -560,24 +560,24 @@
 //! ```
 //! extern crate tracing;
 //! # pub struct FooSubscriber;
-//! # use tracing::{span::{Id, Attributes, Record}, Metadata};
+//! # use tracing::{span::{Id, Attributes, Record}, subscriber::SubscriberResult, Metadata};
 //! # impl tracing::Subscriber for FooSubscriber {
-//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(1) }
-//! #   fn record(&self, _: &Id, _: &Record) {}
-//! #   fn event(&self, _: &tracing::Event) {}
-//! #   fn record_follows_from(&self, _: &Id, _: &Id) {}
-//! #   fn enabled(&self, _: &Metadata) -> bool { false }
-//! #   fn enter(&self, _: &Id) {}
-//! #   fn exit(&self, _: &Id) {}
+//! #   fn new_span(&self, _: &Attributes) -> SubscriberResult<Id> { Ok(Id::from_non_zero_u64(core::num::NonZeroU64::MIN)) }
+//! #   fn record(&self, _: Id, _: &Record) -> SubscriberResult { Ok(()) }
+//! #   fn event(&self, _: &tracing::Event) -> SubscriberResult { Ok(()) }
+//! #   fn record_follows_from(&self, _: Id, _: Id) -> SubscriberResult { Ok(()) }
+//! #   fn enabled(&self, _: &Metadata) -> SubscriberResult<bool> { Ok(false) }
+//! #   fn enter(&self, _: Id) -> SubscriberResult { Ok(()) }
+//! #   fn exit(&self, _: Id) -> SubscriberResult { Ok(()) }
 //! # }
 //! # impl FooSubscriber {
 //! #   fn new() -> Self { FooSubscriber }
 //! # }
-//! # fn main() {
+//! # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 //!
 //! let my_subscriber = FooSubscriber::new();
-//! tracing::subscriber::set_global_default(my_subscriber)
-//!     .expect("setting tracing default failed");
+//! tracing::subscriber::set_global_default(my_subscriber)?;
+//! # Ok(())
 //! # }
 //! ```
 //!
@@ -598,15 +598,15 @@
 //!
 //! ```rust
 //! # pub struct FooSubscriber;
-//! # use tracing::{span::{Id, Attributes, Record}, Metadata};
+//! # use tracing::{span::{Id, Attributes, Record}, subscriber::SubscriberResult, Metadata};
 //! # impl tracing::Subscriber for FooSubscriber {
-//! #   fn new_span(&self, _: &Attributes) -> Id { Id::from_u64(1) }
-//! #   fn record(&self, _: &Id, _: &Record) {}
-//! #   fn event(&self, _: &tracing::Event) {}
-//! #   fn record_follows_from(&self, _: &Id, _: &Id) {}
-//! #   fn enabled(&self, _: &Metadata) -> bool { false }
-//! #   fn enter(&self, _: &Id) {}
-//! #   fn exit(&self, _: &Id) {}
+//! #   fn new_span(&self, _: &Attributes) -> SubscriberResult<Id> { Ok(Id::from_non_zero_u64(core::num::NonZeroU64::MIN)) }
+//! #   fn record(&self, _: Id, _: &Record) -> SubscriberResult { Ok(()) }
+//! #   fn event(&self, _: &tracing::Event) -> SubscriberResult { Ok(()) }
+//! #   fn record_follows_from(&self, _: Id, _: Id) -> SubscriberResult { Ok(()) }
+//! #   fn enabled(&self, _: &Metadata) -> SubscriberResult<bool> { Ok(false) }
+//! #   fn enter(&self, _: Id) -> SubscriberResult { Ok(()) }
+//! #   fn exit(&self, _: Id) -> SubscriberResult { Ok(()) }
 //! # }
 //! # impl FooSubscriber {
 //! #   fn new() -> Self { FooSubscriber }
@@ -924,11 +924,6 @@
 #[cfg(feature = "std")]
 extern crate std;
 
-// Somehow this `use` statement is necessary for us to re-export the `core`
-// macros on Rust 1.26.0. I'm not sure how this makes it work, but it does.
-#[doc(hidden)]
-use tracing_core::*;
-
 #[doc(inline)]
 pub use self::instrument::Instrument;
 pub use self::{dispatcher::Dispatch, event::Event, field::Value, subscriber::Subscriber};
@@ -976,7 +971,14 @@ pub mod __macro_support {
     // Re-export the `core` functions that are used in macros. This allows
     // a crate to be named `core` and avoid name clashes.
     // See here: https://github.com/tokio-rs/tracing/issues/2761
-    pub use core::{concat, file, format_args, iter::Iterator, line, option::Option, stringify};
+    pub use core::{
+        concat, file, format_args,
+        iter::Iterator,
+        line,
+        option::Option,
+        result::Result::{Err, Ok},
+        stringify,
+    };
 
     /// Callsite implementation used by macro-generated code.
     ///
@@ -989,16 +991,19 @@ pub mod __macro_support {
     pub use tracing_core::callsite::DefaultCallsite as MacroCallsite;
 
     /// /!\ WARNING: This is *not* a stable API! /!\
+    ///
     /// This function, and all code contained in the `__macro_support` module, is
     /// a *private* API of `tracing`. It is exposed publicly because it is used
     /// by the `tracing` macros, but it is not part of the stable versioned API.
     /// Breaking changes to this module may occur in small-numbered versions
     /// without warning.
+    #[must_use]
     pub fn __is_enabled(meta: &Metadata<'static>, interest: Interest) -> bool {
-        interest.is_always() || get_default(|default| default.enabled(meta))
+        interest.is_always() || get_default(|default| default.enabled(meta).unwrap_or_default())
     }
 
     /// /!\ WARNING: This is *not* a stable API! /!\
+    ///
     /// This function, and all code contained in the `__macro_support` module, is
     /// a *private* API of `tracing`. It is exposed publicly because it is used
     /// by the `tracing` macros, but it is not part of the stable versioned API.
@@ -1006,11 +1011,13 @@ pub mod __macro_support {
     /// without warning.
     #[inline]
     #[cfg(feature = "log")]
-    pub fn __disabled_span(meta: &'static Metadata<'static>) -> Span {
+    #[must_use]
+    pub const fn __disabled_span(meta: &'static Metadata<'static>) -> Span {
         Span::new_disabled(meta)
     }
 
     /// /!\ WARNING: This is *not* a stable API! /!\
+    ///
     /// This function, and all code contained in the `__macro_support` module, is
     /// a *private* API of `tracing`. It is exposed publicly because it is used
     /// by the `tracing` macros, but it is not part of the stable versioned API.
@@ -1018,11 +1025,13 @@ pub mod __macro_support {
     /// without warning.
     #[inline]
     #[cfg(not(feature = "log"))]
-    pub fn __disabled_span(_: &'static Metadata<'static>) -> Span {
+    #[must_use]
+    pub const fn __disabled_span(_: &'static Metadata<'static>) -> Span {
         Span::none()
     }
 
     /// /!\ WARNING: This is *not* a stable API! /!\
+    ///
     /// This function, and all code contained in the `__macro_support` module, is
     /// a *private* API of `tracing`. It is exposed publicly because it is used
     /// by the `tracing` macros, but it is not part of the stable versioned API.
@@ -1052,33 +1061,43 @@ pub mod __macro_support {
         );
     }
 
-    /// Implementation detail used for constructing FieldSet names from raw
+    /// Implementation detail used for constructing `FieldSet` names from raw
     /// identifiers. In `info!(..., r#type = "...")` the macro would end up
     /// constructing a name equivalent to `FieldName(*b"type")`.
     pub struct FieldName<const N: usize>([u8; N]);
 
     impl<const N: usize> FieldName<N> {
         /// Convert `"prefix.r#keyword.suffix"` to `b"prefix.keyword.suffix"`.
+        #[must_use]
         pub const fn new(input: &str) -> Self {
-            let input = input.as_bytes();
+            let mut input_remaining = input.as_bytes();
             let mut output = [0_u8; N];
-            let mut read = 0;
-            let mut write = 0;
-            while read < input.len() {
-                if read + 1 < input.len() && input[read] == b'r' && input[read + 1] == b'#' {
-                    read += 2;
+            let mut output_remaining: &mut [u8] = &mut output;
+
+            while let &[first, ref rest @ ..] = input_remaining {
+                if let &[b'r', b'#', ref after_marker @ ..] = input_remaining {
+                    input_remaining = after_marker;
+                    continue;
                 }
-                output[write] = input[read];
-                read += 1;
-                write += 1;
+
+                input_remaining = rest;
+                match *output_remaining {
+                    [ref mut slot, ref mut output_rest @ ..] => {
+                        *slot = first;
+                        output_remaining = output_rest;
+                    }
+                    [] => return Self(output),
+                }
             }
-            assert!(
-                write == N,
-                "raw field name length must match the output buffer"
-            );
-            Self(output)
+
+            if output_remaining.is_empty() {
+                Self(output)
+            } else {
+                Self([0_u8; N])
+            }
         }
 
+        #[must_use]
         pub const fn as_str(&self) -> &str {
             match str::from_utf8(self.0.as_slice()) {
                 Ok(name) => name,
@@ -1089,19 +1108,24 @@ pub mod __macro_support {
 
     impl FieldName<0> {
         /// For `"prefix.r#keyword.suffix"` compute `"prefix.keyword.suffix".len()`.
+        #[must_use]
         pub const fn len(input: &str) -> usize {
-            // Count occurrences of "r#"
-            let mut raw = 0;
+            let mut input_remaining = input.as_bytes();
+            let mut len = 0_usize;
 
-            let mut i = 0;
-            while i < input.len() {
-                if input.as_bytes()[i] == b'#' {
-                    raw += 1;
+            while let &[_, ref rest @ ..] = input_remaining {
+                if let &[b'r', b'#', ref after_marker @ ..] = input_remaining {
+                    input_remaining = after_marker;
+                } else {
+                    input_remaining = rest;
+                    len = match len.checked_add(1) {
+                        Some(next) => next,
+                        None => return 0,
+                    };
                 }
-                i += 1;
             }
 
-            input.len() - 2 * raw
+            len
         }
     }
 
@@ -1154,12 +1178,19 @@ pub mod log {
                     let res = if self.is_first {
                         self.is_first = false;
                         if field.name() == "message" {
-                            write!(self.f, "{:?}", value)
+                            fmt::Debug::fmt(value, self.f)
                         } else {
-                            write!(self.f, "{}={:?}", field.name(), value)
+                            self.f
+                                .write_str(field.name())
+                                .and_then(|()| self.f.write_str("="))
+                                .and_then(|()| fmt::Debug::fmt(value, self.f))
                         }
                     } else {
-                        write!(self.f, " {}={:?}", field.name(), value)
+                        self.f
+                            .write_str(" ")
+                            .and_then(|()| self.f.write_str(field.name()))
+                            .and_then(|()| self.f.write_str("="))
+                            .and_then(|()| fmt::Debug::fmt(value, self.f))
                     };
                     if let Err(err) = res {
                         self.result = self.result.and(Err(err));
@@ -1168,9 +1199,9 @@ pub mod log {
 
                 fn record_str(&mut self, field: &Field, value: &str) {
                     if field.name() == "message" {
-                        self.record_debug(field, &format_args!("{}", value))
+                        self.record_debug(field, &format_args!("{value}"));
                     } else {
-                        self.record_debug(field, &value)
+                        self.record_debug(field, &value);
                     }
                 }
             }

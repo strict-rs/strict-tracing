@@ -1,25 +1,38 @@
 use crate::Msg;
 use crossbeam_channel::{Receiver, RecvError, TryRecvError};
-use std::fmt::Debug;
 use std::io::Write;
 use std::{io, thread};
 
-pub(crate) struct Worker<T: Write + Send + 'static> {
+/// Background writer that drains queued log lines into an inner writer.
+pub(super) struct Worker<T: Write + Send + 'static> {
+    /// Destination writer receiving log lines from the queue.
     writer: T,
+    /// Receiver for queued log lines and shutdown messages.
     receiver: Receiver<Msg>,
+    /// Zero-capacity channel used to acknowledge shutdown completion.
     shutdown: Receiver<()>,
 }
 
+/// Result of one worker receive/drain step.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum WorkerState {
+enum WorkerState {
+    /// No more messages are currently buffered.
     Empty,
+    /// All senders have disconnected.
     Disconnected,
+    /// A log line was written and more messages may be available.
     Continue,
+    /// A shutdown message was received.
     Shutdown,
 }
 
 impl<T: Write + Send + 'static> Worker<T> {
-    pub(crate) fn new(receiver: Receiver<Msg>, writer: T, shutdown: Receiver<()>) -> Worker<T> {
+    /// Creates a worker around the queue receiver, destination writer, and shutdown channel.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "constructor keeps worker channel ownership private while non_blocking wires thread startup"
+    )]
+    pub(super) const fn new(receiver: Receiver<Msg>, writer: T, shutdown: Receiver<()>) -> Self {
         Self {
             writer,
             receiver,
@@ -27,21 +40,23 @@ impl<T: Write + Send + 'static> Worker<T> {
         }
     }
 
-    fn handle_recv(&mut self, result: &Result<Msg, RecvError>) -> io::Result<WorkerState> {
+    /// Handles the blocking receive that starts a batch.
+    fn handle_recv(&mut self, result: Result<Msg, RecvError>) -> io::Result<WorkerState> {
         match result {
             Ok(Msg::Line(msg)) => {
-                self.writer.write_all(msg)?;
+                self.writer.write_all(&msg)?;
                 Ok(WorkerState::Continue)
             }
             Ok(Msg::Shutdown) => Ok(WorkerState::Shutdown),
-            Err(_) => Ok(WorkerState::Disconnected),
+            Err(_error) => Ok(WorkerState::Disconnected),
         }
     }
 
-    fn handle_try_recv(&mut self, result: &Result<Msg, TryRecvError>) -> io::Result<WorkerState> {
+    /// Handles non-blocking receives that drain the rest of a batch.
+    fn handle_try_recv(&mut self, result: Result<Msg, TryRecvError>) -> io::Result<WorkerState> {
         match result {
             Ok(Msg::Line(msg)) => {
-                self.writer.write_all(msg)?;
+                self.writer.write_all(&msg)?;
                 Ok(WorkerState::Continue)
             }
             Ok(Msg::Shutdown) => Ok(WorkerState::Shutdown),
@@ -53,40 +68,36 @@ impl<T: Write + Send + 'static> Worker<T> {
     /// Blocks on the first recv of each batch of logs, unless the
     /// channel is disconnected. Afterwards, grabs as many logs as
     /// it can off the channel, buffers them and attempts a flush.
-    pub(crate) fn work(&mut self) -> io::Result<WorkerState> {
+    fn work(&mut self) -> io::Result<WorkerState> {
         // Worker thread yields here if receive buffer is empty
-        let mut worker_state = self.handle_recv(&self.receiver.recv())?;
+        let mut worker_state = self.handle_recv(self.receiver.recv())?;
 
         while worker_state == WorkerState::Continue {
-            let try_recv_result = self.receiver.try_recv();
-            let handle_result = self.handle_try_recv(&try_recv_result);
-            worker_state = handle_result?;
+            worker_state = self.handle_try_recv(self.receiver.try_recv())?;
         }
         self.writer.flush()?;
         Ok(worker_state)
     }
 
     /// Creates a worker thread that processes a channel until it's disconnected
-    pub(crate) fn worker_thread(mut self, name: String) -> thread::JoinHandle<()> {
-        thread::Builder::new()
-            .name(name)
-            .spawn(move || {
-                loop {
-                    match self.work() {
-                        Ok(WorkerState::Continue) | Ok(WorkerState::Empty) => {}
-                        Ok(WorkerState::Shutdown) | Ok(WorkerState::Disconnected) => {
-                            let _ = self.shutdown.recv();
-                            break;
-                        }
-                        Err(_) => {
-                            // TODO: Expose a metric for IO Errors, or print to stderr
-                        }
+    ///
+    /// # Errors
+    ///
+    /// Returns the thread-spawn error if the operating system refuses to create
+    /// the background worker thread.
+    pub(super) fn worker_thread(mut self, name: String) -> io::Result<thread::JoinHandle<()>> {
+        thread::Builder::new().name(name).spawn(move || {
+            loop {
+                match self.work() {
+                    Ok(WorkerState::Continue | WorkerState::Empty) => {}
+                    Ok(WorkerState::Shutdown | WorkerState::Disconnected) => {
+                        let _shutdown_ack: Result<(), RecvError> = self.shutdown.recv();
+                        break;
                     }
+                    Err(_error) => {}
                 }
-                if let Err(e) = self.writer.flush() {
-                    eprintln!("Failed to flush. Error: {}", e);
-                }
-            })
-            .expect("failed to spawn `tracing-appender` non-blocking worker thread")
+            }
+            let _flush_result = self.writer.flush();
+        })
     }
 }

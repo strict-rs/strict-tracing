@@ -1,67 +1,18 @@
 //! Tests interest caching across multiple layer filters.
 #![cfg(feature = "registry")]
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
-use tracing::{Level, Subscriber};
-use tracing_mock::{expect, layer};
-use tracing_subscriber::{filter, prelude::*};
 
-#[test]
-fn multiple_layer_filter_interests_are_cached() {
-    // This layer will return Interest::always for INFO and lower.
-    let seen_info = Arc::new(Mutex::new(HashMap::new()));
-    let seen_info2 = seen_info.clone();
-    let filter = filter::filter_fn(move |meta| {
-        *seen_info
-            .lock()
-            .unwrap()
-            .entry(*meta.level())
-            .or_insert(0_usize) += 1;
-        meta.level() <= &Level::INFO
-    });
-    let seen_info = seen_info2;
+#[cfg(test)]
+mod tests {
+    use parking_lot::Mutex;
+    use std::{collections::BTreeMap, sync::Arc};
 
-    let (info_layer, info_handle) = layer::named("info")
-        .event(expect::event().at_level(Level::INFO))
-        .event(expect::event().at_level(Level::WARN))
-        .event(expect::event().at_level(Level::ERROR))
-        .event(expect::event().at_level(Level::INFO))
-        .event(expect::event().at_level(Level::WARN))
-        .event(expect::event().at_level(Level::ERROR))
-        .only()
-        .run_with_handle();
-    let info_layer = info_layer.with_filter(filter);
+    use strict_test_support::{TestFailure, ensure, ensure_ok};
+    use tracing::subscriber::set_default;
+    use tracing::{Level, Subscriber as _};
+    use tracing_mock::{expect, layer};
+    use tracing_subscriber::{filter, prelude::*};
 
-    // This layer will return Interest::always for WARN and lower.
-    let seen_warn = Arc::new(Mutex::new(HashMap::new()));
-    let seen_warn2 = seen_warn.clone();
-    let filter = filter::filter_fn(move |meta| {
-        *seen_warn
-            .lock()
-            .unwrap()
-            .entry(*meta.level())
-            .or_insert(0_usize) += 1;
-        meta.level() <= &Level::WARN
-    });
-    let seen_warn = seen_warn2;
-
-    let (warn_layer, warn_handle) = layer::named("warn")
-        .event(expect::event().at_level(Level::WARN))
-        .event(expect::event().at_level(Level::ERROR))
-        .event(expect::event().at_level(Level::WARN))
-        .event(expect::event().at_level(Level::ERROR))
-        .only()
-        .run_with_handle();
-    let warn_layer = warn_layer.with_filter(filter);
-
-    let subscriber = tracing_subscriber::registry()
-        .with(warn_layer)
-        .with(info_layer);
-    assert!(subscriber.max_level_hint().is_none());
-
-    let _subscriber = tracing::subscriber::set_default(subscriber);
+    type SeenLevels = Arc<Mutex<BTreeMap<Level, usize>>>;
 
     fn events() {
         tracing::trace!("hello trace");
@@ -71,60 +22,92 @@ fn multiple_layer_filter_interests_are_cached() {
         tracing::error!("hello error");
     }
 
-    events();
-    {
-        let lock = seen_info.lock().unwrap();
-        for (&level, &count) in lock.iter() {
-            if level == Level::INFO {
-                continue;
-            }
-            assert_eq!(
-                count, 1,
-                "level {:?} should have been seen 1 time by the INFO layer (after first set of events)",
-                level
-            );
-        }
-
-        let lock = seen_warn.lock().unwrap();
-        for (&level, &count) in lock.iter() {
-            if level == Level::INFO {
-                continue;
-            }
-            assert_eq!(
-                count, 1,
-                "level {:?} should have been seen 1 time by the WARN layer (after first set of events)",
-                level
-            );
-        }
+    fn increment_seen_level(seen: &SeenLevels, level: Level) {
+        let mut seen_levels = seen.lock();
+        let count = seen_levels.entry(level).or_insert(0);
+        *count = count.saturating_add(1);
+        drop(seen_levels);
     }
 
-    events();
-    {
-        let lock = seen_info.lock().unwrap();
-        for (&level, &count) in lock.iter() {
-            if level == Level::INFO {
-                continue;
-            }
-            assert_eq!(
-                count, 1,
-                "level {:?} should have been seen 1 time by the INFO layer (after second set of events)",
-                level
-            );
-        }
-
-        let lock = seen_warn.lock().unwrap();
-        for (&level, &count) in lock.iter() {
-            if level == Level::INFO {
-                continue;
-            }
-            assert_eq!(
-                count, 1,
-                "level {:?} should have been seen 1 time by the WARN layer (after second set of events)",
-                level
-            );
-        }
+    fn ensure_cached_counts(seen: &SeenLevels, context: &'static str) -> Result<(), TestFailure> {
+        let seen_levels = seen.lock();
+        ensure(
+            seen_levels
+                .iter()
+                .filter(|entry| *entry.0 != Level::INFO)
+                .all(|entry| *entry.1 == 1),
+            context,
+        )
     }
 
-    info_handle.assert_finished();
-    warn_handle.assert_finished();
+    #[test]
+    fn multiple_layer_filter_interests_are_cached() -> Result<(), TestFailure> {
+        let seen_info = Arc::new(Mutex::new(BTreeMap::new()));
+        let seen_info_filter = Arc::clone(&seen_info);
+        let info_filter = filter::filter_fn(move |meta| {
+            increment_seen_level(&seen_info_filter, *meta.level());
+            meta.level() <= &Level::INFO
+        });
+
+        let (raw_info_layer, info_handle) = layer::named("info")
+            .event(expect::event().at_level(Level::INFO))
+            .event(expect::event().at_level(Level::WARN))
+            .event(expect::event().at_level(Level::ERROR))
+            .event(expect::event().at_level(Level::INFO))
+            .event(expect::event().at_level(Level::WARN))
+            .event(expect::event().at_level(Level::ERROR))
+            .only()
+            .run_with_handle();
+        let info_layer = raw_info_layer.with_filter(info_filter);
+
+        let seen_warn = Arc::new(Mutex::new(BTreeMap::new()));
+        let seen_warn_filter = Arc::clone(&seen_warn);
+        let warn_filter = filter::filter_fn(move |meta| {
+            increment_seen_level(&seen_warn_filter, *meta.level());
+            meta.level() <= &Level::WARN
+        });
+
+        let (raw_warn_layer, warn_handle) = layer::named("warn")
+            .event(expect::event().at_level(Level::WARN))
+            .event(expect::event().at_level(Level::ERROR))
+            .event(expect::event().at_level(Level::WARN))
+            .event(expect::event().at_level(Level::ERROR))
+            .only()
+            .run_with_handle();
+        let warn_layer = raw_warn_layer.with_filter(warn_filter);
+
+        let subscriber = tracing_subscriber::registry()
+            .with(warn_layer)
+            .with(info_layer);
+        ensure(
+            subscriber.max_level_hint().is_none(),
+            "combined dynamic filters do not provide a max level hint",
+        )?;
+
+        let _subscriber = set_default(subscriber);
+
+        events();
+        ensure_cached_counts(
+            &seen_info,
+            "INFO layer interests are cached after first event set",
+        )?;
+        ensure_cached_counts(
+            &seen_warn,
+            "WARN layer interests are cached after first event set",
+        )?;
+
+        events();
+        ensure_cached_counts(
+            &seen_info,
+            "INFO layer interests remain cached after second event set",
+        )?;
+        ensure_cached_counts(
+            &seen_warn,
+            "WARN layer interests remain cached after second event set",
+        )?;
+
+        ensure_ok(info_handle.finished(), "mock expectations should finish")?;
+        ensure_ok(warn_handle.finished(), "mock expectations should finish")?;
+        Ok(())
+    }
 }

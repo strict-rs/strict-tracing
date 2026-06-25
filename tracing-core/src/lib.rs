@@ -255,12 +255,19 @@ pub mod dispatcher;
 pub mod event;
 pub mod field;
 pub mod metadata;
-/// Shared parent relationship state for spans and events.
-pub(crate) mod parent;
 pub mod span;
 pub mod subscriber;
-/// Synchronization primitives selected for `std` and `no_std` builds.
-pub(crate) mod sync;
+
+/// Parent relationship requested for a new span or event.
+#[derive(Debug)]
+enum Parent {
+    /// The new span will be a root span.
+    Root,
+    /// The new span will be rooted in the current span.
+    Current,
+    /// The new span has an explicitly-specified parent.
+    Explicit(span::Id),
+}
 
 #[doc(inline)]
 pub use self::{
@@ -269,7 +276,7 @@ pub use self::{
     event::Event,
     field::Field,
     metadata::{Level, LevelFilter, Metadata},
-    subscriber::Subscriber,
+    subscriber::{Subscriber, SubscriberError, SubscriberResult},
 };
 
 pub use self::{metadata::Kind, subscriber::Interest};

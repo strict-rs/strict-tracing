@@ -6,6 +6,7 @@ use std::{
     thread::{self, JoinHandle},
     time::Instant,
 };
+use tracing::subscriber::with_default;
 use tracing::{Level, event};
 use tracing_appender::non_blocking;
 use tracing_subscriber::fmt::MakeWriter;
@@ -13,16 +14,18 @@ use tracing_subscriber::fmt::MakeWriter;
 // a no-op writer is used in order to measure the overhead incurred by
 // tracing-subscriber.
 #[derive(Clone)]
+/// A writer that accepts all bytes without storing them.
 struct NoOpWriter;
 
 impl NoOpWriter {
-    fn new() -> NoOpWriter {
-        NoOpWriter
+    /// Creates a writer for tracing overhead benchmarks.
+    const fn new() -> Self {
+        Self
     }
 }
 
 impl MakeWriter<'_> for NoOpWriter {
-    type Writer = NoOpWriter;
+    type Writer = Self;
 
     fn make_writer(&self) -> Self::Writer {
         self.clone()
@@ -39,17 +42,22 @@ impl Write for NoOpWriter {
     }
 }
 
-fn synchronous_benchmark(c: &mut Criterion) {
-    let mut group = c.benchmark_group("synchronous");
-    let _benchmark = group.bench_function("single_thread", |b| {
+/// Registers synchronous writer benchmarks.
+#[allow(
+    clippy::single_call_fn,
+    reason = "Criterion macro registration requires named benchmark functions"
+)]
+fn synchronous_benchmark(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("synchronous");
+    let _single_thread_benchmark = group.bench_function("single_thread", |bencher| {
         let subscriber = tracing_subscriber::fmt().with_writer(NoOpWriter::new());
-        tracing::subscriber::with_default(subscriber.finish(), || {
-            b.iter(|| event!(Level::INFO, "event"))
+        with_default(subscriber.finish(), || {
+            bencher.iter(|| event!(Level::INFO, "event"));
         });
     });
 
-    let _benchmark = group.bench_function("multiple_writers", |b| {
-        b.iter_custom(|iters| {
+    let _multiple_writers_benchmark = group.bench_function("multiple_writers", |bencher| {
+        bencher.iter_custom(|iters| {
             let mut handles: Vec<JoinHandle<()>> = Vec::new();
 
             let start = Instant::now();
@@ -59,7 +67,7 @@ fn synchronous_benchmark(c: &mut Criterion) {
 
             handles.push(thread::spawn(move || {
                 let subscriber = tracing_subscriber::fmt().with_writer(make_writer);
-                tracing::subscriber::with_default(subscriber.finish(), || {
+                with_default(subscriber.finish(), || {
                     for _ in 0..iters {
                         event!(Level::INFO, "event");
                     }
@@ -68,7 +76,7 @@ fn synchronous_benchmark(c: &mut Criterion) {
 
             handles.push(thread::spawn(move || {
                 let subscriber = tracing_subscriber::fmt().with_writer(cloned_make_writer);
-                tracing::subscriber::with_default(subscriber.finish(), || {
+                with_default(subscriber.finish(), || {
                     for _ in 0..iters {
                         event!(Level::INFO, "event");
                     }
@@ -84,20 +92,25 @@ fn synchronous_benchmark(c: &mut Criterion) {
     });
 }
 
-fn non_blocking_benchmark(c: &mut Criterion) {
-    let mut group = c.benchmark_group("non_blocking");
+/// Registers non-blocking writer benchmarks.
+#[allow(
+    clippy::single_call_fn,
+    reason = "Criterion macro registration requires named benchmark functions"
+)]
+fn non_blocking_benchmark(criterion: &mut Criterion) {
+    let mut group = criterion.benchmark_group("non_blocking");
 
-    let _benchmark = group.bench_function("single_thread", |b| {
+    let _single_thread_benchmark = group.bench_function("single_thread", |bencher| {
         let (non_blocking, _guard) = non_blocking(NoOpWriter::new());
         let subscriber = tracing_subscriber::fmt().with_writer(non_blocking);
 
-        tracing::subscriber::with_default(subscriber.finish(), || {
-            b.iter(|| event!(Level::INFO, "event"))
+        with_default(subscriber.finish(), || {
+            bencher.iter(|| event!(Level::INFO, "event"));
         });
     });
 
-    let _benchmark = group.bench_function("multiple_writers", |b| {
-        b.iter_custom(|iters| {
+    let _multiple_writers_benchmark = group.bench_function("multiple_writers", |bencher| {
+        bencher.iter_custom(|iters| {
             let (non_blocking, _guard) = non_blocking(NoOpWriter::new());
 
             let mut handles: Vec<JoinHandle<()>> = Vec::new();
@@ -108,7 +121,7 @@ fn non_blocking_benchmark(c: &mut Criterion) {
 
             handles.push(thread::spawn(move || {
                 let subscriber = tracing_subscriber::fmt().with_writer(non_blocking);
-                tracing::subscriber::with_default(subscriber.finish(), || {
+                with_default(subscriber.finish(), || {
                     for _ in 0..iters {
                         event!(Level::INFO, "event");
                     }
@@ -117,7 +130,7 @@ fn non_blocking_benchmark(c: &mut Criterion) {
 
             handles.push(thread::spawn(move || {
                 let subscriber = tracing_subscriber::fmt().with_writer(cloned_make_writer);
-                tracing::subscriber::with_default(subscriber.finish(), || {
+                with_default(subscriber.finish(), || {
                     for _ in 0..iters {
                         event!(Level::INFO, "event");
                     }

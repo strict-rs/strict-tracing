@@ -2,7 +2,7 @@
 name = "tracing-examples"
 version = "0.0.0"
 publish = false
-edition = "2018"
+edition.workspace = true
 rust-version.workspace = true
 
 [features]
@@ -55,6 +55,7 @@ thiserror = { workspace = true }
 ansi-to-tui = { workspace = true }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
+parking_lot = { workspace = true }
 ratatui-textarea = { workspace = true }
 
 # valuable examples

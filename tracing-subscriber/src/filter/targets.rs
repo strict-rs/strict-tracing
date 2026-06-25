@@ -13,14 +13,17 @@ use crate::{
     },
     layer,
 };
-use alloc::string::String;
+use alloc::{string::String, vec::Vec};
 use core::{
     fmt,
     iter::{Extend, FilterMap, FromIterator},
     slice,
     str::FromStr,
 };
-use tracing_core::{Interest, Level, Metadata, Subscriber};
+use tracing_core::{
+    Level, Metadata,
+    subscriber::{Interest, Subscriber, SubscriberResult},
+};
 
 /// A filter that enables or disables spans and events based on their [target]
 /// and [level].
@@ -59,6 +62,7 @@ use tracing_core::{Interest, Level, Metadata, Subscriber};
 /// use tracing_subscriber::{filter, prelude::*};
 /// use tracing_core::Level;
 ///
+/// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 /// let filter = filter::Targets::new()
 ///     // Enable the `INFO` level for anything in `my_crate`
 ///     .with_target("my_crate", Level::INFO)
@@ -70,7 +74,8 @@ use tracing_core::{Interest, Level, Metadata, Subscriber};
 /// tracing_subscriber::registry()
 ///     .with(tracing_subscriber::fmt::layer())
 ///     .with(filter)
-///     .init();
+///     .try_init()?;
+/// # Ok(()) }
 /// ```
 ///
 /// [`LevelFilter::OFF`] can be used to disable a particular target:
@@ -97,13 +102,13 @@ use tracing_core::{Interest, Level, Metadata, Subscriber};
 ///     .parse::<filter::Targets>()?;
 ///
 /// // The parsed filter is identical to a filter constructed using `with_target`:
-/// assert_eq!(
-///     filter,
-///     filter::Targets::new()
-///         .with_target("my_crate", Level::INFO)
-///         .with_target("my_crate::interesting_module", Level::TRACE)
-///         .with_target("other_crate", Level::DEBUG)
-/// );
+/// let expected = filter::Targets::new()
+///     .with_target("my_crate", Level::INFO)
+///     .with_target("my_crate::interesting_module", Level::TRACE)
+///     .with_target("other_crate", Level::DEBUG);
+/// if filter != expected {
+///     return Err("parsed targets should match the builder form".into());
+/// }
 /// # Ok(()) }
 /// ```
 ///
@@ -155,7 +160,7 @@ use tracing_core::{Interest, Level, Metadata, Subscriber};
 ///             .with_target("other_crate", Level::INFO)
 ///             .with_target("other_crate::annoying_module", LevelFilter::OFF)
 ///             .with_target("third_crate", Level::DEBUG)
-///     ).init();
+///     ).try_init()?;
 /// # Ok(()) }
 ///```
 ///
@@ -181,6 +186,7 @@ impl Targets {
     /// [`with_target`]: Targets::with_target
     /// [`with_targets`]: Targets::with_targets
     /// [`with_default`]: Targets::with_default
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
@@ -215,10 +221,11 @@ impl Targets {
     /// ```
     ///
     /// [target]: tracing_core::Metadata::target
+    #[must_use]
     pub fn with_target(mut self, target: impl Into<String>, level: impl Into<LevelFilter>) -> Self {
         self.0.add(StaticDirective::new(
             Some(target.into()),
-            Default::default(),
+            Vec::default(),
             level.into(),
         ));
         self
@@ -254,6 +261,7 @@ impl Targets {
     /// ```
     ///
     /// [target]: tracing_core::Metadata::target
+    #[must_use]
     pub fn with_targets<T, L>(mut self, targets: impl IntoIterator<Item = (T, L)>) -> Self
     where
         String: From<T>,
@@ -271,9 +279,10 @@ impl Targets {
     /// prefixes. If this is changed to a different [`LevelFilter`], spans and
     /// events with targets that did not match any of the configured prefixes
     /// will be enabled if their level is at or below the provided level.
+    #[must_use]
     pub fn with_default(mut self, level: impl Into<LevelFilter>) -> Self {
         self.0
-            .add(StaticDirective::new(None, Default::default(), level.into()));
+            .add(StaticDirective::new(None, Vec::default(), level.into()));
         self
     }
 
@@ -292,10 +301,15 @@ impl Targets {
     /// use tracing_subscriber::filter::{LevelFilter, Targets};
     ///
     /// let filter = Targets::new().with_default(LevelFilter::INFO);
-    /// assert_eq!(filter.default_level(), Some(LevelFilter::INFO));
+    /// if filter.default_level() != Some(LevelFilter::INFO) {
+    ///     return Err("default level should be INFO".into());
+    /// }
     ///
-    /// let filter: Targets = "info".parse().unwrap();
-    /// assert_eq!(filter.default_level(), Some(LevelFilter::INFO));
+    /// let filter: Targets = "info".parse()?;
+    /// if filter.default_level() != Some(LevelFilter::INFO) {
+    ///     return Err("parsed default level should be INFO".into());
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
     /// The default level is `None` if no default is set:
@@ -304,10 +318,15 @@ impl Targets {
     /// use tracing_subscriber::filter::Targets;
     ///
     /// let filter = Targets::new();
-    /// assert_eq!(filter.default_level(), None);
+    /// if filter.default_level().is_some() {
+    ///     return Err("unset default level should be None".into());
+    /// }
     ///
-    /// let filter: Targets = "my_crate=info".parse().unwrap();
-    /// assert_eq!(filter.default_level(), None);
+    /// let filter: Targets = "my_crate=info".parse()?;
+    /// if filter.default_level().is_some() {
+    ///     return Err("target-specific directives should not set a default level".into());
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
     /// Note that an unset default level (`None`) behaves like [`LevelFilter::OFF`] when the filter is
@@ -318,19 +337,21 @@ impl Targets {
     /// use tracing_subscriber::filter::{LevelFilter, Targets};
     ///
     /// let filter = Targets::new().with_default(LevelFilter::OFF);
-    /// assert_eq!(filter.default_level(), Some(LevelFilter::OFF));
+    /// if filter.default_level() != Some(LevelFilter::OFF) {
+    ///     return Err("default level should be OFF".into());
+    /// }
     ///
-    /// let filter: Targets = "off".parse().unwrap();
-    /// assert_eq!(filter.default_level(), Some(LevelFilter::OFF));
+    /// let filter: Targets = "off".parse()?;
+    /// if filter.default_level() != Some(LevelFilter::OFF) {
+    ///     return Err("parsed default level should be OFF".into());
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
+    #[must_use]
     pub fn default_level(&self) -> Option<LevelFilter> {
-        self.0.directives().find_map(|d| {
-            if d.target.is_none() {
-                Some(d.level)
-            } else {
-                None
-            }
-        })
+        self.0
+            .directives()
+            .find_map(|directive| directive.target.is_none().then_some(directive.level))
     }
 
     /// Returns an iterator over the [target]-[`LevelFilter`] pairs in this filter.
@@ -350,17 +371,23 @@ impl Targets {
     /// let mut targets: Vec<_> = filter.iter().collect();
     /// targets.sort();
     ///
-    /// assert_eq!(targets, vec![
+    /// let expected = vec![
     ///     ("my_crate", LevelFilter::INFO),
     ///     ("my_crate::interesting_module", LevelFilter::DEBUG),
-    /// ]);
+    /// ];
+    /// if targets != expected {
+    ///     return Err("targets should iterate in sorted order after sorting".into());
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
     /// [target]: tracing_core::Metadata::target
+    #[must_use]
     pub fn iter(&self) -> Iter<'_> {
         self.into_iter()
     }
 
+    /// Returns the callsite interest for the provided metadata.
     #[inline]
     fn interested(&self, metadata: &'static Metadata<'static>) -> Interest {
         if self.0.enabled(metadata) {
@@ -387,13 +414,19 @@ impl Targets {
     ///     .with_target("my_crate", Level::INFO)
     ///     .with_target("my_crate::interesting_module", Level::DEBUG);
     ///
-    /// assert!(filter.would_enable("my_crate", &Level::INFO));
-    /// assert!(!filter.would_enable("my_crate::interesting_module", &Level::TRACE));
+    /// if !filter.would_enable("my_crate", Level::INFO) {
+    ///     return Err("my_crate INFO should be enabled".into());
+    /// }
+    /// if filter.would_enable("my_crate::interesting_module", Level::TRACE) {
+    ///     return Err("interesting_module TRACE should be disabled".into());
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
     /// [target]: tracing_core::Metadata::target
     /// [`module_path!`]: std::module_path!
-    pub fn would_enable(&self, target: &str, level: &Level) -> bool {
+    #[must_use]
+    pub fn would_enable(&self, target: &str, level: Level) -> bool {
         // "Correct" to call because `Targets` only produces `StaticDirective`'s with NO
         // fields
         self.0.target_enabled(target, level)
@@ -405,11 +438,11 @@ where
     T: Into<String>,
     L: Into<LevelFilter>,
 {
-    fn extend<I: IntoIterator<Item = (T, L)>>(&mut self, iter: I) {
-        let iter = iter.into_iter().map(|(target, level)| {
-            StaticDirective::new(Some(target.into()), Default::default(), level.into())
+    fn extend<I: IntoIterator<Item = (T, L)>>(&mut self, directives: I) {
+        let parsed_directives = directives.into_iter().map(|(target, level)| {
+            StaticDirective::new(Some(target.into()), Vec::default(), level.into())
         });
-        self.0.extend(iter);
+        self.0.extend(parsed_directives);
     }
 }
 
@@ -439,32 +472,46 @@ impl<S> layer::Layer<S> for Targets
 where
     S: Subscriber,
 {
-    fn enabled(&self, metadata: &Metadata<'_>, _: layer::Context<'_, S>) -> bool {
-        self.0.enabled(metadata)
+    fn enabled(
+        &self,
+        metadata: &Metadata<'_>,
+        _: layer::Context<'_, S>,
+    ) -> SubscriberResult<bool> {
+        Ok(self.0.enabled(metadata))
     }
 
-    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
-        self.interested(metadata)
+    fn register_callsite(
+        &self,
+        metadata: &'static Metadata<'static>,
+    ) -> SubscriberResult<Interest> {
+        Ok(self.interested(metadata))
     }
 
-    fn max_level_hint(&self) -> Option<LevelFilter> {
-        Some(self.0.max_level)
+    fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
+        Ok(Some(self.0.max_level))
     }
 }
 
 #[cfg(feature = "registry")]
 #[cfg_attr(docsrs, doc(cfg(feature = "registry")))]
 impl<S> layer::Filter<S> for Targets {
-    fn enabled(&self, metadata: &Metadata<'_>, _: &layer::Context<'_, S>) -> bool {
-        self.0.enabled(metadata)
+    fn enabled(
+        &self,
+        metadata: &Metadata<'_>,
+        _: &layer::Context<'_, S>,
+    ) -> SubscriberResult<bool> {
+        Ok(self.0.enabled(metadata))
     }
 
-    fn callsite_enabled(&self, metadata: &'static Metadata<'static>) -> Interest {
-        self.interested(metadata)
+    fn callsite_enabled(
+        &self,
+        metadata: &'static Metadata<'static>,
+    ) -> SubscriberResult<Interest> {
+        Ok(self.interested(metadata))
     }
 
-    fn max_level_hint(&self) -> Option<LevelFilter> {
-        Some(self.0.max_level)
+    fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
+        Ok(Some(self.0.max_level))
     }
 }
 
@@ -474,7 +521,10 @@ impl IntoIterator for Targets {
     type IntoIter = IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        IntoIter::new(self)
+        IntoIter(self.0.into_iter().filter_map(|directive| {
+            let level = directive.level;
+            directive.target.map(|target| (target, level))
+        }))
     }
 }
 
@@ -484,7 +534,12 @@ impl<'a> IntoIterator for &'a Targets {
     type IntoIter = Iter<'a>;
 
     fn into_iter(self) -> Self::IntoIter {
-        Iter::new(self)
+        Iter(self.0.iter().filter_map(|directive| {
+            directive
+                .target
+                .as_deref()
+                .map(|target| (target, directive.level))
+        }))
     }
 }
 
@@ -492,15 +547,21 @@ impl fmt::Display for Targets {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut directives = self.0.directives();
         if let Some(directive) = directives.next() {
-            write!(f, "{}", directive)?;
-            for directive in directives {
-                write!(f, ",{}", directive)?;
+            write!(f, "{directive}")?;
+            for next_directive in directives {
+                write!(f, ",{next_directive}")?;
             }
         }
 
         Ok(())
     }
 }
+
+/// Inner iterator type for [`IntoIter`].
+type IntoTargetIter = FilterMap<
+    <DirectiveSet<StaticDirective> as IntoIterator>::IntoIter,
+    fn(StaticDirective) -> Option<(String, LevelFilter)>,
+>;
 
 /// An owning iterator over the [target]-[level] pairs of a `Targets` filter.
 ///
@@ -524,21 +585,7 @@ impl fmt::Display for Targets {
 /// [target]: tracing_core::Metadata::target
 /// [level]: tracing_core::Level
 #[derive(Debug)]
-pub struct IntoIter(
-    FilterMap<
-        <DirectiveSet<StaticDirective> as IntoIterator>::IntoIter,
-        fn(StaticDirective) -> Option<(String, LevelFilter)>,
-    >,
-);
-
-impl IntoIter {
-    fn new(targets: Targets) -> Self {
-        Self(targets.0.into_iter().filter_map(|directive| {
-            let level = directive.level;
-            directive.target.map(|target| (target, level))
-        }))
-    }
-}
+pub struct IntoIter(IntoTargetIter);
 
 impl Iterator for IntoIter {
     type Item = (String, LevelFilter);
@@ -552,6 +599,12 @@ impl Iterator for IntoIter {
     }
 }
 
+/// Inner iterator type for [`Iter`].
+type TargetIter<'a> = FilterMap<
+    slice::Iter<'a, StaticDirective>,
+    fn(&'a StaticDirective) -> Option<(&'a str, LevelFilter)>,
+>;
+
 /// A borrowing iterator over the [target]-[level] pairs of a `Targets` filter.
 ///
 /// This struct is created by [`iter`] method of [`Targets`], or from the `IntoIterator`
@@ -561,23 +614,7 @@ impl Iterator for IntoIter {
 /// [level]: tracing_core::Level
 /// [`iter`]: Targets::iter
 #[derive(Debug)]
-pub struct Iter<'a>(
-    FilterMap<
-        slice::Iter<'a, StaticDirective>,
-        fn(&'a StaticDirective) -> Option<(&'a str, LevelFilter)>,
-    >,
-);
-
-impl<'a> Iter<'a> {
-    fn new(targets: &'a Targets) -> Self {
-        Self(targets.0.iter().filter_map(|directive| {
-            directive
-                .target
-                .as_deref()
-                .map(|target| (target, directive.level))
-        }))
-    }
-}
+pub struct Iter<'a>(TargetIter<'a>);
 
 impl<'a> Iterator for Iter<'a> {
     type Item = (&'a str, LevelFilter);
@@ -594,95 +631,140 @@ impl<'a> Iterator for Iter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::{string::ToString, vec, vec::Vec};
-    fn expect_parse(s: &str) -> Targets {
-        match s.parse::<Targets>() {
-            Err(e) => panic!("string {:?} did not parse successfully: {}", s, e),
-            Ok(e) => e,
+    use alloc::{
+        string::{String, ToString as _},
+        vec,
+        vec::Vec,
+    };
+    use strict_test_support::{TestFailure, ensure, ensure_ok};
+
+    struct TargetExpectation {
+        target: &'static str,
+        level: LevelFilter,
+    }
+
+    fn expect_parse(source: &str) -> Result<Targets, TestFailure> {
+        ensure_ok(source.parse::<Targets>(), "target filter should parse")
+    }
+
+    fn ensure_targets(
+        dirs: &[StaticDirective],
+        expected: &[TargetExpectation],
+    ) -> Result<(), TestFailure> {
+        ensure(dirs.len() == expected.len(), "parsed target count matches")?;
+        for (directive, expectation) in dirs.iter().zip(expected) {
+            ensure(
+                directive.target.as_deref() == Some(expectation.target),
+                "parsed target name matches",
+            )?;
+            ensure(
+                directive.level == expectation.level,
+                "parsed target level matches",
+            )?;
+            ensure(
+                directive.field_names.is_empty(),
+                "parsed target has no field filters",
+            )?;
         }
+        Ok(())
     }
 
-    fn expect_parse_ralith(s: &str) {
-        let dirs = expect_parse(s).0.into_vec();
-        assert_eq!(dirs.len(), 2, "\nparsed: {:#?}", dirs);
-        assert_eq!(dirs[0].target, Some("server".to_string()));
-        assert_eq!(dirs[0].level, LevelFilter::DEBUG);
-        assert_eq!(dirs[0].field_names, Vec::<String>::new());
-
-        assert_eq!(dirs[1].target, Some("common".to_string()));
-        assert_eq!(dirs[1].level, LevelFilter::INFO);
-        assert_eq!(dirs[1].field_names, Vec::<String>::new());
+    fn expect_parse_ralith(source: &str) -> Result<(), TestFailure> {
+        let dirs = expect_parse(source)?.0.into_vec();
+        ensure_targets(
+            &dirs,
+            &[
+                TargetExpectation {
+                    target: "server",
+                    level: LevelFilter::DEBUG,
+                },
+                TargetExpectation {
+                    target: "common",
+                    level: LevelFilter::INFO,
+                },
+            ],
+        )
     }
 
-    fn expect_parse_level_directives(s: &str) {
-        let dirs = expect_parse(s).0.into_vec();
-        assert_eq!(dirs.len(), 6, "\nparsed: {:#?}", dirs);
-
-        assert_eq!(dirs[0].target, Some("crate3::mod2::mod1".to_string()));
-        assert_eq!(dirs[0].level, LevelFilter::OFF);
-        assert_eq!(dirs[0].field_names, Vec::<String>::new());
-
-        assert_eq!(dirs[1].target, Some("crate1::mod2::mod3".to_string()));
-        assert_eq!(dirs[1].level, LevelFilter::INFO);
-        assert_eq!(dirs[1].field_names, Vec::<String>::new());
-
-        assert_eq!(dirs[2].target, Some("crate1::mod2".to_string()));
-        assert_eq!(dirs[2].level, LevelFilter::WARN);
-        assert_eq!(dirs[2].field_names, Vec::<String>::new());
-
-        assert_eq!(dirs[3].target, Some("crate1::mod1".to_string()));
-        assert_eq!(dirs[3].level, LevelFilter::ERROR);
-        assert_eq!(dirs[3].field_names, Vec::<String>::new());
-
-        assert_eq!(dirs[4].target, Some("crate3".to_string()));
-        assert_eq!(dirs[4].level, LevelFilter::TRACE);
-        assert_eq!(dirs[4].field_names, Vec::<String>::new());
-
-        assert_eq!(dirs[5].target, Some("crate2".to_string()));
-        assert_eq!(dirs[5].level, LevelFilter::DEBUG);
-        assert_eq!(dirs[5].field_names, Vec::<String>::new());
-    }
-
-    #[test]
-    fn parse_ralith() {
-        expect_parse_ralith("common=info,server=debug");
-    }
-
-    #[test]
-    fn parse_ralith_uc() {
-        expect_parse_ralith("common=INFO,server=DEBUG");
-    }
-
-    #[test]
-    fn parse_ralith_mixed() {
-        let _targets = expect_parse("common=iNfo,server=dEbUg");
+    fn expect_parse_level_directives(source: &str) -> Result<(), TestFailure> {
+        let dirs = expect_parse(source)?.0.into_vec();
+        ensure_targets(
+            &dirs,
+            &[
+                TargetExpectation {
+                    target: "crate3::mod2::mod1",
+                    level: LevelFilter::OFF,
+                },
+                TargetExpectation {
+                    target: "crate1::mod2::mod3",
+                    level: LevelFilter::INFO,
+                },
+                TargetExpectation {
+                    target: "crate1::mod2",
+                    level: LevelFilter::WARN,
+                },
+                TargetExpectation {
+                    target: "crate1::mod1",
+                    level: LevelFilter::ERROR,
+                },
+                TargetExpectation {
+                    target: "crate3",
+                    level: LevelFilter::TRACE,
+                },
+                TargetExpectation {
+                    target: "crate2",
+                    level: LevelFilter::DEBUG,
+                },
+            ],
+        )
     }
 
     #[test]
-    fn expect_parse_valid() {
-        let dirs = expect_parse("crate1::mod1=error,crate1::mod2,crate2=debug,crate3=off")
+    fn parse_ralith() -> Result<(), TestFailure> {
+        expect_parse_ralith("common=info,server=debug")
+    }
+
+    #[test]
+    fn parse_ralith_uc() -> Result<(), TestFailure> {
+        expect_parse_ralith("common=INFO,server=DEBUG")
+    }
+
+    #[test]
+    fn parse_ralith_mixed() -> Result<(), TestFailure> {
+        let _targets = expect_parse("common=iNfo,server=dEbUg")?;
+        Ok(())
+    }
+
+    #[test]
+    fn expect_parse_valid() -> Result<(), TestFailure> {
+        let dirs = expect_parse("crate1::mod1=error,crate1::mod2,crate2=debug,crate3=off")?
             .0
             .into_vec();
-        assert_eq!(dirs.len(), 4, "\nparsed: {:#?}", dirs);
-        assert_eq!(dirs[0].target, Some("crate1::mod2".to_string()));
-        assert_eq!(dirs[0].level, LevelFilter::TRACE);
-        assert_eq!(dirs[0].field_names, Vec::<String>::new());
-
-        assert_eq!(dirs[1].target, Some("crate1::mod1".to_string()));
-        assert_eq!(dirs[1].level, LevelFilter::ERROR);
-        assert_eq!(dirs[1].field_names, Vec::<String>::new());
-
-        assert_eq!(dirs[2].target, Some("crate3".to_string()));
-        assert_eq!(dirs[2].level, LevelFilter::OFF);
-        assert_eq!(dirs[2].field_names, Vec::<String>::new());
-
-        assert_eq!(dirs[3].target, Some("crate2".to_string()));
-        assert_eq!(dirs[3].level, LevelFilter::DEBUG);
-        assert_eq!(dirs[3].field_names, Vec::<String>::new());
+        ensure_targets(
+            &dirs,
+            &[
+                TargetExpectation {
+                    target: "crate1::mod2",
+                    level: LevelFilter::TRACE,
+                },
+                TargetExpectation {
+                    target: "crate1::mod1",
+                    level: LevelFilter::ERROR,
+                },
+                TargetExpectation {
+                    target: "crate3",
+                    level: LevelFilter::OFF,
+                },
+                TargetExpectation {
+                    target: "crate2",
+                    level: LevelFilter::DEBUG,
+                },
+            ],
+        )
     }
 
     #[test]
-    fn parse_level_directives() {
+    fn parse_level_directives() -> Result<(), TestFailure> {
         expect_parse_level_directives(
             "crate1::mod1=error,crate1::mod2=warn,crate1::mod2::mod3=info,\
              crate2=debug,crate3=trace,crate3::mod2::mod1=off",
@@ -690,7 +772,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_uppercase_level_directives() {
+    fn parse_uppercase_level_directives() -> Result<(), TestFailure> {
         expect_parse_level_directives(
             "crate1::mod1=ERROR,crate1::mod2=WARN,crate1::mod2::mod3=INFO,\
              crate2=DEBUG,crate3=TRACE,crate3::mod2::mod1=OFF",
@@ -698,7 +780,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_numeric_level_directives() {
+    fn parse_numeric_level_directives() -> Result<(), TestFailure> {
         expect_parse_level_directives(
             "crate1::mod1=1,crate1::mod2=2,crate1::mod2::mod3=3,crate2=4,\
              crate3=5,crate3::mod2::mod1=0",
@@ -706,90 +788,95 @@ mod tests {
     }
 
     #[test]
-    fn targets_iter() {
-        let filter = expect_parse("crate1::mod1=error,crate1::mod2,crate2=debug,crate3=off")
+    fn targets_iter() -> Result<(), TestFailure> {
+        let filter = expect_parse("crate1::mod1=error,crate1::mod2,crate2=debug,crate3=off")?
             .with_default(LevelFilter::WARN);
 
         let mut targets: Vec<_> = filter.iter().collect();
         targets.sort();
 
-        assert_eq!(
-            targets,
-            vec![
-                ("crate1::mod1", LevelFilter::ERROR),
-                ("crate1::mod2", LevelFilter::TRACE),
-                ("crate2", LevelFilter::DEBUG),
-                ("crate3", LevelFilter::OFF),
-            ]
-        );
+        ensure(
+            targets
+                == vec![
+                    ("crate1::mod1", LevelFilter::ERROR),
+                    ("crate1::mod2", LevelFilter::TRACE),
+                    ("crate2", LevelFilter::DEBUG),
+                    ("crate3", LevelFilter::OFF),
+                ],
+            "borrowed targets iterator yields sorted target levels",
+        )
     }
 
     #[test]
-    fn targets_into_iter() {
-        let filter = expect_parse("crate1::mod1=error,crate1::mod2,crate2=debug,crate3=off")
+    fn targets_into_iter() -> Result<(), TestFailure> {
+        let filter = expect_parse("crate1::mod1=error,crate1::mod2,crate2=debug,crate3=off")?
             .with_default(LevelFilter::WARN);
 
         let mut targets: Vec<_> = filter.into_iter().collect();
         targets.sort();
 
-        assert_eq!(
-            targets,
-            vec![
-                ("crate1::mod1".to_string(), LevelFilter::ERROR),
-                ("crate1::mod2".to_string(), LevelFilter::TRACE),
-                ("crate2".to_string(), LevelFilter::DEBUG),
-                ("crate3".to_string(), LevelFilter::OFF),
-            ]
-        );
+        ensure(
+            targets
+                == vec![
+                    (String::from("crate1::mod1"), LevelFilter::ERROR),
+                    (String::from("crate1::mod2"), LevelFilter::TRACE),
+                    (String::from("crate2"), LevelFilter::DEBUG),
+                    (String::from("crate3"), LevelFilter::OFF),
+                ],
+            "owned targets iterator yields sorted target levels",
+        )
     }
 
     #[test]
-    fn targets_default_level() {
-        let filter = expect_parse("crate1::mod1=error,crate1::mod2,crate2=debug,crate3=off");
-        assert_eq!(filter.default_level(), None);
+    fn targets_default_level() -> Result<(), TestFailure> {
+        let initial_filter =
+            expect_parse("crate1::mod1=error,crate1::mod2,crate2=debug,crate3=off")?;
+        ensure(
+            initial_filter.default_level().is_none(),
+            "default level starts empty",
+        )?;
 
-        let filter = expect_parse("crate1::mod1=error,crate1::mod2,crate2=debug,crate3=off")
+        let off_filter = expect_parse("crate1::mod1=error,crate1::mod2,crate2=debug,crate3=off")?
             .with_default(LevelFilter::OFF);
-        assert_eq!(filter.default_level(), Some(LevelFilter::OFF));
+        ensure(
+            off_filter.default_level() == Some(LevelFilter::OFF),
+            "default level can be set to off",
+        )?;
 
-        let filter = expect_parse("crate1::mod1=error,crate1::mod2,crate2=debug,crate3=off")
+        let info_filter = expect_parse("crate1::mod1=error,crate1::mod2,crate2=debug,crate3=off")?
             .with_default(LevelFilter::OFF)
             .with_default(LevelFilter::INFO);
-        assert_eq!(filter.default_level(), Some(LevelFilter::INFO));
+        ensure(
+            info_filter.default_level() == Some(LevelFilter::INFO),
+            "default level can be overwritten",
+        )
     }
 
     #[test]
-    // `println!` is only available with `libstd`.
     #[cfg(feature = "std")]
-    fn size_of_filters() {
-        use std::{mem::size_of_val, println};
+    fn size_of_filters() -> Result<(), TestFailure> {
+        use std::mem::size_of_val;
 
-        fn print_sz(s: &str) {
-            let filter = s.parse::<Targets>().expect("filter should parse");
-            println!(
-                "size_of_val({:?})\n -> {}B",
-                s,
-                size_of_val(&filter)
-            );
+        fn ensure_filter_has_size(source: &str) -> Result<(), TestFailure> {
+            let filter = expect_parse(source)?;
+            ensure(size_of_val(&filter) > 0, "parsed filter has a positive size")
         }
 
-        print_sz("info");
-
-        print_sz("foo=debug");
-
-        print_sz(
+        ensure_filter_has_size("info")?;
+        ensure_filter_has_size("foo=debug")?;
+        ensure_filter_has_size(
             "crate1::mod1=error,crate1::mod2=warn,crate1::mod2::mod3=info,\
             crate2=debug,crate3=trace,crate3::mod2::mod1=off",
-        );
+        )
     }
 
     /// Test that the `fmt::Display` implementation for `Targets` emits a string
     /// that can itself be parsed as a `Targets`, and that the parsed `Targets`
     /// is equivalent to the original one.
     #[test]
-    fn display_roundtrips() {
-        fn test_roundtrip(s: &str) {
-            let filter = expect_parse(s);
+    fn display_roundtrips() -> Result<(), TestFailure> {
+        fn test_roundtrip(source: &str) -> Result<(), TestFailure> {
+            let filter = expect_parse(source)?;
             // we don't assert that the display output is equivalent to the
             // original parsed filter string, because the `Display` impl always
             // uses lowercase level names and doesn't use the
@@ -797,27 +884,24 @@ mod tests {
             // textually equivalent, though, they should still *parse* to the
             // same filter.
             let formatted = filter.to_string();
-            let filter2 = match formatted.parse::<Targets>() {
-                Ok(filter) => filter,
-                Err(e) => panic!(
-                    "failed to parse formatted filter string {:?}: {}",
-                    formatted, e
-                ),
-            };
-            assert_eq!(filter, filter2);
+            let parsed_filter = ensure_ok(
+                formatted.parse::<Targets>(),
+                "formatted target filter should parse",
+            )?;
+            ensure(filter == parsed_filter, "display roundtrip preserves targets")
         }
 
-        test_roundtrip("crate1::mod1=error,crate1::mod2,crate2=debug,crate3=off");
+        test_roundtrip("crate1::mod1=error,crate1::mod2,crate2=debug,crate3=off")?;
         test_roundtrip(
             "crate1::mod1=ERROR,crate1::mod2=WARN,crate1::mod2::mod3=INFO,\
         crate2=DEBUG,crate3=TRACE,crate3::mod2::mod1=OFF",
-        );
+        )?;
         test_roundtrip(
             "crate1::mod1=error,crate1::mod2=warn,crate1::mod2::mod3=info,\
              crate2=debug,crate3=trace,crate3::mod2::mod1=off",
-        );
-        test_roundtrip("crate1::mod1,crate1::mod2,info");
-        test_roundtrip("crate1");
-        test_roundtrip("info");
+        )?;
+        test_roundtrip("crate1::mod1,crate1::mod2,info")?;
+        test_roundtrip("crate1")?;
+        test_roundtrip("info")
     }
 }

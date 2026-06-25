@@ -31,6 +31,7 @@ use crate::{filter::FilterId, registry::Registry};
 /// [`LookupSpan`]: crate::registry::LookupSpan
 #[derive(Debug)]
 pub struct Context<'a, S> {
+    /// The wrapped subscriber that provided this context, when one is available.
     subscriber: Option<&'a S>,
     /// The bitmask of all [`Filtered`] layers that currently apply in this
     /// context. If there is only a single [`Filtered`] wrapping the layer that
@@ -52,7 +53,12 @@ impl<'a, S> Context<'a, S>
 where
     S: Subscriber,
 {
-    pub(super) fn new(subscriber: &'a S) -> Self {
+    /// Returns a new context for the provided subscriber.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "constructor preserves the context initialization boundary for layered subscribers"
+    )]
+    pub(super) const fn new(subscriber: &'a S) -> Self {
         Self {
             subscriber: Some(subscriber),
 
@@ -63,24 +69,29 @@ where
 
     /// Returns the wrapped subscriber's view of the current span.
     #[inline]
+    #[must_use]
     pub fn current_span(&self) -> span::Current {
-        self.subscriber
-            .map(Subscriber::current_span)
-            // TODO: this would be more correct as "unknown", so perhaps
-            // `tracing-core` should make `Current::unknown()` public?
-            .unwrap_or_else(span::Current::none)
+        let Some(subscriber) = self.subscriber else {
+            return span::Current::none();
+        };
+        match subscriber.current_span() {
+            Ok(current) => current,
+            Err(_error) => span::Current::none(),
+        }
     }
 
     /// Returns whether the wrapped subscriber would enable the current span.
     #[inline]
+    #[must_use]
     pub fn enabled(&self, metadata: &Metadata<'_>) -> bool {
-        self.subscriber
-            .map(|subscriber| subscriber.enabled(metadata))
+        let Some(subscriber) = self.subscriber else {
             // If this context is `None`, we are registering a callsite, so
             // return `true` so that the layer does not incorrectly assume that
             // the inner subscriber has disabled this metadata.
             // TODO(eliza): would it be more correct for this to return an `Option`?
-            .unwrap_or(true)
+            return true;
+        };
+        subscriber.enabled(metadata).unwrap_or_default()
     }
 
     /// Records the provided `event` with the wrapped subscriber.
@@ -105,7 +116,7 @@ where
     #[inline]
     pub fn event(&self, event: &Event<'_>) {
         if let Some(subscriber) = self.subscriber {
-            subscriber.event(event);
+            let _ignored = subscriber.event(event);
         }
     }
 
@@ -132,15 +143,17 @@ where
     ///     prelude::*,
     ///     registry::LookupSpan,
     /// };
+    /// use tracing_core::subscriber::SubscriberResult;
     ///
     /// struct PrintingLayer;
     /// impl<S> Layer<S> for PrintingLayer
     /// where
     ///     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
     /// {
-    ///     fn on_event(&self, event: &Event, ctx: Context<S>) {
+    ///     fn on_event(&self, event: &Event, ctx: Context<S>) -> SubscriberResult {
     ///         let span = ctx.event_span(event);
     ///         println!("Event in span: {:?}", span.map(|s| s.name()));
+    ///         Ok(())
     ///     }
     /// }
     ///
@@ -166,6 +179,7 @@ where
     ///     declaration</a> for details.
     /// </pre>
     #[inline]
+    #[must_use]
     pub fn event_span(&self, event: &Event<'_>) -> Option<SpanRef<'_, S>>
     where
         S: for<'lookup> LookupSpan<'lookup>,
@@ -176,7 +190,7 @@ where
             self.lookup_current()
         } else {
             // TODO(eliza): this should handle parent IDs
-            event.parent().and_then(|id| self.span(id))
+            event.parent().copied().and_then(|id| self.span(id))
         }
     }
 
@@ -185,7 +199,8 @@ where
     /// If this returns `None`, then no span exists for that ID (either it has
     /// closed or the ID is invalid).
     #[inline]
-    pub fn metadata(&self, id: &span::Id) -> Option<&'static Metadata<'static>>
+    #[must_use]
+    pub fn metadata(&self, id: span::Id) -> Option<&'static Metadata<'static>>
     where
         S: for<'lookup> LookupSpan<'lookup>,
     {
@@ -208,7 +223,8 @@ where
     ///
     /// [stored data]: crate::registry::SpanRef
     #[inline]
-    pub fn span(&self, id: &span::Id) -> Option<SpanRef<'_, S>>
+    #[must_use]
+    pub fn span(&self, id: span::Id) -> Option<SpanRef<'_, S>>
     where
         S: for<'lookup> LookupSpan<'lookup>,
     {
@@ -231,11 +247,15 @@ where
     ///     declaration</a> for details.
     /// </pre>
     #[inline]
-    pub fn exists(&self, id: &span::Id) -> bool
+    #[must_use]
+    pub fn exists(&self, id: span::Id) -> bool
     where
         S: for<'lookup> LookupSpan<'lookup>,
     {
-        self.subscriber.as_ref().and_then(|s| s.span(id)).is_some()
+        self.subscriber
+            .as_ref()
+            .and_then(|subscriber| subscriber.span(id))
+            .is_some()
     }
 
     /// Returns [stored data] for the span that the wrapped subscriber considers
@@ -253,39 +273,36 @@ where
     ///
     /// [stored data]: crate::registry::SpanRef
     #[inline]
+    #[must_use]
     pub fn lookup_current(&self) -> Option<SpanRef<'_, S>>
     where
         S: for<'lookup> LookupSpan<'lookup>,
     {
         let subscriber = *self.subscriber.as_ref()?;
-        let current = subscriber.current_span();
-        let id = current.id()?;
+        let current = subscriber.current_span().ok()?;
+        let id = *current.id()?;
         let span = subscriber.span(id);
-        debug_assert!(
-            span.is_some(),
-            "the subscriber should have data for the current span ({:?})!",
-            id,
-        );
 
         // If we found a span, and our per-layer filter enables it, return that
         // span!
         #[cfg(all(feature = "registry", feature = "std"))]
         {
-            if let Some(span) = span?.try_with_filter(self.filter) {
-                Some(span)
-            } else {
-                // Otherwise, the span at the *top* of the stack is disabled by
-                // per-layer filtering, but there may be additional spans in the stack.
-                //
-                // Currently, `LookupSpan` doesn't have a nice way of exposing access to
-                // the whole span stack. However, if we can downcast the innermost
-                // subscriber to a a `Registry`, we can iterate over its current span
-                // stack.
-                //
-                // TODO(eliza): when https://github.com/tokio-rs/tracing/issues/1459 is
-                // implemented, change this to use that instead...
-                self.lookup_current_filtered(subscriber)
-            }
+            span?.try_with_filter(self.filter).map_or_else(
+                || {
+                    // Otherwise, the span at the *top* of the stack is disabled by
+                    // per-layer filtering, but there may be additional spans in the stack.
+                    //
+                    // Currently, `LookupSpan` doesn't have a nice way of exposing access to
+                    // the whole span stack. However, if we can downcast the innermost
+                    // subscriber to a a `Registry`, we can iterate over its current span
+                    // stack.
+                    //
+                    // TODO(eliza): when https://github.com/tokio-rs/tracing/issues/1459 is
+                    // implemented, change this to use that instead...
+                    self.lookup_current_filtered(subscriber)
+                },
+                Some,
+            )
         }
 
         #[cfg(not(feature = "registry"))]
@@ -309,10 +326,7 @@ where
     {
         let registry_subscriber: &dyn Subscriber = subscriber;
         let registry = registry_subscriber.downcast_ref::<Registry>()?;
-        registry
-            .span_stack()
-            .iter()
-            .find_map(|id| subscriber.span(id)?.try_with_filter(self.filter))
+        registry.lookup_current_filtered(subscriber, self.filter)
     }
 
     /// Returns an iterator over the [stored data] for all the spans in the
@@ -321,7 +335,7 @@ where
     ///
     /// <pre class="ignore" style="white-space:normal;font:inherit;">
     /// <strong>Note</strong>: This returns the spans in reverse order (from leaf to root). Use
-    /// <a href="../registry/struct.Scope.html#method.from_root"><code>Scope::from_root</code></a>
+    /// <a href="../registry/struct.Scope.html#method.root_to_leaf"><code>Scope::root_to_leaf</code></a>
     /// in case root-to-leaf ordering is desired.
     /// </pre>
     ///
@@ -334,7 +348,8 @@ where
     /// </pre>
     ///
     /// [stored data]: crate::registry::SpanRef
-    pub fn span_scope(&self, id: &span::Id) -> Option<registry::Scope<'_, S>>
+    #[must_use]
+    pub fn span_scope(&self, id: span::Id) -> Option<registry::Scope<'_, S>>
     where
         S: for<'lookup> LookupSpan<'lookup>,
     {
@@ -348,7 +363,7 @@ where
     /// <pre class="ignore" style="white-space:normal;font:inherit;">
     /// <strong>Note</strong>: Compared to <a href="#method.scope"><code>scope</code></a> this
     /// returns the spans in reverse order (from leaf to root). Use
-    /// <a href="../registry/struct.Scope.html#method.from_root"><code>Scope::from_root</code></a>
+    /// <a href="../registry/struct.Scope.html#method.root_to_leaf"><code>Scope::root_to_leaf</code></a>
     /// in case root-to-leaf ordering is desired.
     /// </pre>
     ///
@@ -361,6 +376,7 @@ where
     /// </pre>
     ///
     /// [stored data]: crate::registry::SpanRef
+    #[must_use]
     pub fn event_scope(&self, event: &Event<'_>) -> Option<registry::Scope<'_, S>>
     where
         S: for<'lookup> LookupSpan<'lookup>,
@@ -369,19 +385,25 @@ where
     }
 
     #[cfg(all(feature = "registry", feature = "std"))]
-    pub(crate) fn with_filter(self, filter: FilterId) -> Self {
+    /// Returns this context scoped by the provided per-layer filter.
+    pub(crate) const fn with_filter(self, filter: FilterId) -> Self {
         // If we already have our own `FilterId`, combine it with the provided
         // one. That way, the new `FilterId` will consider a span to be disabled
         // if it was disabled by the given `FilterId` *or* any `FilterId`s for
         // layers "above" us in the stack.
         //
         // See the doc comment for `FilterId::and` for details.
-        let filter = self.filter.and(filter);
-        Self { filter, ..self }
+        let combined_filter = self.filter.and(filter);
+        Self {
+            filter: combined_filter,
+            ..self
+        }
     }
 
     #[cfg(all(feature = "registry", feature = "std"))]
-    pub(crate) fn is_enabled_for(&self, span: &span::Id, filter: FilterId) -> bool
+    #[must_use]
+    /// Returns whether the provided span is enabled for the given filter.
+    pub(crate) fn is_enabled_for(&self, span: span::Id, filter: FilterId) -> bool
     where
         S: for<'lookup> LookupSpan<'lookup>,
     {
@@ -389,19 +411,19 @@ where
     }
 
     #[cfg(all(feature = "registry", feature = "std"))]
-    pub(crate) fn if_enabled_for(self, span: &span::Id, filter: FilterId) -> Option<Self>
+    #[must_use]
+    /// Returns a filtered context if the span is enabled for the filter.
+    pub(crate) fn if_enabled_for(self, span: span::Id, filter: FilterId) -> Option<Self>
     where
         S: for<'lookup> LookupSpan<'lookup>,
     {
-        if self.is_enabled_inner(span, filter)? {
-            Some(self.with_filter(filter))
-        } else {
-            None
-        }
+        self.is_enabled_inner(span, filter)?
+            .then(|| self.with_filter(filter))
     }
 
     #[cfg(all(feature = "registry", feature = "std"))]
-    fn is_enabled_inner(&self, span: &span::Id, filter: FilterId) -> Option<bool>
+    /// Returns the raw enabled state for the provided span and filter.
+    fn is_enabled_inner(&self, span: span::Id, filter: FilterId) -> Option<bool>
     where
         S: for<'lookup> LookupSpan<'lookup>,
     {
@@ -410,7 +432,12 @@ where
 }
 
 impl<S> Context<'_, S> {
-    pub(crate) fn none() -> Self {
+    /// Returns a context without an inner subscriber.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "empty context constructor is retained for layer APIs without a subscriber"
+    )]
+    pub(crate) const fn none() -> Self {
         Self {
             subscriber: None,
 

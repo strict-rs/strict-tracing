@@ -16,7 +16,7 @@ This crate is meaningful only on systemd Linux. The Unix-only parts of `Layer` (
 ## Testing
 
 - `cargo nextest run -p tracing-journald`. Dev-deps: `serde`/`serde_json` (the test parses `journalctl -o json` back into structs).
-- `tests/journal.rs` is `#![cfg(target_os = "linux")]` and **requires a running journald**: it constructs the layer and shells out to `journalctl` to read entries back. It skips gracefully when `journalctl --version` fails, but the system-journal cases call `Layer::new().unwrap()`, which panics if there is no journald socket — so the suite will fail in containers/CI without systemd. The user-journal cases skip cleanly if the user socket can't be opened.
+- `tests/journal.rs` is `#![cfg(target_os = "linux")]` and **requires a running journald**: it constructs the layer and shells out to `journalctl` to read entries back. It skips gracefully when `journalctl --version` fails; system-journal setup returns a structured `TestFailure` if the system socket cannot be opened, while user-journal cases skip cleanly if the user socket can't be opened.
 
 ## Gotchas
 

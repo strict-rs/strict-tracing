@@ -23,13 +23,17 @@ rust-version.workspace = true
 [dependencies]
 crossbeam-channel = { workspace = true }
 time = { workspace = true, features = ["formatting", "parsing"] }
-parking_lot = { workspace = true, optional = true }
+parking_lot = { workspace = true }
 symlink = { workspace = true }
 thiserror = { workspace = true }
 tracing-subscriber = { workspace = true, features = ["fmt", "std"] }
 
+[features]
+parking_lot = []
+
 [dev-dependencies]
 criterion = { workspace = true }
+strict-test-support = { workspace = true }
 tracing = { workspace = true, default-features = true }
 tempfile = { workspace = true }
 

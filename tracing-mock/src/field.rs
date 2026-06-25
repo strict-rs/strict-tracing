@@ -14,6 +14,7 @@
 //! specific name, without any expectation about the value:
 //!
 //! ```
+//! # fn main() -> Result<(), strict_test_support::TestFailure> {
 //! use tracing_mock::{expect, subscriber};
 //!
 //! let event = expect::event()
@@ -27,13 +28,16 @@
 //!     tracing::info!(field_name = "value");
 //! });
 //!
-//! handle.assert_finished();
+//! strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! It is possible to expect multiple fields and specify the value for
 //! each of them:
 //!
 //! ```
+//! # fn main() -> Result<(), strict_test_support::TestFailure> {
 //! use tracing_mock::{expect, subscriber};
 //!
 //! let event = expect::event().with_fields(
@@ -55,14 +59,17 @@
 //!     );
 //! });
 //!
-//! handle.assert_finished();
+//! strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! If an expected field is not present, or if the value of the field
 //! is different, the test will fail. In this example, the value is
 //! different:
 //!
-//! ```should_panic
+//! ```
+//! # fn main() -> Result<(), strict_test_support::TestFailure> {
 //! use tracing_mock::{expect, subscriber};
 //!
 //! let event = expect::event()
@@ -76,7 +83,9 @@
 //!     tracing::info!(field_name = "different value");
 //! });
 //!
-//! handle.assert_finished();
+//! strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! [`subscriber`]: mod@crate::subscriber
@@ -85,10 +94,12 @@ use std::{collections::HashMap, fmt};
 
 use tracing::{
     callsite,
-    callsite::Callsite,
+    callsite::Callsite as _,
     field::{self, Field, Value, Visit},
     metadata::Kind,
 };
+
+use crate::failure::{ExpectationError, ExpectationResult};
 
 /// An expectation for multiple fields.
 ///
@@ -98,7 +109,9 @@ use tracing::{
 /// [`field`]: mod@crate::field
 #[derive(Default, Debug, Eq, PartialEq)]
 pub struct ExpectedFields {
+    /// Expected field names and values.
     fields: HashMap<String, ExpectedValue>,
+    /// Whether unexpected extra fields should fail the expectation.
     only: bool,
 }
 
@@ -110,43 +123,52 @@ pub struct ExpectedFields {
 /// [`field`]: mod@crate::field
 #[derive(Debug)]
 pub struct ExpectedField {
+    /// Expected field name.
     pub(super) name: String,
+    /// Expected field value.
     pub(super) value: ExpectedValue,
 }
 
+/// Expected value for a field.
 #[derive(Debug)]
 pub(crate) enum ExpectedValue {
+    /// Expected floating-point value.
     F64(f64),
+    /// Expected signed integer value.
     I64(i64),
+    /// Expected unsigned integer value.
     U64(u64),
+    /// Expected boolean value.
     Bool(bool),
+    /// Expected string value.
     Str(String),
+    /// Expected debug-rendered value.
     Debug(String),
+    /// Any value is accepted.
     Any,
+    /// Value conversion failed while constructing an expected value.
+    Invalid(String),
 }
 
 impl Eq for ExpectedValue {}
 
 impl PartialEq for ExpectedValue {
     fn eq(&self, other: &Self) -> bool {
-        use ExpectedValue::*;
-
-        match (self, other) {
-            (F64(a), F64(b)) => {
-                debug_assert!(!a.is_nan());
-                debug_assert!(!b.is_nan());
-
-                a.eq(b)
+        let values_match = match *self {
+            Self::F64(left) => matches!(*other, Self::F64(right) if left.eq(&right)),
+            Self::I64(left) => matches!(*other, Self::I64(right) if left.eq(&right)),
+            Self::U64(left) => matches!(*other, Self::U64(right) if left.eq(&right)),
+            Self::Bool(left) => matches!(*other, Self::Bool(right) if left.eq(&right)),
+            Self::Str(ref left) => {
+                matches!(*other, Self::Str(ref right) if left.eq(right))
             }
-            (I64(a), I64(b)) => a.eq(b),
-            (U64(a), U64(b)) => a.eq(b),
-            (Bool(a), Bool(b)) => a.eq(b),
-            (Str(a), Str(b)) => a.eq(b),
-            (Debug(a), Debug(b)) => a.eq(b),
-            (Any, _) => true,
-            (_, Any) => true,
-            _ => false,
-        }
+            Self::Debug(ref left) => {
+                matches!(*other, Self::Debug(ref right) if left.eq(right))
+            }
+            Self::Any => true,
+            Self::Invalid(_) => false,
+        };
+        values_match || matches!(*other, Self::Any)
     }
 }
 
@@ -159,6 +181,7 @@ impl ExpectedField {
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let event = expect::event()
@@ -172,12 +195,15 @@ impl ExpectedField {
     ///     tracing::info!(field_name = "value");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// A different value will cause the test to fail:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let event = expect::event()
@@ -191,11 +217,15 @@ impl ExpectedField {
     ///     tracing::info!(field_name = "different value");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
+    #[must_use]
     pub fn with_value(self, value: &dyn Value) -> Self {
         Self {
-            value: ExpectedValue::from(value),
+            value: ExpectedValue::try_from_value(value)
+                .unwrap_or_else(|error| ExpectedValue::Invalid(error.to_string())),
             ..self
         }
     }
@@ -209,6 +239,7 @@ impl ExpectedField {
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let event = expect::event().with_fields(
@@ -228,12 +259,15 @@ impl ExpectedField {
     ///     );
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// If the second field is not present, the test will fail:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let event = expect::event().with_fields(
@@ -250,9 +284,12 @@ impl ExpectedField {
     ///     tracing::info!(field = "value");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
-    pub fn and(self, other: ExpectedField) -> ExpectedFields {
+    #[must_use]
+    pub fn and(self, other: Self) -> ExpectedFields {
         ExpectedFields {
             fields: HashMap::new(),
             only: false,
@@ -274,6 +311,7 @@ impl ExpectedField {
     /// used:
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let event = expect::event()
@@ -285,13 +323,16 @@ impl ExpectedField {
     ///     tracing::info!(field = "value", another_field = 42,);
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// If we include `only` on the `ExpectedField` then the test
     /// will fail:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let event = expect::event()
@@ -303,8 +344,11 @@ impl ExpectedField {
     ///     tracing::info!(field = "value", another_field = 42,);
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
+    #[must_use]
     pub fn only(self) -> ExpectedFields {
         ExpectedFields {
             fields: HashMap::new(),
@@ -316,7 +360,7 @@ impl ExpectedField {
 
 impl From<ExpectedField> for ExpectedFields {
     fn from(field: ExpectedField) -> Self {
-        ExpectedFields {
+        Self {
             fields: HashMap::new(),
             only: false,
         }
@@ -338,6 +382,7 @@ impl ExpectedFields {
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let event = expect::event().with_fields(
@@ -359,13 +404,16 @@ impl ExpectedFields {
     ///     );
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// If any of the expected fields are not present on the recorded
     /// event, the test will fail:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let event = expect::event().with_fields(
@@ -386,10 +434,13 @@ impl ExpectedFields {
     ///     );
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`ExpectedField::and`]: fn@crate::field::ExpectedField::and
+    #[must_use]
     pub fn and(mut self, field: ExpectedField) -> Self {
         let _previous = self.fields.insert(field.name, field.value);
         self
@@ -408,6 +459,7 @@ impl ExpectedFields {
     /// recorded on the event.
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let event = expect::event().with_fields(
@@ -428,13 +480,16 @@ impl ExpectedFields {
     ///     );
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// If we include `only` on the `ExpectedFields` then the test
     /// will fail:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, subscriber};
     ///
     /// let event = expect::event().with_fields(
@@ -456,41 +511,45 @@ impl ExpectedFields {
     ///     );
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
+    #[must_use]
     pub fn only(self) -> Self {
         Self { only: true, ..self }
     }
 
-    fn compare_or_panic(
+    /// Compares an observed field value against the matching expectation.
+    fn compare(
         &mut self,
         name: &str,
         value: &dyn Value,
         ctx: &str,
         subscriber_name: &str,
-    ) {
-        let value = value.into();
+    ) -> ExpectationResult {
+        let actual_value = ExpectedValue::try_from_value(value)?;
         match self.fields.remove(name) {
             Some(ExpectedValue::Any) => {}
-            Some(expected) => assert!(
-                expected == value,
-                "\n[{}] expected `{}` to contain:\n\t`{}{}`\nbut got:\n\t`{}{}`",
-                subscriber_name,
-                ctx,
-                name,
-                expected,
-                name,
-                value
-            ),
-            None if self.only => panic!(
-                "[{}]expected `{}` to contain only:\n\t`{}`\nbut got:\n\t`{}{}`",
-                subscriber_name, ctx, self, name, value
-            ),
+            Some(expected) => {
+                if expected != actual_value {
+                    return Err(ExpectationError::from_args(format_args!(
+                        "\n[{subscriber_name}] expected `{ctx}` to contain:\n\t`{name}{expected}`\nbut got:\n\t`{name}{actual_value}`"
+                    )));
+                }
+            }
+            None if self.only => {
+                return Err(ExpectationError::from_args(format_args!(
+                    "[{subscriber_name}]expected `{ctx}` to contain only:\n\t`{self}`\nbut got:\n\t`{name}{actual_value}`"
+                )));
+            }
             _ => {}
         }
+        Ok(())
     }
 
-    pub(crate) fn checker<'a>(
+    /// Creates a visitor that checks observed fields against these expectations.
+    pub(crate) const fn checker<'a>(
         &'a mut self,
         ctx: &'a str,
         subscriber_name: &'a str,
@@ -499,9 +558,11 @@ impl ExpectedFields {
             expect: self,
             ctx,
             subscriber_name,
+            error: None,
         }
     }
 
+    /// Returns whether there are no pending field expectations.
     pub(crate) fn is_empty(&self) -> bool {
         self.fields.is_empty()
     }
@@ -509,74 +570,105 @@ impl ExpectedFields {
 
 impl fmt::Display for ExpectedValue {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            ExpectedValue::F64(v) => write!(f, "f64 = {:?}", v),
-            ExpectedValue::I64(v) => write!(f, "i64 = {:?}", v),
-            ExpectedValue::U64(v) => write!(f, "u64 = {:?}", v),
-            ExpectedValue::Bool(v) => write!(f, "bool = {:?}", v),
-            ExpectedValue::Str(v) => write!(f, "&str = {:?}", v),
-            ExpectedValue::Debug(v) => write!(f, "&fmt::Debug = {:?}", v),
-            ExpectedValue::Any => write!(f, "_ = _"),
+        match *self {
+            Self::F64(value) => write!(f, "f64 = {value}"),
+            Self::I64(value) => write!(f, "i64 = {value}"),
+            Self::U64(value) => write!(f, "u64 = {value}"),
+            Self::Bool(value) => write!(f, "bool = {value}"),
+            Self::Str(ref value) => write!(f, "&str = \"{value}\""),
+            Self::Debug(ref value) => write!(f, "&fmt::Debug = \"{value}\""),
+            Self::Any => write!(f, "_ = _"),
+            Self::Invalid(ref error) => write!(f, "<invalid expected value: {error}>"),
         }
     }
 }
 
+/// Visitor that records observed fields into an expectation check.
 pub(crate) struct CheckVisitor<'a> {
+    /// Expected fields still waiting to be matched.
     expect: &'a mut ExpectedFields,
+    /// Context rendered into failure messages.
     ctx: &'a str,
+    /// Subscriber or layer name rendered into failure messages.
     subscriber_name: &'a str,
+    /// First field validation error observed by the visitor.
+    error: Option<ExpectationError>,
 }
 
 impl Visit for CheckVisitor<'_> {
     fn record_f64(&mut self, field: &Field, value: f64) {
-        self.expect
-            .compare_or_panic(field.name(), &value, self.ctx, self.subscriber_name)
+        self.compare_field(field.name(), &value);
     }
 
     fn record_i64(&mut self, field: &Field, value: i64) {
-        self.expect
-            .compare_or_panic(field.name(), &value, self.ctx, self.subscriber_name)
+        self.compare_field(field.name(), &value);
     }
 
     fn record_u64(&mut self, field: &Field, value: u64) {
-        self.expect
-            .compare_or_panic(field.name(), &value, self.ctx, self.subscriber_name)
+        self.compare_field(field.name(), &value);
     }
 
     fn record_bool(&mut self, field: &Field, value: bool) {
-        self.expect
-            .compare_or_panic(field.name(), &value, self.ctx, self.subscriber_name)
+        self.compare_field(field.name(), &value);
     }
 
     fn record_str(&mut self, field: &Field, value: &str) {
-        self.expect
-            .compare_or_panic(field.name(), &value, self.ctx, self.subscriber_name)
+        self.compare_field(field.name(), &value);
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        self.expect.compare_or_panic(
-            field.name(),
-            &field::debug(value),
-            self.ctx,
-            self.subscriber_name,
-        )
+        self.compare_field(field.name(), &field::debug(value));
+    }
+}
+
+/// Display adapter for values recorded through `Visit::record_debug`.
+struct RenderDebug<'a>(&'a dyn fmt::Debug);
+
+impl fmt::Display for RenderDebug<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.0, f)
     }
 }
 
 impl CheckVisitor<'_> {
-    pub(crate) fn finish(self) {
-        assert!(
-            self.expect.fields.is_empty(),
-            "[{}] {}missing {}",
-            self.subscriber_name,
-            self.expect,
-            self.ctx
-        );
+    /// Compares a visited field unless an earlier field mismatch was recorded.
+    fn compare_field(&mut self, name: &str, value: &dyn Value) {
+        if self.error.is_some() {
+            return;
+        }
+        let result = self
+            .expect
+            .compare(name, value, self.ctx, self.subscriber_name);
+        self.record_result(result);
+    }
+
+    /// Preserves the first validation failure reported while visiting fields.
+    fn record_result(&mut self, result: ExpectationResult) {
+        if self.error.is_none()
+            && let Err(error) = result
+        {
+            self.error = Some(error);
+        }
+    }
+
+    /// Finishes field validation and fails if expected fields were not seen.
+    pub(crate) fn finish(self) -> ExpectationResult {
+        if let Some(error) = self.error {
+            return Err(error);
+        }
+        if !self.expect.fields.is_empty() {
+            return Err(ExpectationError::from_args(format_args!(
+                "[{}] {}missing {}",
+                self.subscriber_name, self.expect, self.ctx
+            )));
+        }
+        Ok(())
     }
 }
 
-impl<'a> From<&'a dyn Value> for ExpectedValue {
-    fn from(value: &'a dyn Value) -> Self {
+impl ExpectedValue {
+    /// Converts a tracing field value into a comparable expectation value.
+    fn try_from_value(value: &dyn Value) -> ExpectationResult<Self> {
         struct MockValueBuilder {
             value: Option<ExpectedValue>,
         }
@@ -603,20 +695,26 @@ impl<'a> From<&'a dyn Value> for ExpectedValue {
             }
 
             fn record_debug(&mut self, _: &Field, value: &dyn fmt::Debug) {
-                self.value = Some(ExpectedValue::Debug(format!("{:?}", value)));
+                self.value = Some(ExpectedValue::Debug(RenderDebug(value).to_string()));
             }
         }
 
-        let fake_field = callsite!(name: "fake", kind: Kind::EVENT, fields: fake_field)
+        let internal_field = callsite!(name: "fake", kind: Kind::EVENT, fields: fake_field)
             .metadata()
             .fields()
-            .field("fake_field")
-            .unwrap();
+            .field("fake_field");
+        let Some(fake_field) = internal_field else {
+            return Err(ExpectationError::from_args(format_args!(
+                "tracing-mock could not construct the internal fake field"
+            )));
+        };
         let mut builder = MockValueBuilder { value: None };
         value.record(&fake_field, &mut builder);
-        builder
-            .value
-            .expect("finish called before a value was recorded")
+        builder.value.ok_or_else(|| {
+            ExpectationError::from_args(format_args!(
+                "tracing-mock value conversion finished before a value was recorded"
+            ))
+        })
     }
 }
 
@@ -626,7 +724,7 @@ impl fmt::Display for ExpectedFields {
         let entries = self
             .fields
             .iter()
-            .map(|(k, v)| (field::display(k), field::display(v)));
+            .map(|(name, value)| (field::display(name), field::display(value)));
         f.debug_map().entries(entries).finish()
     }
 }

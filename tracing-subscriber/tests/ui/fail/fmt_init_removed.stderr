@@ -1,0 +1,5 @@
+error[E0425]: cannot find function `init` in module `tracing_subscriber::fmt`
+ --> tests/ui/fail/fmt_init_removed.rs:2:30
+  |
+2 |     tracing_subscriber::fmt::init();
+  |                              ^^^^ not found in `tracing_subscriber::fmt`

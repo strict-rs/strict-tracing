@@ -187,6 +187,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+/// Internal macro helpers shared across this crate.
 #[macro_use]
 mod macros;
 
@@ -201,7 +202,7 @@ pub mod util;
 feature! {
     #![feature = "std"]
     pub mod reload;
-    pub(crate) mod sync;
+    include!("sync.rs");
 }
 
 feature! {
@@ -223,11 +224,15 @@ feature! {
     pub use registry::Registry;
 
     /// Returns a default [`Registry`].
+    #[must_use]
     pub fn registry() -> Registry {
         Registry::default()
     }
 }
 
+/// Sealing traits for extension traits whose implementors are owned by this
+/// crate.
 mod sealed {
+    /// Prevents downstream crates from implementing sealed extension traits.
     pub trait Sealed<A = ()> {}
 }

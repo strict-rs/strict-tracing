@@ -1,0 +1,10 @@
+error[E0308]: mismatched types
+  --> tests/ui/fail/finished_test_failure_result.rs:13:45
+   |
+13 |     let finished: Result<(), TestFailure> = handle.finished();
+   |                   -----------------------   ^^^^^^^^^^^^^^^^^ expected `Result<(), TestFailure>`, found `Result<(), SubscriberError>`
+   |                   |
+   |                   expected due to this
+   |
+   = note: expected enum `Result<(), TestFailure>`
+              found enum `Result<(), SubscriberError>`

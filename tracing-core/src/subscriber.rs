@@ -1,11 +1,74 @@
 //! Collectors collect and record trace data.
 use crate::{Dispatch, Event, LevelFilter, Metadata, span};
 
-use alloc::{boxed::Box, sync::Arc};
+use alloc::{
+    boxed::Box,
+    string::{String, ToString as _},
+    sync::Arc,
+};
 use core::{
     any::{Any, TypeId},
+    fmt,
     num::NonZeroU64,
 };
+#[cfg(feature = "std")]
+use std::error::Error;
+
+/// Error returned by fallible [`Subscriber`] callbacks.
+///
+/// This error is owned by `tracing-core` so shared tracing behavior can report
+/// subscriber failures without depending on higher-level crates.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SubscriberError {
+    /// Human-readable subscriber failure details.
+    message: String,
+}
+
+/// Result returned by fallible [`Subscriber`] callbacks.
+pub type SubscriberResult<T = ()> = Result<T, SubscriberError>;
+
+impl SubscriberError {
+    /// Constructs a subscriber error from formatted arguments.
+    #[must_use]
+    pub fn new(message: fmt::Arguments<'_>) -> Self {
+        Self {
+            message: message.to_string(),
+        }
+    }
+
+    /// Constructs a subscriber error from formatted arguments.
+    #[must_use]
+    pub fn from_args(message: fmt::Arguments<'_>) -> Self {
+        Self::new(message)
+    }
+
+    /// Constructs a subscriber error for a poisoned synchronization primitive.
+    #[must_use]
+    pub fn lock_poisoned() -> Self {
+        Self::new(format_args!("subscriber synchronization lock is poisoned"))
+    }
+
+    /// Returns the subscriber error message.
+    #[must_use]
+    pub const fn as_str(&self) -> &str {
+        self.message.as_str()
+    }
+}
+
+impl fmt::Display for SubscriberError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.message.as_str())
+    }
+}
+
+impl From<fmt::Arguments<'_>> for SubscriberError {
+    fn from(message: fmt::Arguments<'_>) -> Self {
+        Self::new(message)
+    }
+}
+
+#[cfg(feature = "std")]
+impl Error for SubscriberError {}
 
 /// Provides `Any` access for type-erased `Subscriber` downcasting.
 #[doc(hidden)]
@@ -111,9 +174,16 @@ pub trait Subscriber: AsAny {
     /// memory leak, and can be [upgraded] into a `Dispatch` temporarily when
     /// the `Dispatch` must be accessed by the `Subscriber`.
     ///
+    /// # Errors
+    ///
+    /// Returns an error if the subscriber cannot record that it has been
+    /// attached to a dispatch.
+    ///
     /// [`WeakDispatch`]: crate::dispatcher::WeakDispatch
     /// [upgraded]: crate::dispatcher::WeakDispatch::upgrade
-    fn on_register_dispatch(&self, _subscriber: &Dispatch) {}
+    fn on_register_dispatch(&self, _subscriber: &Dispatch) -> SubscriberResult {
+        Ok(())
+    }
 
     /// Registers a new [callsite] with this subscriber, returning whether or not
     /// the subscriber is interested in being notified about the callsite.
@@ -180,18 +250,26 @@ pub trait Subscriber: AsAny {
     /// _may_ still see spans and events originating from that callsite, if
     /// another subscriber expressed interest in it.
     ///
+    /// # Errors
+    ///
+    /// Returns an error if the subscriber cannot evaluate or record its
+    /// interest in the callsite.
+    ///
     /// [callsite]: crate::callsite
     /// [filter]: Self::enabled
     /// [metadata]: super::metadata::Metadata
     /// [`enabled`]: Subscriber::enabled()
     /// [`rebuild_interest_cache`]: super::callsite::rebuild_interest_cache
     /// [cs-reg]: crate::callsite#registering-callsites
-    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
-        if self.enabled(metadata) {
+    fn register_callsite(
+        &self,
+        metadata: &'static Metadata<'static>,
+    ) -> SubscriberResult<Interest> {
+        Ok(if self.enabled(metadata)? {
             Interest::always()
         } else {
             Interest::never()
-        }
+        })
     }
 
     /// Returns true if a span or event with the specified [metadata] would be
@@ -214,7 +292,12 @@ pub trait Subscriber: AsAny {
     /// [interested]: Interest
     /// [`Interest::sometimes`]: Interest::sometimes
     /// [`register_callsite`]: Subscriber::register_callsite()
-    fn enabled(&self, metadata: &Metadata<'_>) -> bool;
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the subscriber cannot evaluate its filter for the
+    /// provided metadata.
+    fn enabled(&self, metadata: &Metadata<'_>) -> SubscriberResult<bool>;
 
     /// Returns the highest [verbosity level][level] that this `Subscriber` will
     /// enable, or `None`, if the subscriber does not implement level-based
@@ -266,7 +349,12 @@ pub trait Subscriber: AsAny {
     /// [`Attributes`]: super::span::Attributes
     /// [visitor]: super::field::Visit
     /// [`record` method]: super::span::Attributes::record
-    fn new_span(&self, span: &span::Attributes<'_>) -> span::Id;
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the subscriber cannot allocate, store, or otherwise
+    /// process the new span.
+    fn new_span(&self, span: &span::Attributes<'_>) -> SubscriberResult<span::Id>;
 
     // === Notification methods ===============================================
 
@@ -306,7 +394,12 @@ pub trait Subscriber: AsAny {
     /// [visitor]: super::field::Visit
     /// [`record`]: super::span::Attributes::record
     /// [`record` method]: super::span::Record::record
-    fn record(&self, span: span::Id, values: &span::Record<'_>);
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the subscriber cannot record the provided field
+    /// values for the span.
+    fn record(&self, span: span::Id, values: &span::Record<'_>) -> SubscriberResult;
 
     /// Adds an indication that `span` follows from the span with the id
     /// `follows`.
@@ -326,7 +419,12 @@ pub trait Subscriber: AsAny {
     /// subscriber knows about, or if a cyclical relationship would be created
     /// (i.e., some span _a_ which proceeds some other span _b_ may not also
     /// follow from _b_), it may silently do nothing.
-    fn record_follows_from(&self, span: span::Id, follows: span::Id);
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the subscriber cannot record the causal relationship
+    /// between the spans.
+    fn record_follows_from(&self, span: span::Id, follows: span::Id) -> SubscriberResult;
 
     /// Determine if an [`Event`] should be recorded.
     ///
@@ -334,8 +432,13 @@ pub trait Subscriber: AsAny {
     /// [`event`][Self::event] without any penalty. However, when `event` is
     /// more complicated, this can be used to determine if `event` should be
     /// called at all, separating out the decision from the processing.
-    fn event_enabled(&self, _event: &Event<'_>) -> bool {
-        true
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the subscriber cannot evaluate whether the event
+    /// should be processed.
+    fn event_enabled(&self, _event: &Event<'_>) -> SubscriberResult<bool> {
+        Ok(true)
     }
 
     /// Records that an [`Event`] has occurred.
@@ -356,7 +459,11 @@ pub trait Subscriber: AsAny {
     /// [visitor]: super::field::Visit
     /// [`record` method]: super::event::Event::record
     /// [`dispatch` method]: super::event::Event::dispatch
-    fn event(&self, event: &Event<'_>);
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the subscriber cannot process or record the event.
+    fn event(&self, event: &Event<'_>) -> SubscriberResult;
 
     /// Records that a span has been entered.
     ///
@@ -366,7 +473,12 @@ pub trait Subscriber: AsAny {
     /// tracking the current span accordingly.
     ///
     /// [span ID]: super::span::Id
-    fn enter(&self, span: span::Id);
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the subscriber cannot process the span-enter
+    /// notification.
+    fn enter(&self, span: span::Id) -> SubscriberResult;
 
     /// Records that a span has been exited.
     ///
@@ -378,7 +490,12 @@ pub trait Subscriber: AsAny {
     /// Exiting a span does not imply that the span will not be re-entered.
     ///
     /// [span ID]: super::span::Id
-    fn exit(&self, span: span::Id);
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the subscriber cannot process the span-exit
+    /// notification.
+    fn exit(&self, span: span::Id) -> SubscriberResult;
 
     /// Notifies the subscriber that a [span ID] has been cloned.
     ///
@@ -400,21 +517,13 @@ pub trait Subscriber: AsAny {
     ///
     /// [span ID]: super::span::Id
     /// [`try_close`]: Subscriber::try_close
-    fn clone_span(&self, id: span::Id) -> span::Id {
-        id
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the subscriber cannot clone its span handle state.
+    fn clone_span(&self, id: span::Id) -> SubscriberResult<span::Id> {
+        Ok(id)
     }
-
-    /// **This method is deprecated.**
-    ///
-    /// Using `drop_span` may result in subscribers composed using
-    /// `tracing-subscriber` crate's `Layer` trait from observing close events.
-    /// Use [`try_close`] instead.
-    ///
-    /// The default implementation of this function does nothing.
-    ///
-    /// [`try_close`]: Subscriber::try_close
-    #[deprecated(since = "0.1.2", note = "use `Subscriber::try_close` instead")]
-    fn drop_span(&self, _id: span::Id) {}
 
     /// Notifies the subscriber that a [span ID] has been dropped, and returns
     /// `true` if there are now 0 IDs that refer to that span.
@@ -423,12 +532,11 @@ pub trait Subscriber: AsAny {
     /// subscriber implementations may use this return value to notify any
     /// "layered" subscribers that this subscriber considers the span closed.
     ///
-    /// The default implementation of this method calls the subscriber's
-    /// [`drop_span`] method and returns `false`. This means that, unless the
-    /// subscriber overrides the default implementation, close notifications
-    /// will never be sent to any layered subscribers. In general, if the
-    /// subscriber tracks reference counts, this method should be implemented,
-    /// rather than `drop_span`.
+    /// The default implementation of this method does nothing and returns
+    /// `false`. This means that, unless the subscriber overrides the default
+    /// implementation, close notifications will never be sent to any layered
+    /// subscribers. Subscribers which track reference counts should implement
+    /// this method.
     ///
     /// This function is guaranteed to only be called with span IDs that were
     /// returned by this subscriber's `new_span` function.
@@ -451,10 +559,12 @@ pub trait Subscriber: AsAny {
     ///
     /// [span ID]: super::span::Id
     /// [`clone_span`]: Subscriber::clone_span
-    /// [`drop_span`]: Subscriber::drop_span
-    fn try_close(&self, id: span::Id) -> bool {
-        self.drop_span(id);
-        false
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the subscriber cannot update its span-close state.
+    fn try_close(&self, _id: span::Id) -> SubscriberResult<bool> {
+        Ok(false)
     }
 
     /// Returns a type representing this subscriber's view of the current span.
@@ -470,8 +580,13 @@ pub trait Subscriber: AsAny {
     ///
     /// [`Current::new`]: super::span::Current#tymethod.new
     /// [`Current::none`]: super::span::Current#tymethod.none
-    fn current_span(&self) -> span::Current {
-        span::Current::unknown()
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the subscriber tracks current-span state but cannot
+    /// query it.
+    fn current_span(&self) -> SubscriberResult<span::Current> {
+        Ok(span::Current::unknown())
     }
 
     // === Downcasting methods ================================================
@@ -536,12 +651,20 @@ impl dyn Subscriber + Sync {
 
 impl dyn Subscriber + Send + Sync {
     /// Returns `true` if this [`Subscriber`] is the same type as `T`.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public downcasting predicate mirrors the Subscriber trait-object API"
+    )]
     pub fn is<T: Any>(&self) -> bool {
         self.downcast_ref::<T>().is_some()
     }
 
     /// Returns some reference to this [`Subscriber`] value if it is of type `T`,
     /// or `None` if it isn't.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public downcasting accessor mirrors the Subscriber trait-object API"
+    )]
     pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
         self.downcast_ref_by_id(TypeId::of::<T>())?
             .downcast_ref::<T>()
@@ -653,31 +776,46 @@ pub struct NoSubscriber(());
 
 impl Subscriber for NoSubscriber {
     #[inline]
-    fn register_callsite(&self, _: &'static Metadata<'static>) -> Interest {
-        Interest::never()
+    fn register_callsite(&self, _: &'static Metadata<'static>) -> SubscriberResult<Interest> {
+        Ok(Interest::never())
     }
 
-    fn new_span(&self, _: &span::Attributes<'_>) -> span::Id {
-        span::Id::from_non_zero_u64(NonZeroU64::MIN)
+    fn new_span(&self, _: &span::Attributes<'_>) -> SubscriberResult<span::Id> {
+        Ok(span::Id::from_non_zero_u64(NonZeroU64::MIN))
     }
 
-    fn event(&self, _event: &Event<'_>) {}
+    fn event(&self, _event: &Event<'_>) -> SubscriberResult {
+        Ok(())
+    }
 
-    fn record(&self, _span: span::Id, _values: &span::Record<'_>) {}
+    fn record(&self, _span: span::Id, _values: &span::Record<'_>) -> SubscriberResult {
+        Ok(())
+    }
 
-    fn record_follows_from(&self, _span: span::Id, _follows: span::Id) {}
+    fn record_follows_from(&self, _span: span::Id, _follows: span::Id) -> SubscriberResult {
+        Ok(())
+    }
 
     #[inline]
-    fn enabled(&self, _metadata: &Metadata<'_>) -> bool {
-        false
+    fn enabled(&self, _metadata: &Metadata<'_>) -> SubscriberResult<bool> {
+        Ok(false)
     }
 
-    fn enter(&self, _span: span::Id) {}
-    fn exit(&self, _span: span::Id) {}
+    fn enter(&self, _span: span::Id) -> SubscriberResult {
+        Ok(())
+    }
+
+    fn exit(&self, _span: span::Id) -> SubscriberResult {
+        Ok(())
+    }
 }
 
 impl NoSubscriber {
     /// Returns a new `NoSubscriber`.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public no-op subscriber constructor remains part of the subscriber API"
+    )]
     #[must_use]
     pub const fn new() -> Self {
         Self(())
@@ -689,12 +827,15 @@ where
     S: Subscriber + ?Sized,
 {
     #[inline]
-    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
+    fn register_callsite(
+        &self,
+        metadata: &'static Metadata<'static>,
+    ) -> SubscriberResult<Interest> {
         self.as_ref().register_callsite(metadata)
     }
 
     #[inline]
-    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+    fn enabled(&self, metadata: &Metadata<'_>) -> SubscriberResult<bool> {
         self.as_ref().enabled(metadata)
     }
 
@@ -704,57 +845,52 @@ where
     }
 
     #[inline]
-    fn new_span(&self, span: &span::Attributes<'_>) -> span::Id {
+    fn new_span(&self, span: &span::Attributes<'_>) -> SubscriberResult<span::Id> {
         self.as_ref().new_span(span)
     }
 
     #[inline]
-    fn record(&self, span: span::Id, values: &span::Record<'_>) {
-        self.as_ref().record(span, values);
+    fn record(&self, span: span::Id, values: &span::Record<'_>) -> SubscriberResult {
+        self.as_ref().record(span, values)
     }
 
     #[inline]
-    fn record_follows_from(&self, span: span::Id, follows: span::Id) {
-        self.as_ref().record_follows_from(span, follows);
+    fn record_follows_from(&self, span: span::Id, follows: span::Id) -> SubscriberResult {
+        self.as_ref().record_follows_from(span, follows)
     }
 
     #[inline]
-    fn event_enabled(&self, event: &Event<'_>) -> bool {
+    fn event_enabled(&self, event: &Event<'_>) -> SubscriberResult<bool> {
         self.as_ref().event_enabled(event)
     }
 
     #[inline]
-    fn event(&self, event: &Event<'_>) {
-        self.as_ref().event(event);
+    fn event(&self, event: &Event<'_>) -> SubscriberResult {
+        self.as_ref().event(event)
     }
 
     #[inline]
-    fn enter(&self, span: span::Id) {
-        self.as_ref().enter(span);
+    fn enter(&self, span: span::Id) -> SubscriberResult {
+        self.as_ref().enter(span)
     }
 
     #[inline]
-    fn exit(&self, span: span::Id) {
-        self.as_ref().exit(span);
+    fn exit(&self, span: span::Id) -> SubscriberResult {
+        self.as_ref().exit(span)
     }
 
     #[inline]
-    fn clone_span(&self, id: span::Id) -> span::Id {
+    fn clone_span(&self, id: span::Id) -> SubscriberResult<span::Id> {
         self.as_ref().clone_span(id)
     }
 
     #[inline]
-    fn try_close(&self, id: span::Id) -> bool {
+    fn try_close(&self, id: span::Id) -> SubscriberResult<bool> {
         self.as_ref().try_close(id)
     }
 
     #[inline]
-    fn drop_span(&self, id: span::Id) {
-        let _closed = self.as_ref().try_close(id);
-    }
-
-    #[inline]
-    fn current_span(&self) -> span::Current {
+    fn current_span(&self) -> SubscriberResult<span::Current> {
         self.as_ref().current_span()
     }
 
@@ -774,12 +910,15 @@ where
     S: Subscriber + ?Sized,
 {
     #[inline]
-    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
+    fn register_callsite(
+        &self,
+        metadata: &'static Metadata<'static>,
+    ) -> SubscriberResult<Interest> {
         self.as_ref().register_callsite(metadata)
     }
 
     #[inline]
-    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+    fn enabled(&self, metadata: &Metadata<'_>) -> SubscriberResult<bool> {
         self.as_ref().enabled(metadata)
     }
 
@@ -789,57 +928,52 @@ where
     }
 
     #[inline]
-    fn new_span(&self, span: &span::Attributes<'_>) -> span::Id {
+    fn new_span(&self, span: &span::Attributes<'_>) -> SubscriberResult<span::Id> {
         self.as_ref().new_span(span)
     }
 
     #[inline]
-    fn record(&self, span: span::Id, values: &span::Record<'_>) {
-        self.as_ref().record(span, values);
+    fn record(&self, span: span::Id, values: &span::Record<'_>) -> SubscriberResult {
+        self.as_ref().record(span, values)
     }
 
     #[inline]
-    fn record_follows_from(&self, span: span::Id, follows: span::Id) {
-        self.as_ref().record_follows_from(span, follows);
+    fn record_follows_from(&self, span: span::Id, follows: span::Id) -> SubscriberResult {
+        self.as_ref().record_follows_from(span, follows)
     }
 
     #[inline]
-    fn event_enabled(&self, event: &Event<'_>) -> bool {
+    fn event_enabled(&self, event: &Event<'_>) -> SubscriberResult<bool> {
         self.as_ref().event_enabled(event)
     }
 
     #[inline]
-    fn event(&self, event: &Event<'_>) {
-        self.as_ref().event(event);
+    fn event(&self, event: &Event<'_>) -> SubscriberResult {
+        self.as_ref().event(event)
     }
 
     #[inline]
-    fn enter(&self, span: span::Id) {
-        self.as_ref().enter(span);
+    fn enter(&self, span: span::Id) -> SubscriberResult {
+        self.as_ref().enter(span)
     }
 
     #[inline]
-    fn exit(&self, span: span::Id) {
-        self.as_ref().exit(span);
+    fn exit(&self, span: span::Id) -> SubscriberResult {
+        self.as_ref().exit(span)
     }
 
     #[inline]
-    fn clone_span(&self, id: span::Id) -> span::Id {
+    fn clone_span(&self, id: span::Id) -> SubscriberResult<span::Id> {
         self.as_ref().clone_span(id)
     }
 
     #[inline]
-    fn try_close(&self, id: span::Id) -> bool {
+    fn try_close(&self, id: span::Id) -> SubscriberResult<bool> {
         self.as_ref().try_close(id)
     }
 
     #[inline]
-    fn drop_span(&self, id: span::Id) {
-        let _closed = self.as_ref().try_close(id);
-    }
-
-    #[inline]
-    fn current_span(&self) -> span::Current {
+    fn current_span(&self) -> SubscriberResult<span::Current> {
         self.as_ref().current_span()
     }
 

@@ -1,4 +1,4 @@
-use crate::{Instrument, Instrumented, WithDispatch};
+use crate::{Instrument as _, Instrumented, WithDispatch};
 use futures_01::{
     Future,
     future::{ExecuteError, ExecuteErrorKind, Executor},
@@ -9,19 +9,19 @@ where
     T: Executor<Instrumented<F>>,
     F: Future<Item = (), Error = ()>,
 {
-    fn execute(&self, future: F) -> Result<(), ExecuteError<F>> {
+    fn execute(&self, job: F) -> Result<(), ExecuteError<F>> {
         let Some(inner) = self.inner.as_ref() else {
-            return Err(ExecuteError::new(ExecuteErrorKind::Shutdown, future));
+            return Err(ExecuteError::new(ExecuteErrorKind::Shutdown, job));
         };
-        let future = future.instrument(self.span.clone());
-        match inner.execute(future) {
+        let instrumented_job = job.instrument(self.span.clone());
+        match inner.execute(instrumented_job) {
             Ok(()) => Ok(()),
-            Err(e) => {
-                let kind = e.kind();
-                match e.into_future().into_inner() {
-                    Some(future) => Err(ExecuteError::new(kind, future)),
-                    None => Ok(()),
-                }
+            Err(error) => {
+                let kind = error.kind();
+                error
+                    .into_future()
+                    .into_inner()
+                    .map_or_else(|| Ok(()), |original| Err(ExecuteError::new(kind, original)))
             }
         }
     }
@@ -32,25 +32,22 @@ where
     T: Executor<WithDispatch<F>>,
     F: Future<Item = (), Error = ()>,
 {
-    fn execute(&self, future: F) -> Result<(), ExecuteError<F>> {
-        let future = self.with_dispatch(future);
-        self.inner.execute(future).map_err(|e| {
-            let kind = e.kind();
-            let future = e.into_future().inner;
-            ExecuteError::new(kind, future)
+    fn execute(&self, job: F) -> Result<(), ExecuteError<F>> {
+        let dispatched_job = self.with_dispatch(job);
+        self.inner.execute(dispatched_job).map_err(|error| {
+            let kind = error.kind();
+            let original = error.into_future().inner;
+            ExecuteError::new(kind, original)
         })
     }
 }
-
-#[cfg(feature = "tokio-executor")]
-pub use self::tokio_executor::*;
 
 /// `tokio_executor::Executor`/`TypedExecutor` integration for the instrumented
 /// wrappers. Enabled by the `tokio-executor` feature (and by `tokio`, which
 /// implies it).
 #[cfg(feature = "tokio-executor")]
 mod tokio_executor {
-    use crate::{Instrument, Instrumented, WithDispatch};
+    use crate::{Instrument as _, Instrumented, WithDispatch};
     use ::tokio_executor::{Executor, SpawnError, TypedExecutor};
     use futures_01::Future;
 
@@ -60,14 +57,14 @@ mod tokio_executor {
     {
         fn spawn(
             &mut self,
-            future: Box<dyn Future<Error = (), Item = ()> + 'static + Send>,
+            job: Box<dyn Future<Error = (), Item = ()> + 'static + Send>,
         ) -> Result<(), SpawnError> {
             let Some(inner) = self.inner.as_mut() else {
                 return Err(SpawnError::shutdown());
             };
             // TODO: get rid of double box somehow?
-            let future = Box::new(future.instrument(self.span.clone()));
-            inner.spawn(future)
+            let instrumented_job = Box::new(job.instrument(self.span.clone()));
+            inner.spawn(instrumented_job)
         }
     }
 
@@ -75,11 +72,11 @@ mod tokio_executor {
     where
         T: TypedExecutor<Instrumented<F>>,
     {
-        fn spawn(&mut self, future: F) -> Result<(), SpawnError> {
+        fn spawn(&mut self, job: F) -> Result<(), SpawnError> {
             let Some(inner) = self.inner.as_mut() else {
                 return Err(SpawnError::shutdown());
             };
-            inner.spawn(future.instrument(self.span.clone()))
+            inner.spawn(job.instrument(self.span.clone()))
         }
 
         fn status(&self) -> Result<(), SpawnError> {
@@ -96,11 +93,11 @@ mod tokio_executor {
     {
         fn spawn(
             &mut self,
-            future: Box<dyn Future<Error = (), Item = ()> + 'static + Send>,
+            job: Box<dyn Future<Error = (), Item = ()> + 'static + Send>,
         ) -> Result<(), SpawnError> {
             // TODO: get rid of double box?
-            let future = Box::new(self.with_dispatch(future));
-            self.inner.spawn(future)
+            let dispatched_job = Box::new(self.with_dispatch(job));
+            self.inner.spawn(dispatched_job)
         }
     }
 
@@ -108,8 +105,8 @@ mod tokio_executor {
     where
         T: TypedExecutor<WithDispatch<F>>,
     {
-        fn spawn(&mut self, future: F) -> Result<(), SpawnError> {
-            self.inner.spawn(self.with_dispatch(future))
+        fn spawn(&mut self, job: F) -> Result<(), SpawnError> {
+            self.inner.spawn(self.with_dispatch(job))
         }
 
         fn status(&self) -> Result<(), SpawnError> {
@@ -118,14 +115,11 @@ mod tokio_executor {
     }
 }
 
-#[cfg(feature = "tokio")]
-pub use self::tokio_runtime::*;
-
 /// tokio 0.1 runtime conveniences (`Runtime`/`current_thread::Runtime`).
 /// Provided only by the full `tokio` feature.
 #[cfg(feature = "tokio")]
 mod tokio_runtime {
-    use crate::{Instrument, Instrumented, WithDispatch};
+    use crate::{Instrument as _, Instrumented, WithDispatch};
     use futures_01::Future;
     use tokio_01::runtime::{Runtime, TaskExecutor, current_thread};
 
@@ -138,15 +132,22 @@ mod tokio_runtime {
         ///
         /// This method simply wraps a call to `tokio::runtime::Runtime::spawn`,
         /// instrumenting the spawned future beforehand.
-        pub fn spawn<F>(&mut self, future: F) -> Result<&mut Self, tokio_executor::SpawnError>
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the wrapped runtime has already been consumed.
+        pub fn spawn_instrumented<F>(
+            &mut self,
+            job: F,
+        ) -> Result<&mut Self, tokio_executor::SpawnError>
         where
             F: Future<Item = (), Error = ()> + Send + 'static,
         {
             let Some(inner) = self.inner.as_mut() else {
                 return Err(tokio_executor::SpawnError::shutdown());
             };
-            let future = future.instrument(self.span.clone());
-            let _runtime = inner.spawn(future);
+            let instrumented_job = job.instrument(self.span.clone());
+            let _runtime = inner.spawn(instrumented_job);
             Ok(self)
         }
 
@@ -165,15 +166,15 @@ mod tokio_runtime {
         ///
         /// This function panics if the executor is at capacity, if the provided
         /// future panics, or if called within an asynchronous execution context.
-        pub fn block_on<F, R, E>(&mut self, future: F) -> Option<Result<R, E>>
+        pub fn block_on<F, R, E>(&mut self, job: F) -> Option<Result<R, E>>
         where
             F: Send + 'static + Future<Item = R, Error = E>,
             R: Send + 'static,
             E: Send + 'static,
         {
             let inner = self.inner.as_mut()?;
-            let future = future.instrument(self.span.clone());
-            Some(inner.block_on(future))
+            let instrumented_job = job.instrument(self.span.clone());
+            Some(inner.block_on(instrumented_job))
         }
 
         /// Return an instrumented handle to the runtime's executor.
@@ -198,15 +199,22 @@ mod tokio_runtime {
         ///
         /// This method simply wraps a call to `current_thread::Runtime::spawn`,
         /// instrumenting the spawned future beforehand.
-        pub fn spawn<F>(&mut self, future: F) -> Result<&mut Self, tokio_executor::SpawnError>
+        ///
+        /// # Errors
+        ///
+        /// Returns an error if the wrapped runtime has already been consumed.
+        pub fn spawn_instrumented<F>(
+            &mut self,
+            job: F,
+        ) -> Result<&mut Self, tokio_executor::SpawnError>
         where
             F: Future<Item = (), Error = ()> + 'static,
         {
             let Some(inner) = self.inner.as_mut() else {
                 return Err(tokio_executor::SpawnError::shutdown());
             };
-            let future = future.instrument(self.span.clone());
-            let _runtime = inner.spawn(future);
+            let instrumented_job = job.instrument(self.span.clone());
+            let _runtime = inner.spawn(instrumented_job);
             Ok(self)
         }
 
@@ -234,15 +242,15 @@ mod tokio_runtime {
         ///
         /// This function panics if the executor is at capacity, if the provided
         /// future panics, or if called within an asynchronous execution context.
-        pub fn block_on<F, R, E>(&mut self, future: F) -> Option<Result<R, E>>
+        pub fn block_on<F, R, E>(&mut self, job: F) -> Option<Result<R, E>>
         where
             F: 'static + Future<Item = R, Error = E>,
             R: 'static,
             E: 'static,
         {
             let inner = self.inner.as_mut()?;
-            let future = future.instrument(self.span.clone());
-            Some(inner.block_on(future))
+            let instrumented_job = job.instrument(self.span.clone());
+            Some(inner.block_on(instrumented_job))
         }
 
         /// Get a new instrumented handle to spawn futures on the single-threaded
@@ -269,12 +277,12 @@ mod tokio_runtime {
         ///
         /// This method simply wraps a call to `tokio::runtime::Runtime::spawn`,
         /// instrumenting the spawned future beforehand.
-        pub fn spawn<F>(&mut self, future: F) -> &mut Self
+        pub fn spawn_with_dispatch<F>(&mut self, job: F) -> &mut Self
         where
             F: Future<Item = (), Error = ()> + Send + 'static,
         {
-            let future = self.with_dispatch(future);
-            let _runtime = self.inner.spawn(future);
+            let dispatched_job = self.with_dispatch(job);
+            let _runtime = self.inner.spawn(dispatched_job);
             self
         }
 
@@ -294,14 +302,18 @@ mod tokio_runtime {
         ///
         /// This function panics if the executor is at capacity, if the provided
         /// future panics, or if called within an asynchronous execution context.
-        pub fn block_on<F, R, E>(&mut self, future: F) -> Result<R, E>
+        ///
+        /// # Errors
+        ///
+        /// Returns the future's error if it completes unsuccessfully.
+        pub fn block_on<F, R, E>(&mut self, job: F) -> Result<R, E>
         where
             F: Send + 'static + Future<Item = R, Error = E>,
             R: Send + 'static,
             E: Send + 'static,
         {
-            let future = self.with_dispatch(future);
-            self.inner.block_on(future)
+            let dispatched_job = self.with_dispatch(job);
+            self.inner.block_on(dispatched_job)
         }
 
         /// Return a handle to the runtime's executor, in the context of this
@@ -323,12 +335,12 @@ mod tokio_runtime {
         ///
         /// This method simply wraps a call to `current_thread::Runtime::spawn`,
         /// instrumenting the spawned future beforehand.
-        pub fn spawn<F>(&mut self, future: F) -> &mut Self
+        pub fn spawn_with_dispatch<F>(&mut self, job: F) -> &mut Self
         where
             F: Future<Item = (), Error = ()> + 'static,
         {
-            let future = self.with_dispatch(future);
-            let _runtime = self.inner.spawn(future);
+            let dispatched_job = self.with_dispatch(job);
+            let _runtime = self.inner.spawn(dispatched_job);
             self
         }
 
@@ -356,14 +368,18 @@ mod tokio_runtime {
         ///
         /// This function panics if the executor is at capacity, if the provided
         /// future panics, or if called within an asynchronous execution context.
-        pub fn block_on<F, R, E>(&mut self, future: F) -> Result<R, E>
+        ///
+        /// # Errors
+        ///
+        /// Returns the future's error if it completes unsuccessfully.
+        pub fn block_on<F, R, E>(&mut self, job: F) -> Result<R, E>
         where
             F: 'static + Future<Item = R, Error = E>,
             R: 'static,
             E: 'static,
         {
-            let future = self.with_dispatch(future);
-            self.inner.block_on(future)
+            let dispatched_job = self.with_dispatch(job);
+            self.inner.block_on(dispatched_job)
         }
 
         /// Get a new handle to spawn futures on the single-threaded Tokio runtime,

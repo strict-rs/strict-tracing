@@ -184,15 +184,66 @@
     html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
     issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
+use std::{borrow::Borrow, fmt};
+use tracing::{Dispatch, Metadata, span};
+
+/// Type-erased callback for walking span context after a `SpanTrace` capture.
+///
+/// This function remembers the types of the subscriber and the formatter, so
+/// that callers can downcast to something aware of them without knowing those
+/// types at the callsite.
+pub(crate) struct WithContext(
+    /// Invokes the subscriber-specific context walker for a captured span.
+    fn(&Dispatch, span::Id, visitor: &mut dyn FnMut(&'static Metadata<'static>, &str) -> bool),
+);
+
+impl fmt::Debug for WithContext {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("WithContext")
+            .finish_non_exhaustive()
+    }
+}
+
+impl WithContext {
+    /// Builds a type-erased callback for visiting formatted span context.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "constructor keeps the type-erased callback field private across sibling modules"
+    )]
+    pub(crate) const fn new(
+        callback: fn(
+            &Dispatch,
+            span::Id,
+            visitor: &mut dyn FnMut(&'static Metadata<'static>, &str) -> bool,
+        ),
+    ) -> Self {
+        Self(callback)
+    }
+
+    /// Visits formatted span context with this type-erased callback.
+    pub(crate) fn with_context(
+        &self,
+        dispatch: &Dispatch,
+        id: impl Borrow<span::Id>,
+        mut visitor: impl FnMut(&'static Metadata<'static>, &str) -> bool,
+    ) {
+        (self.0)(dispatch, *id.borrow(), &mut visitor);
+    }
+}
+
 mod backtrace;
 #[cfg(feature = "traced-error")]
 mod error;
-mod layer;
+#[path = "layer.rs"]
+mod layer_impl;
+/// Crate-root alias for internal bridge types shared by sibling modules.
+pub(crate) use crate as layer;
 
 pub use self::backtrace::{SpanTrace, SpanTraceStatus};
 #[cfg(feature = "traced-error")]
 pub use self::error::{ExtractSpanTrace, InstrumentError, InstrumentResult, TracedError};
-pub use self::layer::ErrorLayer;
+pub use self::layer_impl::ErrorLayer;
 
 #[cfg(feature = "traced-error")]
 #[cfg_attr(docsrs, doc(cfg(feature = "traced-error")))]

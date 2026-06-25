@@ -43,10 +43,17 @@
 //! `/some/directory/prefix.log.YYYY-MM-DD-HH`:
 //!
 //! ```rust
-//! # fn docs() {
-//! let file_appender = tracing_appender::rolling::hourly("/some/directory", "prefix.log");
+//! # fn docs() -> Result<(), Box<dyn std::error::Error>> {
+//! let file_appender = tracing_appender::rolling::hourly("/some/directory", "prefix.log")?;
+//! # drop(file_appender);
+//! # Ok(())
 //! # }
 //! ```
+//!
+//! Rolling file appender constructors return a `Result` because initialization
+//! opens the initial log file and can fail. Use [`RollingFileAppender::builder`]
+//! and [`rolling::Builder::build`] when you need additional appender options
+//! such as filename suffixes, latest-log symlinks, or log-file retention.
 //!
 //! The file appender implements [`std::io::Write`]. To be used with
 //! [`tracing_subscriber::FmtSubscriber`][fmt_subscriber], it must be combined with a
@@ -61,11 +68,12 @@
 //! which implements [`MakeWriter`][make_writer].
 //!
 //! ```rust
-//! # fn doc() {
+//! # fn doc() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 //! let (non_blocking, _guard) = tracing_appender::non_blocking(std::io::stdout());
 //! tracing_subscriber::fmt()
 //!     .with_writer(non_blocking)
-//!     .init();
+//!     .try_init()?;
+//! # Ok(())
 //! # }
 //! ```
 //! **Note:** `_guard` is a [`WorkerGuard`] which is returned by [`tracing_appender::non_blocking`][non_blocking]
@@ -92,11 +100,12 @@
 //!     }
 //! }
 //!
-//! # fn doc() {
+//! # fn doc() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 //! let (non_blocking, _guard) = tracing_appender::non_blocking(TestWriter);
 //! tracing_subscriber::fmt()
 //!     .with_writer(non_blocking)
-//!     .init();
+//!     .try_init()?;
+//! # Ok(())
 //! # }
 //! ```
 //!
@@ -112,12 +121,13 @@
 //! ## Non-Blocking Rolling File Appender
 //!
 //! ```rust
-//! # fn docs() {
-//! let file_appender = tracing_appender::rolling::hourly("/some/directory", "prefix.log");
+//! # fn docs() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+//! let file_appender = tracing_appender::rolling::hourly("/some/directory", "prefix.log")?;
 //! let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
 //! tracing_subscriber::fmt()
 //!     .with_writer(non_blocking)
-//!     .init();
+//!     .try_init()?;
+//! # Ok(())
 //! # }
 //! ```
 //!
@@ -149,9 +159,9 @@ pub mod non_blocking;
 
 pub mod rolling;
 
-mod worker;
-
-pub(crate) mod sync;
+/// Synchronization primitives shared by rolling appenders.
+#[doc(hidden)]
+pub mod sync;
 
 /// Convenience function for creating a non-blocking, off-thread writer.
 ///
@@ -174,8 +184,11 @@ pub fn non_blocking<T: Write + Send + 'static>(writer: T) -> (NonBlocking, Worke
     NonBlocking::new(writer)
 }
 
+/// Messages sent from non-blocking writers to the background worker.
 #[derive(Debug)]
 pub(crate) enum Msg {
+    /// Log line payload to be written by the worker.
     Line(Vec<u8>),
+    /// Shutdown request sent by [`non_blocking::WorkerGuard`].
     Shutdown,
 }

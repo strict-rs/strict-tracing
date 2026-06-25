@@ -26,7 +26,7 @@
 //! [ignore]: Builder::ignore_crate()
 use crate::AsTrace as _;
 #[cfg(all(feature = "interest-cache", feature = "std"))]
-use crate::interest_cache::configure as configure_interest_cache;
+use crate::interest_cache;
 pub use log::SetLoggerError;
 use tracing_core::dispatcher;
 
@@ -61,7 +61,7 @@ impl LogTracer {
     /// use tracing_log::LogTracer;
     /// use log;
     ///
-    /// # fn main() -> Result<(), Box<Error>> {
+    /// # fn main() -> Result<(), Box<dyn Error>> {
     /// LogTracer::builder()
     ///     .ignore_crate("foo") // suppose the `foo` crate is using `tracing`'s log feature
     ///     .with_max_level(log::LevelFilter::Info)
@@ -89,7 +89,7 @@ impl LogTracer {
     /// use tracing_log::LogTracer;
     /// use log;
     ///
-    /// # fn main() -> Result<(), Box<Error>> {
+    /// # fn main() -> Result<(), Box<dyn Error>> {
     /// let logger = LogTracer::new();
     /// log::set_boxed_logger(Box::new(logger))?;
     /// log::set_max_level(log::LevelFilter::Trace);
@@ -102,6 +102,10 @@ impl LogTracer {
     ///
     /// [`init`]: LogTracer::init()
     /// [`init_with_filter`]: .#method.init_with_filter
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public constructor documents standalone logger construction outside global initialization"
+    )]
     #[must_use]
     pub fn new() -> Self {
         Self {
@@ -138,7 +142,7 @@ impl LogTracer {
     /// use tracing_log::LogTracer;
     /// use log;
     ///
-    /// # fn main() -> Result<(), Box<Error>> {
+    /// # fn main() -> Result<(), Box<dyn Error>> {
     /// LogTracer::init()?;
     ///
     /// // will be available for Subscribers as a tracing Event
@@ -176,15 +180,6 @@ impl Default for LogTracer {
     }
 }
 
-#[cfg(all(feature = "interest-cache", feature = "std"))]
-use crate::interest_cache::try_cache as try_cache_interest;
-
-#[cfg(not(all(feature = "interest-cache", feature = "std")))]
-/// Runs the provided callback directly when the interest-cache feature is absent.
-fn try_cache_interest(_: &log::Metadata<'_>, callback: impl FnOnce() -> bool) -> bool {
-    callback()
-}
-
 impl log::Log for LogTracer {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
         // First, check the log record against the current max level enabled by
@@ -207,15 +202,27 @@ impl log::Log for LogTracer {
             }
         }
 
-        try_cache_interest(metadata, || {
+        let check_dispatch = || {
             // Finally, check if the current `tracing` dispatcher cares about this.
-            dispatcher::get_default(|dispatch| dispatch.enabled(&metadata.as_trace()))
-        })
+            dispatcher::get_default(|dispatch| {
+                dispatch.enabled(&metadata.as_trace()).unwrap_or(false)
+            })
+        };
+
+        #[cfg(all(feature = "interest-cache", feature = "std"))]
+        {
+            interest_cache::try_cache(metadata, check_dispatch)
+        }
+
+        #[cfg(not(all(feature = "interest-cache", feature = "std")))]
+        {
+            check_dispatch()
+        }
     }
 
     fn log(&self, record: &log::Record<'_>) {
         if self.enabled(record.metadata()) {
-            crate::dispatch_record(record);
+            let _ignored_error = crate::dispatch_record(record).err();
         }
     }
 
@@ -253,6 +260,10 @@ impl Builder {
     /// This should be used when a crate enables the `tracing/log` feature to
     /// emit log records for tracing events. Otherwise, those events will be
     /// recorded twice.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public builder method exposes the documented single-crate filtering API"
+    )]
     #[must_use]
     pub fn ignore_crate(mut self, name: impl Into<String>) -> Self {
         self.ignore_crates.push(name.into());
@@ -298,7 +309,7 @@ impl Builder {
     #[cfg(all(feature = "interest-cache", feature = "std"))]
     #[cfg_attr(docsrs, doc(cfg(all(feature = "interest-cache", feature = "std"))))]
     #[must_use]
-    pub fn with_interest_cache(mut self, config: crate::InterestCacheConfig) -> Self {
+    pub const fn with_interest_cache(mut self, config: crate::InterestCacheConfig) -> Self {
         self.interest_cache_config = Some(config);
         self
     }
@@ -314,9 +325,9 @@ impl Builder {
     /// already been installed.
     #[cfg(feature = "std")]
     #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-    pub fn init(mut self) -> Result<(), SetLoggerError> {
+    pub fn init(self) -> Result<(), SetLoggerError> {
         #[cfg(all(feature = "interest-cache", feature = "std"))]
-        configure_interest_cache(self.interest_cache_config.take());
+        interest_cache::configure(self.interest_cache_config);
 
         let ignore_crates = self.ignore_crates.into_boxed_slice();
         let logger = Box::new(LogTracer { ignore_crates });

@@ -1,17 +1,25 @@
 #![cfg(feature = "std")]
 //! No-subscriber behavior coverage.
 
-use tracing_mock::subscriber;
+#[cfg(test)]
+mod tests {
+    use strict_test_support::{TestFailure, ensure_ok};
+    use tracing::subscriber::{NoSubscriber, set_global_default, with_default};
+    use tracing_mock::subscriber;
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
-fn no_subscriber_disables_global() {
-    // Reproduces https://github.com/tokio-rs/tracing/issues/1999
-    let (subscriber, handle) = subscriber::mock().only().run_with_handle();
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("setting global default must succeed");
-    tracing::subscriber::with_default(tracing::subscriber::NoSubscriber::default(), || {
-        tracing::info!("this should not be recorded");
-    });
-    handle.assert_finished();
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn no_subscriber_disables_global() -> Result<(), TestFailure> {
+        // Reproduces https://github.com/tokio-rs/tracing/issues/1999
+        let (subscriber, handle) = subscriber::mock().only().run_with_handle();
+        ensure_ok(
+            set_global_default(subscriber),
+            "setting global default must succeed",
+        )?;
+        with_default(NoSubscriber::default(), || {
+            tracing::info!("this should not be recorded");
+        });
+        ensure_ok(handle.finished(), "mock expectations should finish")?;
+        Ok(())
+    }
 }

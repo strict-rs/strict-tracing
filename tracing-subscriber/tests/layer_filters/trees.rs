@@ -1,8 +1,10 @@
 use super::*;
+use strict_test_support::{TestFailure, ensure_ok};
+use tracing::subscriber::set_default;
 use tracing_mock::{expect, layer::MockLayer};
 
 #[test]
-fn basic_trees() {
+fn basic_trees() -> Result<(), TestFailure> {
     let (with_target, with_target_handle) = layer::named("info_with_target")
         .event(
             expect::event()
@@ -47,28 +49,30 @@ fn basic_trees() {
         .run_with_handle();
 
     let info_tree = info
-        .and_then(
-            with_target.with_filter(filter::filter_fn(|meta| dbg!(meta.target()) == "my_target")),
-        )
+        .and_then(with_target.with_filter(filter::filter_fn(|meta| meta.target() == "my_target")))
         .with_filter(LevelFilter::INFO);
 
     let subscriber = tracing_subscriber::registry().with(info_tree).with(all);
-    let _guard = tracing::subscriber::set_default(dbg!(subscriber));
+    let _guard = set_default(subscriber);
 
     tracing::info!("hello world");
     tracing::trace!("hello trace");
     tracing::info!(target: "my_target", "hi to my target");
     tracing::trace!(target: "my_target", "hi to my target at trace");
 
-    all_handle.assert_finished();
-    info_handle.assert_finished();
-    with_target_handle.assert_finished();
+    ensure_ok(all_handle.finished(), "mock expectations should finish")?;
+    ensure_ok(info_handle.finished(), "mock expectations should finish")?;
+    ensure_ok(
+        with_target_handle.finished(),
+        "mock expectations should finish",
+    )?;
+    Ok(())
 }
 
 #[test]
-fn filter_span_scopes() {
+fn filter_span_scopes() -> Result<(), TestFailure> {
     fn target_layer(target: &'static str) -> (MockLayer, subscriber::MockHandle) {
-        layer::named(format!("target_{}", target))
+        layer::named(format!("target_{target}"))
             .enter(expect::span().with_target(target).at_level(Level::INFO))
             .event(
                 expect::event()
@@ -82,8 +86,8 @@ fn filter_span_scopes() {
             .run_with_handle()
     }
 
-    let (a_layer, a_handle) = target_layer("a");
-    let (b_layer, b_handle) = target_layer("b");
+    let (a_target_layer, a_handle) = target_layer("a");
+    let (b_target_layer, b_handle) = target_layer("b");
     let (info_layer, info_handle) = layer::named("info")
         .enter(expect::span().with_target("b").at_level(Level::INFO))
         .enter(expect::span().with_target("a").at_level(Level::INFO))
@@ -135,12 +139,12 @@ fn filter_span_scopes() {
         .only()
         .run_with_handle();
 
-    let a_layer = a_layer.with_filter(filter::filter_fn(|meta| {
+    let a_layer = a_target_layer.with_filter(filter::filter_fn(|meta| {
         let target = meta.target();
         target == "a" || target == module_path!()
     }));
 
-    let b_layer = b_layer.with_filter(filter::filter_fn(|meta| {
+    let b_layer = b_target_layer.with_filter(filter::filter_fn(|meta| {
         let target = meta.target();
         target == "b" || target == module_path!()
     }));
@@ -153,7 +157,7 @@ fn filter_span_scopes() {
     let subscriber = tracing_subscriber::registry()
         .with(info_tree)
         .with(all_layer);
-    let _guard = tracing::subscriber::set_default(dbg!(subscriber));
+    let _guard = set_default(subscriber);
 
     {
         let _a1 = tracing::trace_span!(target: "a", "a/trace").entered();
@@ -163,10 +167,11 @@ fn filter_span_scopes() {
         tracing::info!("hello world");
         tracing::debug!(target: "a", "hello to my target");
         tracing::debug!(target: "b", "hello to my target");
-    }
+    };
 
-    all_handle.assert_finished();
-    info_handle.assert_finished();
-    a_handle.assert_finished();
-    b_handle.assert_finished();
+    ensure_ok(all_handle.finished(), "mock expectations should finish")?;
+    ensure_ok(info_handle.finished(), "mock expectations should finish")?;
+    ensure_ok(a_handle.finished(), "mock expectations should finish")?;
+    ensure_ok(b_handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }

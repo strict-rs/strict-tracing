@@ -45,7 +45,7 @@ macro_rules! span {
                 let span = $crate::__macro_support::__disabled_span(__CALLSITE.metadata());
                 $crate::if_log_enabled! { $lvl, {
                     $crate::valueset_all!(@with __CALLSITE.metadata().fields(), |value_set| {
-                        span.record_all(value_set);
+                        let _recorded: &$crate::Span = span.record_all(value_set);
                     }, $($fields)*);
                 }};
                 span
@@ -76,7 +76,7 @@ macro_rules! span {
                 let span = $crate::__macro_support::__disabled_span(__CALLSITE.metadata());
                 $crate::if_log_enabled! { $lvl, {
                     $crate::valueset_all!(@with __CALLSITE.metadata().fields(), |value_set| {
-                        span.record_all(value_set);
+                        let _recorded: &$crate::Span = span.record_all(value_set);
                     }, $($fields)*);
                 }};
                 span
@@ -154,7 +154,7 @@ macro_rules! record_all {
     ($span:expr, $($fields:tt)*) => {
         if let $crate::__macro_support::Option::Some(meta) = $span.metadata() {
             $crate::valueset!(@with meta.fields(), |value_set| {
-                $span.record_all(value_set);
+                let _recorded: &$crate::Span = $span.record_all(value_set);
             }, $($fields)*);
         }
     };
@@ -1173,7 +1173,10 @@ macro_rules! enabled {
             let interest = __CALLSITE.interest();
             if !interest.is_never() && $crate::__macro_support::__is_enabled(__CALLSITE.metadata(), interest) {
                 let meta = __CALLSITE.metadata();
-                $crate::dispatcher::get_default(|current| current.enabled(meta))
+                $crate::dispatcher::get_default(|current| match current.enabled(meta) {
+                    $crate::__macro_support::Ok(enabled) => enabled,
+                    $crate::__macro_support::Err(_error) => false,
+                })
             } else {
                 false
             }

@@ -68,10 +68,11 @@ Additionally, `tracing-subscriber` is able to consume messages emitted by `log`-
 The simplest way to use a subscriber is to call the `set_global_default` function.
 
 ```rust
+use std::error::Error;
 use tracing::{info, Level};
 use tracing_subscriber::FmtSubscriber;
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // a builder for `FmtSubscriber`.
     let subscriber = FmtSubscriber::builder()
         // all spans/events with a level higher than TRACE (e.g, debug, info, warn, etc.)
@@ -80,8 +81,7 @@ fn main() {
         // completes the builder.
         .finish();
 
-    tracing::subscriber::set_global_default(subscriber)
-        .expect("setting default subscriber failed");
+    tracing::subscriber::set_global_default(subscriber)?;
 
     let number_of_yaks = 3;
     // this creates a new event, outside of any spans.
@@ -92,6 +92,8 @@ fn main() {
         all_yaks_shaved = number_shaved == number_of_yaks,
         "yak shaving completed."
     );
+
+    Ok(())
 }
 ```
 

@@ -2,12 +2,13 @@
 //! subscriber API in the [`subscriber`] module.
 //!
 //! The expected event should be created with [`expect::event`] and a
-//! chain of method calls to describe the assertions we wish to make
+//! chain of method calls to describe the expectations we wish to make
 //! about the event.
 //!
 //! # Examples
 //!
 //! ```
+//! # fn main() -> Result<(), strict_test_support::TestFailure> {
 //! use tracing::subscriber::with_default;
 //! use tracing_mock::{expect, subscriber};
 //!
@@ -23,7 +24,9 @@
 //!     tracing::info!(field.name = "field_value");
 //! });
 //!
-//! handle.assert_finished();
+//! strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! [`subscriber`]: mod@crate::subscriber
@@ -32,8 +35,9 @@ use std::fmt;
 
 use crate::{
     ancestry::{ActualAncestry, ExpectedAncestry},
+    failure::{ExpectationError, ExpectationResult},
     field,
-    metadata::ExpectedMetadata,
+    metadata::{ExpectedMetadata, display_level},
     span,
 };
 
@@ -45,9 +49,13 @@ use crate::{
 /// [`event`]: mod@crate::event
 #[derive(Default, Eq, PartialEq)]
 pub struct ExpectedEvent {
+    /// Field expectations for this event.
     pub(super) fields: Option<field::ExpectedFields>,
+    /// Ancestry expectations for this event.
     pub(super) ancestry: Option<ExpectedAncestry>,
+    /// Scope expectations for this event.
     pub(super) in_spans: Option<Vec<span::ExpectedSpan>>,
+    /// Metadata expectations for this event.
     pub(super) metadata: ExpectedMetadata,
 }
 
@@ -66,6 +74,7 @@ impl ExpectedEvent {
     /// name and line number. Assertions about event names are
     /// therefore quite fragile, since they will change as the source
     /// code is modified.
+    #[must_use]
     pub fn named<I>(self, name: I) -> Self
     where
         I: Into<String>,
@@ -93,7 +102,8 @@ impl ExpectedEvent {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing::subscriber::with_default;
     /// use tracing_mock::{expect, subscriber};
     ///
@@ -108,12 +118,15 @@ impl ExpectedEvent {
     ///     tracing::info!(field.name = "field_value");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// A different field value will cause the expectation to fail:
     ///
-    /// ```should_panic
+    /// ```no_run
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing::subscriber::with_default;
     /// use tracing_mock::{expect, subscriber};
     ///
@@ -128,10 +141,13 @@ impl ExpectedEvent {
     ///     tracing::info!(field.name = "different_field_value");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`ExpectedFields`]: struct@crate::field::ExpectedFields
+    #[must_use]
     pub fn with_fields<I>(self, fields: I) -> Self
     where
         I: Into<field::ExpectedFields>,
@@ -149,7 +165,8 @@ impl ExpectedEvent {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing::subscriber::with_default;
     /// use tracing_mock::{expect, subscriber};
     ///
@@ -164,13 +181,16 @@ impl ExpectedEvent {
     ///     tracing::warn!("this message is bad news");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// Expecting an event at `INFO` level will fail if the event is
     /// recorded at any other level:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing::subscriber::with_default;
     /// use tracing_mock::{expect, subscriber};
     ///
@@ -185,8 +205,11 @@ impl ExpectedEvent {
     ///     tracing::warn!("this message is bad news");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
+    #[must_use]
     pub fn at_level(self, level: tracing::Level) -> Self {
         Self {
             metadata: ExpectedMetadata {
@@ -204,6 +227,7 @@ impl ExpectedEvent {
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing::subscriber::with_default;
     /// use tracing_mock::{expect, subscriber};
     ///
@@ -218,12 +242,15 @@ impl ExpectedEvent {
     ///     tracing::info!(target: "some_target", field = &"value");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// The test will fail if the target is different:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing::subscriber::with_default;
     /// use tracing_mock::{expect, subscriber};
     ///
@@ -238,8 +265,11 @@ impl ExpectedEvent {
     ///     tracing::info!(target: "a_different_target", field = &"value");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
+    #[must_use]
     pub fn with_target<I>(self, target: I) -> Self
     where
         I: Into<String>,
@@ -271,6 +301,7 @@ impl ExpectedEvent {
     /// An explicit or contextual can be matched on an `ExpectedSpan`.
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing::subscriber::with_default;
     /// use tracing_mock::{expect, subscriber};
     ///
@@ -290,7 +321,9 @@ impl ExpectedEvent {
     ///     tracing::info!(parent: parent.id(), field = &"value");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     /// The functions `expect::has_explicit_parent` and
     /// `expect::has_contextual_parent` take `Into<ExpectedSpan>`, so a string
@@ -298,6 +331,7 @@ impl ExpectedEvent {
     /// [`ExpectedId`] can be passed to match a span with that Id.
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing::subscriber::with_default;
     /// use tracing_mock::{expect, subscriber};
     ///
@@ -313,13 +347,16 @@ impl ExpectedEvent {
     ///     tracing::info!(parent: parent.id(), field = &"value");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// In the following example, we expect that the matched event is
     /// an explicit root:
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing::subscriber::with_default;
     /// use tracing_mock::{expect, subscriber};
     ///
@@ -336,7 +373,9 @@ impl ExpectedEvent {
     ///     tracing::info!(parent: None, field = &"value");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// When `expect::has_contextual_parent("parent_name")` is passed to
@@ -344,6 +383,7 @@ impl ExpectedEvent {
     /// parent span to expect.
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing::subscriber::with_default;
     /// use tracing_mock::{expect, subscriber};
     ///
@@ -361,13 +401,16 @@ impl ExpectedEvent {
     ///     tracing::info!(field = &"value");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// Matching an event recorded outside of a span, a contextual
     /// root:
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing::subscriber::with_default;
     /// use tracing_mock::{expect, subscriber};
     ///
@@ -382,14 +425,17 @@ impl ExpectedEvent {
     ///     tracing::info!(field = &"value");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// In the example below, the expectation fails because the event is
     /// recorded with an explicit parent, however a contextual parent is
     /// expected.
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing::subscriber::with_default;
     /// use tracing_mock::{expect, subscriber};
     ///
@@ -406,11 +452,14 @@ impl ExpectedEvent {
     ///     tracing::info!(parent: parent.id(), field = &"value");
     /// });
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`ExpectedId`]: struct@crate::span::ExpectedId
-    pub fn with_ancestry(self, ancenstry: ExpectedAncestry) -> ExpectedEvent {
+    #[must_use]
+    pub fn with_ancestry(self, ancenstry: ExpectedAncestry) -> Self {
         Self {
             ancestry: Some(ancenstry),
             ..self
@@ -433,7 +482,8 @@ impl ExpectedEvent {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, layer};
     /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
     ///
@@ -458,15 +508,18 @@ impl ExpectedEvent {
     /// let _p_guard = parent.enter();
     /// tracing::info!(field = &"value");    
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
-    /// The scope must match exactly, otherwise the expectation will fail:
+    /// Unmet scope expectations can be inspected through returned errors:
     ///
-    /// ```should_panic
+    /// ```
+    /// use strict_test_support::{TestFailure, ensure};
     /// use tracing_mock::{expect, layer};
-    /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
     ///
+    /// # fn main() -> Result<(), TestFailure> {
     /// let event = expect::event().in_scope([
     ///     expect::span().named("parent_span"),
     ///     expect::span().named("grandparent_span")
@@ -477,25 +530,22 @@ impl ExpectedEvent {
     ///     .event(event)
     ///     .run_with_handle();
     ///
-    /// let _subscriber = tracing_subscriber::registry()
-    ///     .with(layer.with_filter(tracing_subscriber::filter::filter_fn(move |_meta| true)))
-    ///     .set_default();
-    ///
-    /// let parent = tracing::info_span!("parent_span");
-    /// let _p_guard = parent.enter();
-    /// tracing::info!(field = &"value");
-    ///
-    /// handle.assert_finished();
+    /// drop(layer);
+    /// let result = handle.finished();
+    /// ensure(result.is_err(), "missing scoped event returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// It is also possible to test that an event has no parent spans
     /// by passing `None` to `in_scope`. If the event is within a
     /// span, the test will fail:
     ///
-    /// ```should_panic
+    /// ```
+    /// use strict_test_support::{TestFailure, ensure};
     /// use tracing_mock::{expect, layer};
-    /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
     ///
+    /// # fn main() -> Result<(), TestFailure> {
     /// let event = expect::event().in_scope(None);
     ///
     /// let (layer, handle) = layer::mock()
@@ -503,20 +553,17 @@ impl ExpectedEvent {
     ///     .event(event)
     ///     .run_with_handle();
     ///
-    /// let _subscriber = tracing_subscriber::registry()
-    ///     .with(layer.with_filter(tracing_subscriber::filter::filter_fn(move |_meta| true)))
-    ///     .set_default();
-    ///
-    /// let parent = tracing::info_span!("parent_span");
-    /// let _guard = parent.enter();
-    /// tracing::info!(field = &"value");    
-    ///
-    /// handle.assert_finished();
+    /// drop(layer);
+    /// let result = handle.finished();
+    /// ensure(result.is_err(), "missing parentless event returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`MockLayer`]: struct@crate::layer::MockLayer
     /// [`MockSubscriber`]: struct@crate::subscriber::MockSubscriber
     #[cfg(feature = "tracing-subscriber")]
+    #[must_use]
     pub fn in_scope(self, spans: impl IntoIterator<Item = span::ExpectedSpan>) -> Self {
         Self {
             in_spans: Some(spans.into_iter().collect()),
@@ -524,40 +571,44 @@ impl ExpectedEvent {
         }
     }
 
-    /// Provides access to the expected scope (spans) for this expected
-    /// event.
+    /// Returns mutable scope expectations for layer event checks.
     #[cfg(feature = "tracing-subscriber")]
     pub(crate) fn scope_mut(&mut self) -> Option<&mut [span::ExpectedSpan]> {
-        self.in_spans.as_mut().map(|s| &mut s[..])
+        self.in_spans.as_deref_mut()
     }
 
+    /// Checks an observed event against this expectation.
     pub(crate) fn check(
         &mut self,
         event: &tracing::Event<'_>,
-        get_ancestry: impl FnOnce() -> ActualAncestry,
+        get_ancestry: impl FnOnce() -> ExpectationResult<ActualAncestry>,
         subscriber_name: &str,
-    ) {
+    ) -> ExpectationResult {
         let meta = event.metadata();
         let name = meta.name();
         self.metadata
-            .check(meta, format_args!("event \"{}\"", name), subscriber_name);
-        assert!(
-            meta.is_event(),
-            "[{}] expected {}, but got {:?}",
-            subscriber_name,
-            self,
-            event
-        );
+            .check(meta, format_args!("event \"{name}\""), subscriber_name)?;
+        if !meta.is_event() {
+            return Err(ExpectationError::from_args(format_args!(
+                "[{}] expected {}, but got metadata `{}` with target `{}`",
+                subscriber_name,
+                self,
+                meta.name(),
+                meta.target()
+            )));
+        }
         if let Some(ref mut expected_fields) = self.fields {
             let mut checker = expected_fields.checker(name, subscriber_name);
             event.record(&mut checker);
-            checker.finish();
+            checker.finish()?;
         }
 
         if let Some(ref expected_ancestry) = self.ancestry {
-            let actual_ancestry = get_ancestry();
-            expected_ancestry.check(&actual_ancestry, event.metadata().name(), subscriber_name);
+            let actual_ancestry = get_ancestry()?;
+            expected_ancestry.check(&actual_ancestry, event.metadata().name(), subscriber_name)?;
         }
+
+        Ok(())
     }
 }
 
@@ -569,32 +620,32 @@ impl fmt::Display for ExpectedEvent {
 
 impl fmt::Debug for ExpectedEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut s = f.debug_struct("MockEvent");
+        let mut debug = f.debug_struct("MockEvent");
 
         if let Some(ref name) = self.metadata.name {
-            let _builder = s.field("name", name);
+            let _builder = debug.field("name", name);
         }
 
         if let Some(ref target) = self.metadata.target {
-            let _builder = s.field("target", target);
+            let _builder = debug.field("target", target);
         }
 
         if let Some(ref level) = self.metadata.level {
-            let _builder = s.field("level", &format_args!("{:?}", level));
+            let _builder = debug.field("level", &format_args!("{}", display_level(*level)));
         }
 
         if let Some(ref fields) = self.fields {
-            let _builder = s.field("fields", fields);
+            let _builder = debug.field("fields", fields);
         }
 
         if let Some(ref parent) = self.ancestry {
-            let _builder = s.field("parent", &format_args!("{:?}", parent));
+            let _builder = debug.field("parent", &format_args!("{parent}"));
         }
 
-        if let Some(in_spans) = &self.in_spans {
-            let _builder = s.field("in_spans", in_spans);
+        if let Some(ref in_spans) = self.in_spans {
+            let _builder = debug.field("in_spans", in_spans);
         }
 
-        s.finish()
+        debug.finish()
     }
 }

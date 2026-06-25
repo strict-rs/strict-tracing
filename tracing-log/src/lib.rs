@@ -30,7 +30,7 @@
 //! use tracing_log::LogTracer;
 //! use log;
 //!
-//! # fn main() -> Result<(), Box<Error>> {
+//! # fn main() -> Result<(), Box<dyn Error>> {
 //! LogTracer::init()?;
 //!
 //! // will be available for Subscribers as a tracing Event
@@ -125,7 +125,8 @@ pub use log;
 
 #[cfg(all(feature = "interest-cache", feature = "log-tracer", feature = "std"))]
 /// Per-thread interest cache for log metadata filtering.
-mod interest_cache;
+#[doc(hidden)]
+pub mod interest_cache;
 
 #[cfg(all(feature = "interest-cache", feature = "log-tracer", feature = "std"))]
 #[cfg_attr(
@@ -138,23 +139,23 @@ pub use crate::interest_cache::InterestCacheConfig;
 ///
 /// # Errors
 ///
-/// This function preserves its historical `io::Result` return type for
-/// compatibility. Dispatching a record into `tracing` is infallible, so the
-/// current implementation always returns `Ok(())`.
+/// Returns [`io::ErrorKind::InvalidData`] if the crate's synthetic log
+/// callsite metadata is missing one of the fields required to reconstruct a
+/// `tracing` event.
 pub fn format_trace(record: &log::Record<'_>) -> io::Result<()> {
-    dispatch_record(record);
-    Ok(())
+    dispatch_record(record)
 }
 
 /// Dispatch a log record into the current tracing dispatcher.
-pub(crate) fn dispatch_record(record: &log::Record<'_>) {
+pub(crate) fn dispatch_record(record: &log::Record<'_>) -> io::Result<()> {
     dispatcher::get_default(|dispatch| {
         let filter_meta = record.as_trace();
-        if !dispatch.enabled(&filter_meta) {
-            return;
+        if !dispatch.enabled(&filter_meta).unwrap_or(false) {
+            return Ok(());
         }
 
-        let (_, keys, meta) = loglevel_to_cs(record.level());
+        let (_, meta) = loglevel_to_cs(record.level());
+        let keys = loglevel_to_fields(record.level())?;
 
         let log_module = record.module_path();
         let log_file = record.file();
@@ -174,7 +175,7 @@ pub(crate) fn dispatch_record(record: &log::Record<'_>) {
         });
         let message: &dyn field::Value = record.args();
 
-        dispatch.event(&Event::new(
+        let _delivery_result = dispatch.event(&Event::new(
             meta,
             &meta.fields().value_set(&[
                 (&keys.message, Some(message)),
@@ -184,7 +185,9 @@ pub(crate) fn dispatch_record(record: &log::Record<'_>) {
                 (&keys.line, line),
             ]),
         ));
-    });
+
+        Ok(())
+    })
 }
 
 /// Trait implemented for `tracing` types that can be converted to a `log`
@@ -260,28 +263,30 @@ static FIELD_NAMES: &[&str] = &[
 
 impl Fields {
     /// Build field handles from a synthetic log callsite's metadata.
-    fn new(cs: &'static dyn Callsite) -> Self {
+    fn new(cs: &'static dyn Callsite) -> Result<Self, io::ErrorKind> {
         let fieldset = cs.metadata().fields();
-        let message = fieldset.field("message").expect("message field must exist");
-        let target = fieldset
-            .field("log.target")
-            .expect("log target field must exist");
-        let module = fieldset
-            .field("log.module_path")
-            .expect("log module path field must exist");
-        let file = fieldset
-            .field("log.file")
-            .expect("log source file field must exist");
-        let line = fieldset
-            .field("log.line")
-            .expect("log source line field must exist");
-        Self {
+        let Some(message) = fieldset.field("message") else {
+            return Err(io::ErrorKind::InvalidData);
+        };
+        let Some(target) = fieldset.field("log.target") else {
+            return Err(io::ErrorKind::InvalidData);
+        };
+        let Some(module) = fieldset.field("log.module_path") else {
+            return Err(io::ErrorKind::InvalidData);
+        };
+        let Some(file) = fieldset.field("log.file") else {
+            return Err(io::ErrorKind::InvalidData);
+        };
+        let Some(line) = fieldset.field("log.line") else {
+            return Err(io::ErrorKind::InvalidData);
+        };
+        Ok(Self {
             message,
             target,
             module,
             file,
             line,
-        }
+        })
     }
 }
 
@@ -317,41 +322,90 @@ log_cs!(Level::WARN, WARN_CS, WARN_META, WarnCallsite);
 log_cs!(Level::ERROR, ERROR_CS, ERROR_META, ErrorCallsite);
 
 /// Field handles for the trace-level synthetic callsite.
-static TRACE_FIELDS: LazyLock<Fields> = LazyLock::new(|| Fields::new(&TRACE_CS));
+static TRACE_FIELDS: LazyLock<Result<Fields, io::ErrorKind>> =
+    LazyLock::new(|| Fields::new(&TRACE_CS));
 /// Field handles for the debug-level synthetic callsite.
-static DEBUG_FIELDS: LazyLock<Fields> = LazyLock::new(|| Fields::new(&DEBUG_CS));
+static DEBUG_FIELDS: LazyLock<Result<Fields, io::ErrorKind>> =
+    LazyLock::new(|| Fields::new(&DEBUG_CS));
 /// Field handles for the info-level synthetic callsite.
-static INFO_FIELDS: LazyLock<Fields> = LazyLock::new(|| Fields::new(&INFO_CS));
+static INFO_FIELDS: LazyLock<Result<Fields, io::ErrorKind>> =
+    LazyLock::new(|| Fields::new(&INFO_CS));
 /// Field handles for the warn-level synthetic callsite.
-static WARN_FIELDS: LazyLock<Fields> = LazyLock::new(|| Fields::new(&WARN_CS));
+static WARN_FIELDS: LazyLock<Result<Fields, io::ErrorKind>> =
+    LazyLock::new(|| Fields::new(&WARN_CS));
 /// Field handles for the error-level synthetic callsite.
-static ERROR_FIELDS: LazyLock<Fields> = LazyLock::new(|| Fields::new(&ERROR_CS));
+static ERROR_FIELDS: LazyLock<Result<Fields, io::ErrorKind>> =
+    LazyLock::new(|| Fields::new(&ERROR_CS));
 
 /// Return the synthetic tracing callsite for a tracing level.
-fn level_to_cs(level: Level) -> (&'static dyn Callsite, &'static Fields) {
+#[allow(
+    clippy::single_call_fn,
+    reason = "NormalizeEvent uses this named lookup for identify_callsite comparisons against synthetic trace callsites"
+)]
+fn level_to_cs(level: Level) -> &'static dyn Callsite {
     match level {
-        Level::TRACE => (&TRACE_CS, &TRACE_FIELDS),
-        Level::DEBUG => (&DEBUG_CS, &DEBUG_FIELDS),
-        Level::INFO => (&INFO_CS, &INFO_FIELDS),
-        Level::WARN => (&WARN_CS, &WARN_FIELDS),
-        Level::ERROR => (&ERROR_CS, &ERROR_FIELDS),
+        Level::TRACE => &TRACE_CS,
+        Level::DEBUG => &DEBUG_CS,
+        Level::INFO => &INFO_CS,
+        Level::WARN => &WARN_CS,
+        Level::ERROR => &ERROR_CS,
     }
 }
 
+/// Return the synthetic field handles for a tracing level.
+#[allow(
+    clippy::single_call_fn,
+    reason = "normalized metadata keeps trace-level field handles aligned with synthetic callsites through this lookup"
+)]
+fn level_to_fields(level: Level) -> io::Result<&'static Fields> {
+    let fields = match level {
+        Level::TRACE => &TRACE_FIELDS,
+        Level::DEBUG => &DEBUG_FIELDS,
+        Level::INFO => &INFO_FIELDS,
+        Level::WARN => &WARN_FIELDS,
+        Level::ERROR => &ERROR_FIELDS,
+    };
+    field_handles(fields)
+}
+
 /// Return the synthetic tracing callsite for a log level.
-fn loglevel_to_cs(
-    level: log::Level,
-) -> (
-    &'static dyn Callsite,
-    &'static Fields,
-    &'static Metadata<'static>,
-) {
+#[allow(
+    clippy::single_call_fn,
+    reason = "log-to-trace conversion uses this named lookup for identify_callsite and dispatch metadata"
+)]
+fn loglevel_to_cs(level: log::Level) -> (&'static dyn Callsite, &'static Metadata<'static>) {
     match level {
-        log::Level::Trace => (&TRACE_CS, &TRACE_FIELDS, &TRACE_META),
-        log::Level::Debug => (&DEBUG_CS, &DEBUG_FIELDS, &DEBUG_META),
-        log::Level::Info => (&INFO_CS, &INFO_FIELDS, &INFO_META),
-        log::Level::Warn => (&WARN_CS, &WARN_FIELDS, &WARN_META),
-        log::Level::Error => (&ERROR_CS, &ERROR_FIELDS, &ERROR_META),
+        log::Level::Trace => (&TRACE_CS, &TRACE_META),
+        log::Level::Debug => (&DEBUG_CS, &DEBUG_META),
+        log::Level::Info => (&INFO_CS, &INFO_META),
+        log::Level::Warn => (&WARN_CS, &WARN_META),
+        log::Level::Error => (&ERROR_CS, &ERROR_META),
+    }
+}
+
+/// Return the synthetic field handles for a log level.
+#[allow(
+    clippy::single_call_fn,
+    reason = "dispatch_record keeps log-level field handles aligned with synthetic callsites through this lookup"
+)]
+fn loglevel_to_fields(level: log::Level) -> io::Result<&'static Fields> {
+    let fields = match level {
+        log::Level::Trace => &TRACE_FIELDS,
+        log::Level::Debug => &DEBUG_FIELDS,
+        log::Level::Info => &INFO_FIELDS,
+        log::Level::Warn => &WARN_FIELDS,
+        log::Level::Error => &ERROR_FIELDS,
+    };
+    field_handles(fields)
+}
+
+/// Borrow initialized field handles or convert the stored error kind.
+fn field_handles(
+    field_result: &'static Result<Fields, io::ErrorKind>,
+) -> io::Result<&'static Fields> {
+    match field_result.as_ref() {
+        Ok(handles) => Ok(handles),
+        Err(error_kind) => Err((*error_kind).into()),
     }
 }
 
@@ -582,25 +636,34 @@ impl<'a> NormalizeEvent<'a> for Event<'a> {
             return None;
         }
 
-        let mut fields = LogVisitor::new(level_to_cs(*original.level()).1);
-        self.record(&mut fields);
+        let Ok(field_handles) = level_to_fields(*original.level()) else {
+            return None;
+        };
+        let mut visitor = LogVisitor {
+            target: None,
+            module_path: None,
+            file: None,
+            line: None,
+            fields: field_handles,
+        };
+        self.record(&mut visitor);
 
         Some(NormalizedMetadata {
             name: "log event",
-            target: fields
+            target: visitor
                 .target
                 .map_or_else(|| Cow::Borrowed("log"), Cow::Owned),
             level: *original.level(),
-            file: fields.file.map(Cow::Owned),
-            line: fields.line.and_then(|line| u32::try_from(line).ok()),
-            module_path: fields.module_path.map(Cow::Owned),
+            file: visitor.file.map(Cow::Owned),
+            line: visitor.line.and_then(|line| u32::try_from(line).ok()),
+            module_path: visitor.module_path.map(Cow::Owned),
             callsite: original.callsite(),
             kind: Kind::EVENT,
         })
     }
 
     fn is_log(&self) -> bool {
-        self.metadata().callsite() == identify_callsite!(level_to_cs(*self.metadata().level()).0)
+        self.metadata().callsite() == identify_callsite!(level_to_cs(*self.metadata().level()))
     }
 }
 
@@ -618,19 +681,6 @@ struct LogVisitor {
     fields: &'static Fields,
 }
 
-impl LogVisitor {
-    /// Create a visitor for fields belonging to a synthetic log callsite.
-    const fn new(fields: &'static Fields) -> Self {
-        Self {
-            target: None,
-            module_path: None,
-            file: None,
-            line: None,
-            fields,
-        }
-    }
-}
-
 impl Visit for LogVisitor {
     fn record_debug(&mut self, _field: &Field, _value: &dyn fmt::Debug) {}
 
@@ -643,9 +693,11 @@ impl Visit for LogVisitor {
     fn record_str(&mut self, field: &Field, value: &str) {
         if field == &self.fields.file {
             self.file = Some(value.to_owned());
-        } else if field == &self.fields.target {
+        }
+        if field == &self.fields.target {
             self.target = Some(value.to_owned());
-        } else if field == &self.fields.module {
+        }
+        if field == &self.fields.module {
             self.module_path = Some(value.to_owned());
         }
     }
@@ -661,8 +713,9 @@ mod sealed {
 mod test {
 
     use super::*;
+    use strict_test_support::{TestFailure, ensure, ensure_eq};
 
-    fn test_callsite(level: log::Level) {
+    fn test_callsite(level: log::Level) -> Result<(), TestFailure> {
         let record = log::Record::builder()
             .args(format_args!("Error!"))
             .level(level)
@@ -673,40 +726,41 @@ mod test {
             .build();
 
         let meta = record.as_trace();
-        let (cs, _keys, _) = loglevel_to_cs(record.level());
+        let (cs, _) = loglevel_to_cs(record.level());
         let cs_meta = cs.metadata();
-        assert_eq!(
-            meta.callsite(),
-            cs_meta.callsite(),
-            "actual: {:#?}\nexpected: {:#?}",
-            meta,
-            cs_meta
-        );
-        assert_eq!(meta.level(), &level.as_trace());
+        ensure(
+            meta.callsite() == cs_meta.callsite(),
+            "record metadata callsite matches synthetic metadata",
+        )?;
+        ensure_eq(
+            meta.level(),
+            &level.as_trace(),
+            "metadata level matches log level",
+        )
     }
 
     #[test]
-    fn error_callsite_is_correct() {
-        test_callsite(log::Level::Error);
+    fn error_callsite_is_correct() -> Result<(), TestFailure> {
+        test_callsite(log::Level::Error)
     }
 
     #[test]
-    fn warn_callsite_is_correct() {
-        test_callsite(log::Level::Warn);
+    fn warn_callsite_is_correct() -> Result<(), TestFailure> {
+        test_callsite(log::Level::Warn)
     }
 
     #[test]
-    fn info_callsite_is_correct() {
-        test_callsite(log::Level::Info);
+    fn info_callsite_is_correct() -> Result<(), TestFailure> {
+        test_callsite(log::Level::Info)
     }
 
     #[test]
-    fn debug_callsite_is_correct() {
-        test_callsite(log::Level::Debug);
+    fn debug_callsite_is_correct() -> Result<(), TestFailure> {
+        test_callsite(log::Level::Debug)
     }
 
     #[test]
-    fn trace_callsite_is_correct() {
-        test_callsite(log::Level::Trace);
+    fn trace_callsite_is_correct() -> Result<(), TestFailure> {
+        test_callsite(log::Level::Trace)
     }
 }

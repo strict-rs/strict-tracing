@@ -8,7 +8,9 @@ use tracing_core::field::{Field, Visit};
 /// that a delimiter is inserted between writing formatted field values.
 #[derive(Debug, Clone)]
 pub struct Delimited<D, V> {
+    /// The string-like delimiter inserted between formatted fields.
     delimiter: D,
+    /// The wrapped visitor factory.
     inner: V,
 }
 
@@ -16,9 +18,13 @@ pub struct Delimited<D, V> {
 /// a field value.
 #[derive(Debug)]
 pub struct VisitDelimited<D, V> {
+    /// The string-like delimiter inserted between formatted fields.
     delimiter: D,
+    /// Whether any field has already been formatted.
     seen: bool,
+    /// The wrapped field visitor.
     inner: V,
+    /// The first formatting error returned while writing delimiters.
     err: fmt::Result,
 }
 
@@ -42,7 +48,11 @@ impl<D, V> Delimited<D, V> {
     /// it will format each visited field separated by the provided `delimiter`.
     ///
     /// [`MakeVisitor`]: super::MakeVisitor
-    pub fn new(delimiter: D, inner: V) -> Self {
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public field visitor constructor is part of the formatting extension API"
+    )]
+    pub const fn new(delimiter: D, inner: V) -> Self {
         Self { delimiter, inner }
     }
 }
@@ -54,7 +64,11 @@ impl<D, V> VisitDelimited<D, V> {
     /// each formatted field is separated by the provided `delimiter`.
     ///
     /// [`Visit`]: tracing_core::field::Visit
-    pub fn new(delimiter: D, inner: V) -> Self {
+    #[allow(
+        clippy::single_call_fn,
+        reason = "visitor constructor preserves the field formatting wrapper boundary"
+    )]
+    pub const fn new(delimiter: D, inner: V) -> Self {
         Self {
             delimiter,
             inner,
@@ -63,6 +77,8 @@ impl<D, V> VisitDelimited<D, V> {
         }
     }
 
+    /// Writes a delimiter before the current field when a prior field was
+    /// formatted successfully.
     fn delimit(&mut self)
     where
         V: VisitFmt,
@@ -137,48 +153,52 @@ where
 mod test {
     use super::*;
     use crate::field::test_util::*;
+    use strict_test_support::{TestFailure, ensure, ensure_ok};
 
     #[test]
-    fn delimited_visitor() {
-        let mut s = String::new();
-        let visitor = DebugVisitor::new(&mut s);
-        let mut visitor = VisitDelimited::new(", ", visitor);
+    fn delimited_visitor() -> Result<(), TestFailure> {
+        let mut output = String::new();
+        let debug_visitor = DebugVisitor::new(&mut output);
+        let mut visitor = VisitDelimited::new(", ", debug_visitor);
 
-        TestAttrs1::with(|attrs| attrs.record(&mut visitor));
-        visitor.finish().unwrap();
+        TestAttrs1::with(|attrs| attrs.record(&mut visitor))?;
+        ensure_ok(visitor.finish(), "delimited visitor should finish")?;
 
-        assert_eq!(
-            s.as_str(),
-            "question=\"life, the universe, and everything\", tricky=true, can_you_do_it=true"
-        );
+        ensure(
+            output.as_str()
+                == "question=\"life, the universe, and everything\", tricky=true, can_you_do_it=true",
+            "delimited fields render with comma separators",
+        )
     }
 
     #[test]
-    fn delimited_new_visitor() {
+    fn delimited_new_visitor() -> Result<(), TestFailure> {
         let make = Delimited::new("; ", MakeDebug);
 
-        TestAttrs1::with(|attrs| {
-            let mut s = String::new();
+        TestAttrs1::with(|attrs| -> Result<(), TestFailure> {
+            let mut output = String::new();
             {
-                let mut v = make.make_visitor(&mut s);
-                attrs.record(&mut v);
-            }
-            assert_eq!(
-                s.as_str(),
-                "question=\"life, the universe, and everything\"; tricky=true; can_you_do_it=true"
-            );
-        });
+                let mut visitor = make.make_visitor(&mut output);
+                attrs.record(&mut visitor);
+            };
+            ensure(
+                output.as_str()
+                    == "question=\"life, the universe, and everything\"; tricky=true; can_you_do_it=true",
+                "first attribute set renders with semicolon separators",
+            )
+        })??;
 
-        TestAttrs2::with(|attrs| {
-            let mut s = String::new();
+        TestAttrs2::with(|attrs| -> Result<(), TestFailure> {
+            let mut output = String::new();
             {
-                let mut v = make.make_visitor(&mut s);
-                attrs.record(&mut v);
-            }
-            assert_eq!(
-                s.as_str(),
-                "question=None; question.answer=42; tricky=true; can_you_do_it=false"
-            );
-        });
+                let mut visitor = make.make_visitor(&mut output);
+                attrs.record(&mut visitor);
+            };
+            ensure(
+                output.as_str()
+                    == "question=None; question.answer=42; tricky=true; can_you_do_it=false",
+                "second attribute set renders with semicolon separators",
+            )
+        })?
     }
 }

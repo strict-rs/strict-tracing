@@ -3,12 +3,21 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use tracing::{Level, span};
 
-mod shared;
+pub mod shared;
+use shared::BenchmarkMatrix as _;
 
-fn bench(c: &mut Criterion) {
-    shared::for_all_recording(&mut c.benchmark_group("span_no_fields"), |b| {
-        b.iter(|| span!(Level::TRACE, "span"))
-    });
+/// Benchmarks constructing spans without fields.
+#[allow(
+    clippy::single_call_fn,
+    reason = "Criterion invokes this benchmark entrypoint through criterion_group"
+)]
+fn bench(criterion: &mut Criterion) {
+    shared::Recording.bench(
+        &mut criterion.benchmark_group("span_no_fields"),
+        |bencher| {
+            bencher.iter(|| span!(Level::TRACE, "span"));
+        },
+    );
 }
 
 criterion_group!(benches, bench);

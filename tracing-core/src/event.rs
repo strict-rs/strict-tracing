@@ -1,8 +1,7 @@
 //! Events represent single points in time during the execution of a program.
 use crate::dispatcher::get_default;
-use crate::parent::Parent;
 use crate::span::Id;
-use crate::{Metadata, field};
+use crate::{Metadata, Parent, field};
 
 /// `Event`s represent single points in time where something occurred during the
 /// execution of a program.
@@ -36,12 +35,16 @@ impl<'a> Event<'a> {
     pub fn dispatch(metadata: &'static Metadata<'static>, fields: &'a field::ValueSet<'_>) {
         let event = Self::new(metadata, fields);
         get_default(|current| {
-            current.event(&event);
+            let _ignored = current.event(&event);
         });
     }
 
     /// Returns a new `Event` in the current span, with the specified metadata
     /// and set of values.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public Event constructor is used by downstream manual instrumentation"
+    )]
     #[inline]
     #[must_use]
     pub const fn new(
@@ -57,6 +60,10 @@ impl<'a> Event<'a> {
 
     /// Returns a new `Event` as a child of the specified span, with the
     /// provided metadata and set of values.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public explicit-parent Event constructor is used by downstream manual instrumentation"
+    )]
     #[inline]
     #[must_use]
     pub fn new_child_of(
@@ -81,7 +88,7 @@ impl<'a> Event<'a> {
     ) {
         let event = Self::new_child_of(parent, metadata, fields);
         get_default(|current| {
-            current.event(&event);
+            let _ignored = current.event(&event);
         });
     }
 

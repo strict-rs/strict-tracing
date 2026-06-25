@@ -1,14 +1,23 @@
 //! Example binary for tracing workspace checks.
+#![cfg(test)]
 
+use std::any::type_name;
 use std::convert::Infallible;
+use std::hint::black_box;
 use std::{future::Future, pin::Pin, sync::Arc};
 
+use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_ok};
+use tracing::field::debug;
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
 use tracing_mock::{expect, subscriber};
 use tracing_test::{PollN, block_on_future};
 
 #[instrument]
+#[allow(
+    clippy::single_call_fn,
+    reason = "async fixture remains a named instrumented function so poll and await span behavior can be asserted"
+)]
 async fn test_async_fn(polls: usize) -> Result<(), ()> {
     let future = PollN::new_ok(polls);
     tracing::trace!(awaiting = true);
@@ -18,44 +27,66 @@ async fn test_async_fn(polls: usize) -> Result<(), ()> {
 // Reproduces a compile error when returning an `impl Trait` from an
 // instrumented async fn (see https://github.com/tokio-rs/tracing/issues/1615)
 #[instrument]
-async fn test_ret_impl_trait(n: i32) -> Result<impl Iterator<Item = i32>, ()> {
-    Ok((0..10).filter(move |x| *x < n))
+#[allow(
+    clippy::single_call_fn,
+    reason = "async impl Trait regression fixture must remain a named instrumented function item"
+)]
+async fn test_ret_impl_trait(limit: i32) -> Result<impl Iterator<Item = i32>, ()> {
+    Ok((0..10).filter(move |value| *value < limit))
 }
 
 // Reproduces a compile error when returning an `impl Trait` from an
 // instrumented async fn (see https://github.com/tokio-rs/tracing/issues/1615)
 #[instrument(err)]
-async fn test_ret_impl_trait_err(n: i32) -> Result<impl Iterator<Item = i32>, &'static str> {
-    Ok((0..10).filter(move |x| *x < n))
+#[allow(
+    clippy::single_call_fn,
+    reason = "async err impl Trait regression fixture must remain a named instrumented function item"
+)]
+async fn test_ret_impl_trait_err(limit: i32) -> Result<impl Iterator<Item = i32>, &'static str> {
+    Ok((0..10).filter(move |value| *value < limit))
 }
 
 #[instrument]
+#[allow(
+    clippy::single_call_fn,
+    reason = "empty async fixture remains a named instrumented function so empty body expansion is asserted"
+)]
 async fn test_async_fn_empty() {}
 
 // Reproduces a compile error when an instrumented function body contains inner
 // attributes (https://github.com/tokio-rs/tracing/issues/2294).
 #[deny(unused_variables)]
 #[instrument]
+#[allow(
+    clippy::single_call_fn,
+    reason = "async inner-attribute regression fixture must remain a named instrumented function item"
+)]
 async fn repro_async_2294() {
-    let i = 42;
+    let observed_value = 42;
+    let _observed = black_box(observed_value);
 }
 
 // Reproduces https://github.com/tokio-rs/tracing/issues/1613
 #[instrument]
+#[allow(
+    clippy::single_call_fn,
+    reason = "suspicious-else regression fixture must remain a named instrumented async function item"
+)]
 // LOAD-BEARING `#[rustfmt::skip]`! This is necessary to reproduce the bug;
 // with the rustfmt-generated formatting, the lint will not be triggered!
 #[rustfmt::skip]
 #[deny(clippy::suspicious_else_formatting)]
 async fn repro_1613(var: bool) {
-    println!(
-        "{}",
-        if var { "true" } else { "false" }
-    );
+    let _rendered = black_box(if var { "true" } else { "false" });
 }
 
 // Reproduces https://github.com/tokio-rs/tracing/issues/1613
 // and https://github.com/rust-lang/rust-clippy/issues/7760
 #[instrument]
+#[allow(
+    clippy::single_call_fn,
+    reason = "suspicious-else comment regression fixture must remain a named instrumented async function item"
+)]
 #[deny(clippy::suspicious_else_formatting)]
 async fn repro_1613_2() {
     // hello world
@@ -78,7 +109,45 @@ fn repro_1831_2() -> impl Future<Output = Result<(), Infallible>> {
 }
 
 #[test]
-fn async_fn_only_enters_for_polls() {
+fn async_compile_repros_run() -> Result<(), TestFailure> {
+    block_on_future(async {
+        let Ok(values) = test_ret_impl_trait(3).await else {
+            return ensure(false, "instrumented async impl Trait result should be Ok");
+        };
+        ensure_eq(
+            &values.count(),
+            &3_usize,
+            "instrumented async impl Trait iterator should retain values",
+        )?;
+
+        let Ok(err_values) = test_ret_impl_trait_err(4).await else {
+            return ensure(
+                false,
+                "instrumented async err impl Trait result should be Ok",
+            );
+        };
+        ensure_eq(
+            &err_values.count(),
+            &4_usize,
+            "instrumented async err impl Trait iterator should retain values",
+        )?;
+
+        test_async_fn_empty().await;
+        repro_async_2294().await;
+        repro_1613(true).await;
+        repro_1613_2().await;
+        repro_1831().await;
+        match repro_1831_2().await {
+            Ok(()) => {}
+            Err(error) => match error {},
+        }
+
+        Ok(())
+    })
+}
+
+#[test]
+fn async_fn_only_enters_for_polls() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
         .new_span(expect::span().named("test_async_fn"))
         .enter(expect::span().named("test_async_fn"))
@@ -88,17 +157,21 @@ fn async_fn_only_enters_for_polls() {
         .exit(expect::span().named("test_async_fn"))
         .enter(expect::span().named("test_async_fn"))
         .exit(expect::span().named("test_async_fn"))
-        .drop_span(expect::span().named("test_async_fn"))
+        .close_span(expect::span().named("test_async_fn"))
         .only()
         .run_with_handle();
-    let _result = with_default(subscriber, || {
-        let _result = block_on_future(async { test_async_fn(2).await }).unwrap();
-    });
-    handle.assert_finished();
+    with_default(subscriber, || {
+        let Ok(()) = block_on_future(async { test_async_fn(2).await }) else {
+            return ensure(false, "instrumented async function should complete");
+        };
+        Ok(())
+    })?;
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn async_fn_nested() {
+fn async_fn_nested() -> Result<(), TestFailure> {
     #[instrument]
     async fn test_async_fns_nested() {
         test_async_fns_nested_other().await
@@ -120,30 +193,31 @@ fn async_fn_nested() {
         .exit(span2.clone())
         .enter(span2.clone())
         .exit(span2.clone())
-        .drop_span(span2)
+        .close_span(span2)
         .exit(span.clone())
         .enter(span.clone())
         .exit(span.clone())
-        .drop_span(span)
+        .close_span(span)
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
-        let _result = block_on_future(async { test_async_fns_nested().await });
+    with_default(subscriber, || {
+        block_on_future(async { test_async_fns_nested().await });
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn async_fn_with_async_trait() {
+fn async_fn_with_async_trait() -> Result<(), TestFailure> {
     use async_trait::async_trait;
 
     // test the correctness of the metadata obtained by #[instrument]
     // (function name, functions parameters) when async-trait is used
     #[async_trait]
     pub(crate) trait TestA {
-        async fn foo(&mut self, v: usize);
+        async fn foo(&mut self, value: usize);
     }
 
     // test nesting of async fns with aync-trait
@@ -163,11 +237,11 @@ fn async_fn_with_async_trait() {
 
     #[async_trait]
     impl TestA for TestImpl {
-        #[instrument]
-        async fn foo(&mut self, v: usize) {
+        #[instrument(skip(value), fields(v = value))]
+        async fn foo(&mut self, value: usize) {
             self.baz().await;
-            self.0 = v;
-            self.bar().await
+            self.0 = value;
+            self.bar().await;
         }
     }
 
@@ -203,36 +277,37 @@ fn async_fn_with_async_trait() {
         .exit(span3.clone())
         .enter(span3.clone())
         .exit(span3.clone())
-        .drop_span(span3)
+        .close_span(span3)
         .new_span(span2.clone().with_fields(expect::field("self")))
         .enter(span2.clone())
         .event(expect::event().with_fields(expect::field("val").with_value(&5_u64)))
         .exit(span2.clone())
         .enter(span2.clone())
         .exit(span2.clone())
-        .drop_span(span2)
+        .close_span(span2)
         .exit(span.clone())
         .enter(span.clone())
         .exit(span.clone())
-        .drop_span(span)
+        .close_span(span)
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
+    with_default(subscriber, || {
         let mut test = TestImpl(2);
-        let _result = block_on_future(async { test.foo(5).await });
+        block_on_future(async { test.foo(5).await });
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn async_fn_with_async_trait_and_fields_expressions() {
+fn async_fn_with_async_trait_and_fields_expressions() -> Result<(), TestFailure> {
     use async_trait::async_trait;
 
     #[async_trait]
     pub(crate) trait Test {
-        async fn call(&mut self, v: usize);
+        async fn call(&mut self, value: usize);
     }
 
     #[derive(Clone, Debug)]
@@ -240,6 +315,8 @@ fn async_fn_with_async_trait_and_fields_expressions() {
 
     impl TestImpl {
         fn foo(&self) -> usize {
+            let observed_self = format!("{self:?}");
+            drop(observed_self);
             42
         }
     }
@@ -257,7 +334,7 @@ fn async_fn_with_async_trait_and_fields_expressions() {
             span.clone().with_fields(
                 expect::field("_v")
                     .with_value(&5_usize)
-                    .and(expect::field("test").with_value(&tracing::field::debug(10)))
+                    .and(expect::field("test").with_value(&debug(10)))
                     .and(expect::field("val").with_value(&42_u64))
                     .and(expect::field("val2").with_value(&42_u64)),
             ),
@@ -266,19 +343,21 @@ fn async_fn_with_async_trait_and_fields_expressions() {
         .exit(span.clone())
         .enter(span.clone())
         .exit(span.clone())
-        .drop_span(span)
+        .close_span(span)
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
-        let _result = block_on_future(async { TestImpl.call(5).await });
+    with_default(subscriber, || {
+        block_on_future(async { TestImpl.call(5).await });
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn async_fn_with_async_trait_and_fields_expressions_with_generic_parameter() {
+fn async_fn_with_async_trait_and_fields_expressions_with_generic_parameter()
+-> Result<(), TestFailure> {
     use async_trait::async_trait;
 
     #[async_trait]
@@ -294,11 +373,12 @@ fn async_fn_with_async_trait_and_fields_expressions_with_generic_parameter() {
     // we also test sync functions that return futures, as they should be handled just like
     // async-trait (>= 0.1.44) functions
     impl TestImpl {
-        #[instrument(fields(Self=std::any::type_name::<Self>()))]
+        #[instrument(fields(Self=type_name::<Self>()))]
         fn sync_fun(&self) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
             let val = self.clone();
             Box::pin(async move {
-                let _ = val;
+                let observed_self = format!("{val:?}");
+                drop(observed_self);
             })
         }
     }
@@ -306,16 +386,18 @@ fn async_fn_with_async_trait_and_fields_expressions_with_generic_parameter() {
     #[async_trait]
     impl Test for TestImpl {
         // instrumenting this is currently not possible, see https://github.com/tokio-rs/tracing/issues/864#issuecomment-667508801
-        //#[instrument(fields(Self=std::any::type_name::<Self>()))]
+        //#[instrument(fields(Self=type_name::<Self>()))]
         async fn call() {}
 
-        #[instrument(fields(Self=std::any::type_name::<Self>()))]
+        #[instrument(fields(Self=type_name::<Self>()))]
         async fn call_with_self(&self) {
             self.sync_fun().await;
         }
 
-        #[instrument(fields(Self=std::any::type_name::<Self>()))]
-        async fn call_with_mut_self(&mut self) {}
+        #[instrument(fields(Self=type_name::<Self>()))]
+        async fn call_with_mut_self(&mut self) {
+            let _observed_self: &mut Self = self;
+        }
     }
 
     //let span = span::mock().named("call");
@@ -328,17 +410,17 @@ fn async_fn_with_async_trait_and_fields_expressions_with_generic_parameter() {
                 expect::field("Self").with_value(&"TestImpler")))
         .enter(span.clone())
         .exit(span.clone())
-        .drop_span(span)*/
+        .close_span(span)*/
         .new_span(
             span2
                 .clone()
-                .with_fields(expect::field("Self").with_value(&std::any::type_name::<TestImpl>())),
+                .with_fields(expect::field("Self").with_value(&type_name::<TestImpl>())),
         )
         .enter(span2.clone())
         .new_span(
             span4
                 .clone()
-                .with_fields(expect::field("Self").with_value(&std::any::type_name::<TestImpl>())),
+                .with_fields(expect::field("Self").with_value(&type_name::<TestImpl>())),
         )
         .enter(span4.clone())
         .exit(span4.clone())
@@ -347,33 +429,34 @@ fn async_fn_with_async_trait_and_fields_expressions_with_generic_parameter() {
         .exit(span2.clone())
         .enter(span2.clone())
         .exit(span2.clone())
-        .drop_span(span2)
+        .close_span(span2)
         .new_span(
             span3
                 .clone()
-                .with_fields(expect::field("Self").with_value(&std::any::type_name::<TestImpl>())),
+                .with_fields(expect::field("Self").with_value(&type_name::<TestImpl>())),
         )
         .enter(span3.clone())
         .exit(span3.clone())
         .enter(span3.clone())
         .exit(span3.clone())
-        .drop_span(span3)
+        .close_span(span3)
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
-        let _result = block_on_future(async {
+    with_default(subscriber, || {
+        block_on_future(async {
             TestImpl::call().await;
             TestImpl.call_with_self().await;
-            TestImpl.call_with_mut_self().await
+            TestImpl.call_with_mut_self().await;
         });
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn out_of_scope_fields() {
+fn out_of_scope_fields() -> Result<(), TestFailure> {
     // Reproduces tokio-rs/tracing#1296
 
     struct Thing {
@@ -384,7 +467,7 @@ fn out_of_scope_fields() {
         #[instrument(skip(self, _req), fields(app_id))]
         fn call(&mut self, _req: ()) -> Pin<Box<dyn Future<Output = Arc<()>> + Send + Sync>> {
             // ...
-            let metrics = self.metrics.clone();
+            let metrics = Arc::clone(&self.metrics);
             // ...
             Box::pin(async move {
                 // ...
@@ -400,12 +483,12 @@ fn out_of_scope_fields() {
         .exit(span.clone())
         .enter(span.clone())
         .exit(span.clone())
-        .drop_span(span)
+        .close_span(span)
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
-        let _result = block_on_future(async {
+    with_default(subscriber, || {
+        block_on_future(async {
             let mut my_thing = Thing {
                 metrics: Arc::new(()),
             };
@@ -413,11 +496,12 @@ fn out_of_scope_fields() {
         });
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn manual_impl_future() {
+fn manual_impl_future() -> Result<(), TestFailure> {
     #[instrument]
     fn manual_impl_future() -> impl Future<Output = ()> {
         async {
@@ -436,21 +520,22 @@ fn manual_impl_future() {
         .exit(span.clone())
         .enter(span.clone())
         .exit(span.clone())
-        .drop_span(span)
+        .close_span(span)
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
-        let _result = block_on_future(async {
+    with_default(subscriber, || {
+        block_on_future(async {
             manual_impl_future().await;
         });
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }
 
 #[test]
-fn manual_box_pin() {
+fn manual_box_pin() -> Result<(), TestFailure> {
     #[instrument]
     fn manual_box_pin() -> Pin<Box<dyn Future<Output = ()>>> {
         Box::pin(async {
@@ -469,15 +554,16 @@ fn manual_box_pin() {
         .exit(span.clone())
         .enter(span.clone())
         .exit(span.clone())
-        .drop_span(span)
+        .close_span(span)
         .only()
         .run_with_handle();
 
-    let _result = with_default(subscriber, || {
-        let _result = block_on_future(async {
+    with_default(subscriber, || {
+        block_on_future(async {
             manual_box_pin().await;
         });
     });
 
-    handle.assert_finished();
+    ensure_ok(handle.finished(), "mock expectations should finish")?;
+    Ok(())
 }

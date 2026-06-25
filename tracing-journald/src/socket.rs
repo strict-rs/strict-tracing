@@ -12,12 +12,18 @@ use rustix::{
 use std::{
     io::{self, IoSlice},
     mem::MaybeUninit,
-    os::unix::{ffi::OsStrExt, net::UnixDatagram},
+    os::unix::{ffi::OsStrExt as _, net::UnixDatagram},
     path::Path,
 };
 
+/// Maximum byte length accepted by Linux `sockaddr_un.sun_path`.
 const LINUX_SUN_PATH_BYTES: usize = 108;
 
+/// Build a Rustix socket address after checking Linux path capacity.
+#[allow(
+    clippy::single_call_fn,
+    reason = "socket path validation stays isolated before Rustix address construction"
+)]
 fn socket_addr(path: &Path) -> io::Result<SocketAddrAny> {
     if path.as_os_str().as_bytes().len() >= LINUX_SUN_PATH_BYTES {
         return Err(io::Error::from(Errno::NAMETOOLONG));
@@ -28,7 +34,12 @@ fn socket_addr(path: &Path) -> io::Result<SocketAddrAny> {
         .map_err(io::Error::from)
 }
 
-pub(crate) fn send_one_fd_to<P: AsRef<Path>>(
+/// Send one file descriptor to `path` with an `SCM_RIGHTS` control message.
+#[allow(
+    clippy::single_call_fn,
+    reason = "SCM_RIGHTS descriptor transfer remains a named journald socket boundary"
+)]
+pub(super) fn send_one_fd_to<P: AsRef<Path>>(
     socket: &UnixDatagram,
     fd: BorrowedFd<'_>,
     path: P,
@@ -56,18 +67,31 @@ pub(crate) fn send_one_fd_to<P: AsRef<Path>>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt as _};
+    use strict_test_support::{TestFailure, ensure, ensure_ok, ensure_some};
 
     #[test]
-    fn socket_path_at_linux_sun_path_capacity_is_rejected() {
+    fn socket_path_at_linux_sun_path_capacity_is_rejected() -> Result<(), TestFailure> {
         let path = OsString::from_vec(vec![b'a'; LINUX_SUN_PATH_BYTES]);
-        let err = socket_addr(Path::new(&path)).expect_err("path should be rejected");
-        assert_eq!(err.raw_os_error(), Some(Errno::NAMETOOLONG.raw_os_error()));
+        let err = ensure_some(
+            socket_addr(Path::new(&path)).err(),
+            "path at Linux sun_path capacity should be rejected",
+        )?;
+        ensure(
+            err.raw_os_error() == Some(Errno::NAMETOOLONG.raw_os_error()),
+            "oversized socket path error",
+        )
     }
 
     #[test]
-    fn socket_path_below_linux_sun_path_capacity_is_accepted_by_address_builder() {
-        let path = OsString::from_vec(vec![b'a'; LINUX_SUN_PATH_BYTES - 1]);
-        let _addr = socket_addr(Path::new(&path)).expect("path should fit in linux sun_path");
+    fn socket_path_below_linux_sun_path_capacity_is_accepted_by_address_builder()
+    -> Result<(), TestFailure> {
+        let path_len = LINUX_SUN_PATH_BYTES.saturating_sub(1);
+        let path = OsString::from_vec(vec![b'a'; path_len]);
+        let _addr = ensure_ok(
+            socket_addr(Path::new(&path)),
+            "path below Linux sun_path capacity should fit",
+        )?;
+        Ok(())
     }
 }

@@ -1,12 +1,24 @@
 //! Tests registry max level hints.
 #![cfg(all(feature = "registry", feature = "fmt"))]
-use tracing_subscriber::{filter::LevelFilter, prelude::*};
 
-#[test]
-fn registry_sets_max_level_hint() {
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
-        .with(LevelFilter::DEBUG)
-        .init();
-    assert_eq!(LevelFilter::current(), LevelFilter::DEBUG);
+#[cfg(test)]
+mod tests {
+    use strict_test_support::{TestFailure, ensure_eq, ensure_ok};
+    use tracing_subscriber::{filter::LevelFilter, fmt, prelude::*, registry};
+
+    #[test]
+    fn registry_sets_max_level_hint() -> Result<(), TestFailure> {
+        ensure_ok(
+            registry()
+                .with(fmt::layer())
+                .with(LevelFilter::DEBUG)
+                .try_init(),
+            "registry installs",
+        )?;
+        ensure_eq(
+            &LevelFilter::current(),
+            &LevelFilter::DEBUG,
+            "registry init updates the current max level hint",
+        )
+    }
 }

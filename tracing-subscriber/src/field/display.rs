@@ -19,8 +19,12 @@ impl<V> Messages<V> {
     /// that any strings named `message` are formatted using `fmt::Display`.
     ///
     /// [`MakeVisitor`]: super::MakeVisitor
-    pub fn new(inner: V) -> Self {
-        Messages(inner)
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public field visitor constructor is part of the formatting extension API"
+    )]
+    pub const fn new(inner: V) -> Self {
+        Self(inner)
     }
 }
 
@@ -42,30 +46,30 @@ where
 {
     #[inline]
     fn record_f64(&mut self, field: &Field, value: f64) {
-        self.0.record_f64(field, value)
+        self.0.record_f64(field, value);
     }
 
     #[inline]
     fn record_i64(&mut self, field: &Field, value: i64) {
-        self.0.record_i64(field, value)
+        self.0.record_i64(field, value);
     }
 
     #[inline]
     fn record_u64(&mut self, field: &Field, value: u64) {
-        self.0.record_u64(field, value)
+        self.0.record_u64(field, value);
     }
 
     #[inline]
     fn record_bool(&mut self, field: &Field, value: bool) {
-        self.0.record_bool(field, value)
+        self.0.record_bool(field, value);
     }
 
     /// Visit a string value.
     fn record_str(&mut self, field: &Field, value: &str) {
         if field.name() == "message" {
-            self.0.record_debug(field, &format_args!("{}", value))
+            self.0.record_debug(field, &format_args!("{value}"));
         } else {
-            self.0.record_str(field, value)
+            self.0.record_str(field, value);
         }
     }
 
@@ -76,7 +80,7 @@ where
 
     #[inline]
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        self.0.record_debug(field, value)
+        self.0.record_debug(field, value);
     }
 }
 

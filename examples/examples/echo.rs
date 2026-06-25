@@ -20,18 +20,43 @@
 //! to the same address you should be able to see them all make progress simultaneously.
 //!
 //! [echo-example]: https://github.com/tokio-rs/tokio/blob/master/tokio/examples/echo.rs
-use futures::future::{FutureExt, TryFutureExt};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpListener;
 
 use std::env;
-use std::error::Error;
+use std::error::Error as StdError;
+use std::fmt;
 use std::net::SocketAddr;
 
-use tracing::{debug, info, info_span, trace_span, warn, Instrument as _};
+use tracing::{Instrument as _, debug, info, info_span, trace_span, warn};
+
+/// Error type returned by the example.
+type Error = Box<dyn StdError + Send + Sync + 'static>;
+
+/// Error returned when a socket read reports more bytes than the buffer holds.
+#[derive(Debug)]
+struct BufferLengthError {
+    /// Number of bytes reported by the socket read.
+    bytes_read: usize,
+    /// Length of the buffer passed to the socket read.
+    buffer_len: usize,
+}
+
+impl fmt::Display for BufferLengthError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let bytes_read = self.bytes_read;
+        let buffer_len = self.buffer_len;
+        write!(
+            formatter,
+            "socket read reported {bytes_read} bytes for a {buffer_len} byte buffer"
+        )
+    }
+}
+
+impl StdError for BufferLengthError {}
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+async fn main() -> Result<(), Error> {
     use tracing_subscriber::EnvFilter;
 
     tracing_subscriber::fmt()
@@ -41,10 +66,10 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // Allow passing an address to listen on as the first argument of this
     // program, but otherwise we'll just set up our TCP listener on
     // 127.0.0.1:8080 for connections.
-    let addr = env::args()
+    let addr_arg = env::args()
         .nth(1)
-        .unwrap_or_else(|| "127.0.0.1:3000".to_string());
-    let addr = addr.parse::<SocketAddr>()?;
+        .unwrap_or_else(|| "127.0.0.1:3000".to_owned());
+    let addr = addr_arg.parse::<SocketAddr>()?;
 
     // Next up we create a TCP listener which will listen for incoming
     // connections. This TCP listener is bound to the address we determined
@@ -72,48 +97,39 @@ async fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
 
             // In a loop, read data from the socket and write the data back.
             loop {
-                let n: usize = socket
+                let n = socket
                     .read(&mut buf)
-                    .map(|bytes| {
-                        if let Ok(n) = bytes {
-                            debug!(bytes_read = n);
-                        }
-
-                        bytes
-                    })
-                    .map_err(|error| {
-                        warn!(%error);
-                        error
-                    })
                     .instrument(trace_span!("read"))
                     .await
-                    .expect("failed to read data from socket");
+                    .inspect(|bytes_read| {
+                        debug!(bytes_read = *bytes_read);
+                    })
+                    .inspect_err(|error| {
+                        warn!(%error);
+                    })?;
 
                 if n == 0 {
-                    return;
+                    return Ok::<(), Error>(());
                 }
 
-                socket
-                    .write_all(&buf[0..n])
-                    .map(|bytes| {
-                        if matches!(bytes, Ok(())) {
-                            debug!(bytes_written = n);
-                        }
+                let bytes = buf.get(..n).ok_or(BufferLengthError {
+                    bytes_read: n,
+                    buffer_len: buf.len(),
+                })?;
 
-                        bytes
-                    })
-                    .map_err(|error| {
-                        warn!(%error);
-                        error
-                    })
+                socket
+                    .write_all(bytes)
                     .instrument(trace_span!("write"))
                     .await
-                    .expect("failed to write data to socket");
+                    .inspect_err(|error| {
+                        warn!(%error);
+                    })?;
+                debug!(bytes_written = n);
 
                 info!(message = "echo'd data", %peer_addr, size = n);
             }
         })
         .instrument(info_span!("echo", %peer_addr))
-        .await?;
+        .await??;
     }
 }

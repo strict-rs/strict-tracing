@@ -1,13 +1,12 @@
 //! Metadata describing trace data.
 use super::{callsite, field};
 use core::{
-    cmp, fmt, ptr,
+    cmp,
+    error::Error,
+    fmt, ptr,
     str::FromStr,
     sync::atomic::{AtomicUsize, Ordering},
 };
-
-#[cfg(feature = "std")]
-use std::error::Error;
 
 /// Metadata describing a [span] or [event].
 ///
@@ -106,10 +105,19 @@ pub struct Kind(u8);
 /// ```
 /// use tracing_core::Level;
 ///
-/// assert!(Level::TRACE > Level::DEBUG);
-/// assert!(Level::ERROR < Level::WARN);
-/// assert!(Level::INFO <= Level::DEBUG);
-/// assert_eq!(Level::TRACE, Level::TRACE);
+/// if Level::TRACE <= Level::DEBUG {
+///     return Err("TRACE should be more verbose than DEBUG".into());
+/// }
+/// if Level::ERROR >= Level::WARN {
+///     return Err("ERROR should be less verbose than WARN".into());
+/// }
+/// if Level::INFO > Level::DEBUG {
+///     return Err("INFO should not be more verbose than DEBUG".into());
+/// }
+/// if Level::TRACE != Level::TRACE {
+///     return Err("TRACE should equal itself".into());
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
 /// # Filtering
@@ -135,11 +143,22 @@ pub struct Kind(u8);
 /// ```
 /// use tracing_core::{Level, LevelFilter};
 ///
-/// assert!(LevelFilter::OFF < Level::TRACE);
-/// assert!(LevelFilter::TRACE > Level::DEBUG);
-/// assert!(LevelFilter::ERROR < Level::WARN);
-/// assert!(LevelFilter::INFO <= Level::DEBUG);
-/// assert!(LevelFilter::INFO >= Level::INFO);
+/// if LevelFilter::OFF >= Level::TRACE {
+///     return Err("OFF should be less verbose than TRACE".into());
+/// }
+/// if LevelFilter::TRACE <= Level::DEBUG {
+///     return Err("TRACE should be more verbose than DEBUG".into());
+/// }
+/// if LevelFilter::ERROR >= Level::WARN {
+///     return Err("ERROR should be less verbose than WARN".into());
+/// }
+/// if LevelFilter::INFO > Level::DEBUG {
+///     return Err("INFO should not be more verbose than DEBUG".into());
+/// }
+/// if LevelFilter::INFO < Level::INFO {
+///     return Err("INFO should compare equal to itself".into());
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
 ///
 /// ## Examples
@@ -152,8 +171,9 @@ pub struct Kind(u8);
 /// often improving performance in short-lived programs.
 ///
 /// ```
-/// use tracing_core::{span, Event, Level, LevelFilter, Subscriber, Metadata};
+/// use tracing_core::{span, Event, Level, LevelFilter, Metadata, Subscriber};
 /// # use tracing_core::span::{Id, Record, Current};
+/// # use tracing_core::subscriber::SubscriberResult;
 ///
 /// #[derive(Debug)]
 /// pub struct MySubscriber {
@@ -174,10 +194,10 @@ pub struct Kind(u8);
 ///     }
 /// }
 /// impl Subscriber for MySubscriber {
-///     fn enabled(&self, meta: &Metadata<'_>) -> bool {
+///     fn enabled(&self, meta: &Metadata<'_>) -> SubscriberResult<bool> {
 ///         // A span or event is enabled if it is at or below the configured
 ///         // maximum level.
-///         meta.level() <= &self.max_level
+///         Ok(meta.level() <= &self.max_level)
 ///     }
 ///
 ///     // This optional method returns the most verbose level that this
@@ -190,21 +210,22 @@ pub struct Kind(u8);
 ///     }
 ///
 ///     // Implement the rest of the subscriber...
-///     fn new_span(&self, span: &span::Attributes<'_>) -> span::Id {
+///     fn new_span(&self, span: &span::Attributes<'_>) -> SubscriberResult<span::Id> {
 ///         // ...
-///         # drop(span); Id::from_non_zero_u64(core::num::NonZeroU64::MIN)
+///         # drop(span); Ok(Id::from_non_zero_u64(core::num::NonZeroU64::MIN))
 ///     }
 ///
-///     fn event(&self, event: &Event<'_>) {
+///     fn event(&self, event: &Event<'_>) -> SubscriberResult {
 ///         // ...
 ///         # drop(event);
+///         Ok(())
 ///     }
 ///
 ///     // ...
-///     # fn enter(&self, _: Id) {}
-///     # fn exit(&self, _: Id) {}
-///     # fn record(&self, _: Id, _: &Record<'_>) {}
-///     # fn record_follows_from(&self, _: Id, _: Id) {}
+///     # fn enter(&self, _: Id) -> SubscriberResult { Ok(()) }
+///     # fn exit(&self, _: Id) -> SubscriberResult { Ok(()) }
+///     # fn record(&self, _: Id, _: &Record<'_>) -> SubscriberResult { Ok(()) }
+///     # fn record_follows_from(&self, _: Id, _: Id) -> SubscriberResult { Ok(()) }
 /// }
 /// ```
 ///
@@ -253,6 +274,10 @@ static MAX_LEVEL: AtomicUsize = AtomicUsize::new(LevelFilter::OFF_USIZE);
 impl<'a> Metadata<'a> {
     /// Construct new metadata for a span or event, with a name, target, level, field
     /// names, and optional source code location.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public metadata constructor is used by instrumentation macros and downstream callsites"
+    )]
     #[must_use]
     pub const fn new(
         name: &'static str,
@@ -571,7 +596,13 @@ impl Level {
 
     /// Returns the comparison encoding used by level ordering.
     const fn as_usize(self) -> usize {
-        level_inner_as_usize(self.0)
+        match self.0 {
+            LevelInner::Trace => LevelFilter::TRACE_USIZE,
+            LevelInner::Debug => LevelFilter::DEBUG_USIZE,
+            LevelInner::Info => LevelFilter::INFO_USIZE,
+            LevelInner::Warn => LevelFilter::WARN_USIZE,
+            LevelInner::Error => LevelFilter::ERROR_USIZE,
+        }
     }
 }
 
@@ -587,8 +618,6 @@ impl fmt::Display for Level {
     }
 }
 
-#[cfg(feature = "std")]
-#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 impl Error for ParseLevelError {}
 
 impl FromStr for Level {
@@ -740,6 +769,10 @@ impl LevelFilter {
     }
 
     /// Decodes a filter from atomic storage.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "pair atomic LevelFilter decoding with encoding and round-trip validation"
+    )]
     const fn decode(value: usize) -> Self {
         match value {
             Self::ERROR_USIZE => Self::ERROR,
@@ -773,6 +806,10 @@ impl LevelFilter {
     }
 
     /// Updates the process-wide maximum level hint.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "centralize max-level atomic encoding owned by LevelFilter"
+    )]
     pub(crate) fn set_max(filter: Self) {
         let val = filter.encode();
 
@@ -861,7 +898,6 @@ impl fmt::Display for ParseLevelFilterError {
     }
 }
 
-#[cfg(feature = "std")]
 impl Error for ParseLevelFilterError {}
 
 // ==== Level and LevelFilter comparisons ====
@@ -1002,17 +1038,6 @@ impl PartialOrd<LevelFilter> for Level {
     #[inline]
     fn ge(&self, other: &LevelFilter) -> bool {
         other.as_usize() >= self.as_usize()
-    }
-}
-
-/// Returns the integer encoding guaranteed by `LevelInner`'s representation.
-const fn level_inner_as_usize(level: LevelInner) -> usize {
-    match level {
-        LevelInner::Trace => LevelFilter::TRACE_USIZE,
-        LevelInner::Debug => LevelFilter::DEBUG_USIZE,
-        LevelInner::Info => LevelFilter::INFO_USIZE,
-        LevelInner::Warn => LevelFilter::WARN_USIZE,
-        LevelInner::Error => LevelFilter::ERROR_USIZE,
     }
 }
 

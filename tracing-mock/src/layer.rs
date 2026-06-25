@@ -1,12 +1,15 @@
-//! An implementation of the [`Layer`] trait which validates that
-//! the `tracing` data it receives matches the expected output for a test.
+//! Mock [`Layer`] support for validating traces.
+//!
+//! It validates that the `tracing` data it receives matches the expected
+//! output for a test.
 //!
 //!
 //! The [`MockLayer`] is the central component in these tools. The
 //! `MockLayer` has expectations set on it which are later
 //! validated as the code under test is run.
 //!
-//! ```
+//! ```no_run
+//! # fn main() -> Result<(), strict_test_support::TestFailure> {
 //! use tracing_mock::{expect, layer};
 //! use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 //!
@@ -24,15 +27,18 @@
 //! // These *are* the droids we are looking for
 //! tracing::info!("droids");
 //!
-//! // Use the handle to check the assertions. This line will panic if an
-//! // assertion is not met.
-//! handle.assert_finished();
+//! // Use the handle to check the expectations. This line returns an error if
+//! // an expectation is not met.
+//! strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! A more complex example may consider multiple spans and events with
 //! their respective fields:
 //!
-//! ```
+//! ```no_run
+//! # fn main() -> Result<(), strict_test_support::TestFailure> {
 //! use tracing_mock::{expect, layer};
 //! use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 //!
@@ -66,18 +72,21 @@
 //!     tracing::info!("say hello");
 //! }
 //!
-//! // Use the handle to check the assertions. This line will panic if an
-//! // assertion is not met.
-//! handle.assert_finished();
+//! // Use the handle to check the expectations. This line returns an error if
+//! // an expectation is not met.
+//! strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+//! # Ok(())
+//! # }
 //! ```
 //!
-//! If we modify the previous example so that we **don't** enter the
-//! span before recording an event, the test will fail:
+//! Unmet expectations can be inspected through returned errors by using
+//! [`MockHandle::finished`]:
 //!
-//! ```should_panic
+//! ```
+//! use strict_test_support::{TestFailure, ensure};
 //! use tracing_mock::{expect, layer};
-//! use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};  
 //!
+//! # fn main() -> Result<(), TestFailure> {
 //! let span = expect::span()
 //!     .named("my_span");
 //! let (layer, handle) = layer::mock()
@@ -92,46 +101,34 @@
 //!     // Return the subscriber and handle
 //!     .run_with_handle();
 //!
-//! // Use `set_default` to apply the `MockSubscriber` until the end
-//! // of the current scope (when the guard `_subscriber` is dropped).
-//! let _subscriber =  tracing_subscriber::registry()
-//!     .with(layer.with_filter(tracing_subscriber::filter::filter_fn(move |_meta| true)))
-//!     .set_default();
-//!
-//! {
-//!     let span = tracing::trace_span!(
-//!         "my_span",
-//!         greeting = "hello world",
-//!     );
-//!
-//!     // Don't enter the span.
-//!     // let _guard = span.enter();
-//!     tracing::info!("say hello");
-//! }
-//!
-//! // Use the handle to check the assertions. This line will panic if an
-//! // assertion is not met.
-//! handle.assert_finished();
+//! drop(layer);
+//! let result = handle.finished();
+//! ensure(result.is_err(), "unmet mock layer expectations return an error")?;
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! [`Layer`]: trait@tracing_subscriber::layer::Layer
-use std::{collections::VecDeque, fmt, sync::Arc};
+//! [`MockHandle::finished`]: fn@crate::subscriber::MockHandle::finished
+use std::{collections::VecDeque, fmt, sync::Arc, thread};
 
 use parking_lot::Mutex;
 
 use tracing_core::{
     Event, Subscriber,
     span::{Attributes, Id, Record},
+    subscriber::SubscriberResult,
 };
 use tracing_subscriber::{
     layer::{Context, Layer},
-    registry::{LookupSpan, SpanRef},
+    registry::{LookupSpan, Scope, SpanRef},
 };
 
 use crate::{
     ancestry::{ActualAncestry, HasAncestry, get_ancestry},
     event::ExpectedEvent,
     expect::Expect,
+    failure::{ExpectationError, ExpectationResult, SharedFailures},
     span::{ActualSpan, ExpectedSpan, NewSpan},
     subscriber::MockHandle,
 };
@@ -144,7 +141,8 @@ use crate::{
 ///
 /// # Examples
 ///
-/// ```
+/// ```no_run
+/// # fn main() -> Result<(), strict_test_support::TestFailure> {
 /// use tracing_mock::{expect, layer};
 /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 ///
@@ -178,17 +176,23 @@ use crate::{
 ///     tracing::info!("say hello");
 /// }
 ///
-/// // Use the handle to check the assertions. This line will panic if an
-/// // assertion is not met.
-/// handle.assert_finished();
+/// // Use the handle to check the expectations. This line returns an error if
+/// // an expectation is not met.
+/// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// [`layer`]: mod@crate::layer
 #[must_use]
+#[allow(
+    clippy::single_call_fn,
+    reason = "public DSL constructor is the documented entry point for mock layers"
+)]
 pub fn mock() -> MockLayerBuilder {
     MockLayerBuilder {
         expected: VecDeque::default(),
-        name: std::thread::current()
+        name: thread::current()
             .name()
             .map(String::from)
             .unwrap_or_default(),
@@ -208,7 +212,8 @@ pub fn mock() -> MockLayerBuilder {
 ///
 /// The example from [`MockLayerBuilder::named`] could be rewritten as:
 ///
-/// ```should_panic
+/// ```
+/// # fn main() -> Result<(), strict_test_support::TestFailure> {
 /// use tracing_mock::{expect, layer};
 /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
 ///
@@ -236,8 +241,11 @@ pub fn mock() -> MockLayerBuilder {
 ///     tracing::info!("a");
 /// }
 ///
-/// handle_1.assert_finished();
-/// handle_2.assert_finished();
+/// let handle_1_result = handle_1.finished();
+/// let handle_2_result = handle_2.finished();
+/// strict_test_support::ensure(handle_1_result.is_err() || handle_2_result.is_err(), "mock expectation mismatch returns an error")?;
+/// # Ok(())
+/// # }
 /// ```
 ///
 /// [`MockLayerBuilder::named`]: fn@crate::layer::MockLayerBuilder::named
@@ -259,7 +267,9 @@ pub fn named(name: impl fmt::Display) -> MockLayerBuilder {
 
 #[derive(Debug)]
 pub struct MockLayerBuilder {
+    /// Pending expectations.
     expected: VecDeque<Expect>,
+    /// Name used in failure messages.
     name: String,
 }
 
@@ -272,15 +282,20 @@ pub struct MockLayerBuilder {
 ///
 /// [`layer`]: mod@crate::layer
 pub struct MockLayer {
+    /// Pending expectations.
     expected: Arc<Mutex<VecDeque<Expect>>>,
+    /// First expectation failure observed while the layer is running.
+    failures: SharedFailures,
+    /// Current entered span stack.
     current: Mutex<Vec<Id>>,
+    /// Name used in failure messages.
     name: String,
 }
 
 impl MockLayerBuilder {
     /// Overrides the name printed by the mock layer's debugging output.
     ///
-    /// The debugging output is displayed if the test panics, or if the test is
+    /// The debugging output is displayed if the test fails, or if the test is
     /// run with `--nocapture`.
     ///
     /// By default, the mock layer's name is the  name of the test
@@ -298,7 +313,8 @@ impl MockLayerBuilder {
     /// expecting to receive an event. As we only record a single
     /// event, the test will fail:
     ///
-    /// ```should_panic
+    /// ```no_run
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{layer, expect};
     /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
     ///
@@ -328,8 +344,11 @@ impl MockLayerBuilder {
     ///     tracing::info!("a");
     /// }
     ///
-    /// handle_1.assert_finished();
-    /// handle_2.assert_finished();
+    /// let handle_1_result = handle_1.finished();
+    /// let handle_2_result = handle_2.finished();
+    /// strict_test_support::ensure(handle_1_result.is_err() || handle_2_result.is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// In the test output, we see that the layer which didn't
@@ -344,12 +363,13 @@ impl MockLayerBuilder {
     ///     ),
     /// ]', tracing-mock/src/subscriber.rs:472:13
     /// ```
+    #[must_use]
     pub fn named(mut self, name: impl fmt::Display) -> Self {
-        use std::fmt::Write;
-        if !self.name.is_empty() {
-            write!(&mut self.name, "::{}", name).unwrap();
-        } else {
+        if self.name.is_empty() {
             self.name = name.to_string();
+        } else {
+            self.name.push_str("::");
+            self.name.push_str(&name.to_string());
         }
         self
     }
@@ -367,7 +387,8 @@ impl MockLayerBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, layer};
     /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
     ///
@@ -381,12 +402,15 @@ impl MockLayerBuilder {
     ///
     /// tracing::info!("event");
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// A span is entered before the event, causing the test to fail:
     ///
-    /// ```should_panic
+    /// ```no_run
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, layer};
     /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
     ///
@@ -402,8 +426,11 @@ impl MockLayerBuilder {
     /// let _guard = span.enter();
     /// tracing::info!("event");
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
+    #[must_use]
     pub fn event(mut self, event: ExpectedEvent) -> Self {
         self.expected.push_back(Expect::Event(event));
         self
@@ -425,7 +452,8 @@ impl MockLayerBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, layer};
     /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
     ///
@@ -443,16 +471,18 @@ impl MockLayerBuilder {
     ///
     /// _ = tracing::info_span!("the span we're testing", testing = "yes");
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
-    /// An event is recorded before the span is created, causing the
-    /// test to fail:
+    /// An unmet span expectation can be inspected through a returned error:
     ///
-    /// ```should_panic
+    /// ```
+    /// use strict_test_support::{TestFailure, ensure};
     /// use tracing_mock::{expect, layer};
-    /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
     ///
+    /// # fn main() -> Result<(), TestFailure> {
     /// let span = expect::span()
     ///     .at_level(tracing::Level::INFO)
     ///     .named("the span we're testing")
@@ -461,18 +491,16 @@ impl MockLayerBuilder {
     ///     .new_span(span)
     ///     .run_with_handle();
     ///
-    /// let _subscriber =  tracing_subscriber::registry()
-    ///     .with(layer.with_filter(tracing_subscriber::filter::filter_fn(move |_meta| true)))
-    ///     .set_default();
-    ///
-    /// tracing::info!("an event");
-    /// _ = tracing::info_span!("the span we're testing", testing = "yes");
-    ///
-    /// handle.assert_finished();
+    /// drop(layer);
+    /// let result = handle.finished();
+    /// ensure(result.is_err(), "missing new span returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`ExpectedSpan`]: struct@crate::span::ExpectedSpan
     /// [`NewSpan`]: struct@crate::span::NewSpan
+    #[must_use]
     pub fn new_span<I>(mut self, new_span: I) -> Self
     where
         I: Into<NewSpan>,
@@ -496,7 +524,8 @@ impl MockLayerBuilder {
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, layer};
     /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
     ///
@@ -518,16 +547,18 @@ impl MockLayerBuilder {
     ///     let _entered = span.enter();
     /// }
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
-    /// An event is recorded before the span is entered, causing the
-    /// test to fail:
+    /// An unmet enter expectation can be inspected through a returned error:
     ///
-    /// ```should_panic
+    /// ```
+    /// use strict_test_support::{TestFailure, ensure};
     /// use tracing_mock::{expect, layer};
-    /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
     ///
+    /// # fn main() -> Result<(), TestFailure> {
     /// let span = expect::span()
     ///     .at_level(tracing::Level::INFO)
     ///     .named("the span we're testing");
@@ -537,21 +568,16 @@ impl MockLayerBuilder {
     ///     .only()
     ///     .run_with_handle();
     ///
-    /// let _subscriber =  tracing_subscriber::registry()
-    ///     .with(layer.with_filter(tracing_subscriber::filter::filter_fn(move |_meta| true)))
-    ///     .set_default();
-    ///
-    /// {
-    ///     tracing::info!("an event");
-    ///     let span = tracing::info_span!("the span we're testing");
-    ///     let _entered = span.enter();
-    /// }
-    ///
-    /// handle.assert_finished();
+    /// drop(layer);
+    /// let result = handle.finished();
+    /// ensure(result.is_err(), "missing span enter returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`exit`]: fn@Self::exit
     /// [`only`]: fn@Self::only
+    #[must_use]
     pub fn enter<S>(mut self, span: S) -> Self
     where
         S: Into<ExpectedSpan>,
@@ -572,11 +598,12 @@ impl MockLayerBuilder {
     /// then the expectation will fail.
     ///
     /// **Note**: Ensure that the guard returned by [`Span::enter`]
-    /// is dropped before calling [`MockHandle::assert_finished`].
+    /// is dropped before calling [`MockHandle::finished`].
     ///
     /// # Examples
     ///
-    /// ```
+    /// ```no_run
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, layer};
     /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
     ///
@@ -597,16 +624,18 @@ impl MockLayerBuilder {
     ///     let _entered = span.enter();
     /// }
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
-    /// An event is recorded before the span is exited, causing the
-    /// test to fail:
+    /// An unmet exit expectation can be inspected through a returned error:
     ///
-    /// ```should_panic
+    /// ```
+    /// use strict_test_support::{TestFailure, ensure};
     /// use tracing_mock::{expect, layer};
-    /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
     ///
+    /// # fn main() -> Result<(), TestFailure> {
     /// let span = expect::span()
     ///     .at_level(tracing::Level::INFO)
     ///     .named("the span we're testing");
@@ -616,27 +645,67 @@ impl MockLayerBuilder {
     ///     .only()
     ///     .run_with_handle();
     ///
-    /// let _subscriber =  tracing_subscriber::registry()
-    ///     .with(layer.with_filter(tracing_subscriber::filter::filter_fn(move |_meta| true)))
-    ///     .set_default();
-    ///
-    /// {
-    ///     let span = tracing::info_span!("the span we're testing");
-    ///     let _entered = span.enter();
-    ///     tracing::info!("an event");
-    /// }
-    ///
-    /// handle.assert_finished();
+    /// drop(layer);
+    /// let result = handle.finished();
+    /// ensure(result.is_err(), "missing span exit returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`enter`]: fn@Self::enter
-    /// [`MockHandle::assert_finished`]: fn@crate::subscriber::MockHandle::assert_finished
+    /// [`MockHandle::finished`]: fn@crate::subscriber::MockHandle::finished
     /// [`Span::enter`]: fn@tracing::Span::enter
+    #[must_use]
     pub fn exit<S>(mut self, span: S) -> Self
     where
         S: Into<ExpectedSpan>,
     {
         self.expected.push_back(Expect::Exit(span.into()));
+        self
+    }
+
+    /// Adds an expectation that closing a span matching the
+    /// [`ExpectedSpan`] will be recorded next.
+    ///
+    /// This expectation matches [`Layer::on_close`], which is called
+    /// when the subscriber considers the span fully closed.
+    ///
+    /// If the span that is closed doesn't match the [`ExpectedSpan`],
+    /// or if something else (such as an event) is recorded first,
+    /// then the expectation will fail.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+    /// use tracing_mock::{expect, layer};
+    /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
+    ///
+    /// let span = expect::span()
+    ///     .at_level(tracing::Level::INFO)
+    ///     .named("the span we're testing");
+    /// let (layer, handle) = layer::mock()
+    ///     .close_span(&span)
+    ///     .run_with_handle();
+    ///
+    /// let _subscriber = tracing_subscriber::registry()
+    ///     .with(layer.with_filter(tracing_subscriber::filter::filter_fn(move |_meta| true)))
+    ///     .set_default();
+    ///
+    /// _ = tracing::info_span!("the span we're testing");
+    ///
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [`Layer::on_close`]: tracing_subscriber::layer::Layer::on_close
+    #[must_use]
+    pub fn close_span<S>(mut self, span: S) -> Self
+    where
+        S: Into<ExpectedSpan>,
+    {
+        self.expected.push_back(Expect::CloseSpan(span.into()));
         self
     }
 
@@ -653,6 +722,7 @@ impl MockLayerBuilder {
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, layer};
     /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
     ///
@@ -666,14 +736,17 @@ impl MockLayerBuilder {
     ///
     /// // The layer's on_register_dispatch was called when the subscriber was set as default
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// If the `on_register_dispatch` call doesn't make it to the `MockLayer`,
     /// in case it's wrapped in another Layer that doesn't forward the call,
     /// then the expectation will fail.
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// # use std::marker::PhantomData;
     ///
     /// # use tracing::{Event, Subscriber};
@@ -690,12 +763,20 @@ impl MockLayerBuilder {
     /// }
     ///
     /// impl<S: Subscriber, L: Layer<S>> Layer<S> for WrapLayer<S, L> {
-    ///     fn on_register_dispatch(&self, subscriber: &tracing::Dispatch) {
+    ///     fn on_register_dispatch(
+    ///         &self,
+    ///         subscriber: &tracing::Dispatch,
+    ///     ) -> tracing_core::subscriber::SubscriberResult {
     ///         // Doesn't forward to `self.inner`
     ///         let _ = subscriber;
+    ///         Ok(())
     ///     }
     ///
-    ///     fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+    ///     fn on_event(
+    ///         &self,
+    ///         event: &Event<'_>,
+    ///         ctx: Context<'_, S>,
+    ///     ) -> tracing_core::subscriber::SubscriberResult {
     ///         self.inner.on_event(event, ctx)
     ///     }
     /// }
@@ -710,10 +791,13 @@ impl MockLayerBuilder {
     /// // The layer's on_register_dispatch is called when the subscriber is set as default
     /// drop(subscriber);
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`Layer::on_register_dispatch`]: tracing_subscriber::layer::Layer::on_register_dispatch
+    #[must_use]
     pub fn on_register_dispatch(mut self) -> Self {
         self.expected.push_back(Expect::OnRegisterDispatch);
         self
@@ -731,6 +815,7 @@ impl MockLayerBuilder {
     /// expect a single event, but receive three:
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, layer};
     /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
     ///
@@ -746,12 +831,15 @@ impl MockLayerBuilder {
     /// tracing::info!("b");
     /// tracing::info!("c");
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// After including `only`, the test will fail:
     ///
-    /// ```should_panic
+    /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, layer};
     /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
     ///
@@ -768,11 +856,14 @@ impl MockLayerBuilder {
     /// tracing::info!("b");
     /// tracing::info!("c");
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure(handle.finished().is_err(), "mock expectation mismatch returns an error")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`run`]: fn@Self::run
     /// [`run_with_handle`]: fn@Self::run_with_handle
+    #[must_use]
     pub fn only(mut self) -> Self {
         self.expected.push_back(Expect::Nothing);
         self
@@ -783,7 +874,7 @@ impl MockLayerBuilder {
     ///
     /// This function is similar to [`run_with_handle`], but it doesn't
     /// return a [`MockHandle`]. This is useful if the desired
-    /// assertions can be checked externally to the subscriber.
+    /// expectations can be checked externally to the subscriber.
     ///
     /// # Examples
     ///
@@ -791,6 +882,7 @@ impl MockLayerBuilder {
     /// codebase:
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing::Subscriber;
     /// use tracing_mock::layer;
     /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
@@ -807,14 +899,21 @@ impl MockLayerBuilder {
     ///
     /// let subscriber = tracing_subscriber::registry().with(vec![unfiltered, info, debug]);
     ///
-    /// assert_eq!(subscriber.max_level_hint(), None);
+    /// strict_test_support::ensure(
+    ///     subscriber.max_level_hint().is_none(),
+    ///     "mock layer stack reports no max-level hint",
+    /// )?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`MockHandle`]: struct@crate::subscriber::MockHandle
     /// [`run_with_handle`]: fn@Self::run_with_handle
+    #[must_use]
     pub fn run(self) -> MockLayer {
         MockLayer {
             expected: Arc::new(Mutex::new(self.expected)),
+            failures: SharedFailures::default(),
             name: self.name,
             current: Mutex::new(Vec::new()),
         }
@@ -827,6 +926,7 @@ impl MockLayerBuilder {
     /// # Examples
     ///
     /// ```
+    /// # fn main() -> Result<(), strict_test_support::TestFailure> {
     /// use tracing_mock::{expect, layer};
     /// use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, Layer};
     ///
@@ -840,16 +940,21 @@ impl MockLayerBuilder {
     ///
     /// tracing::info!("event");
     ///
-    /// handle.assert_finished();
+    /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
     /// [`MockHandle`]: struct@crate::subscriber::MockHandle
     /// [`MockLayer`]: struct@crate::layer::MockLayer
+    #[must_use]
     pub fn run_with_handle(self) -> (MockLayer, MockHandle) {
         let expected = Arc::new(Mutex::new(self.expected));
-        let handle = MockHandle::new(expected.clone(), self.name.clone());
+        let failures = SharedFailures::default();
+        let handle = MockHandle::new(Arc::clone(&expected), failures.clone(), self.name.clone());
         let subscriber = MockLayer {
             expected,
+            failures,
             name: self.name,
             current: Mutex::new(Vec::new()),
         };
@@ -867,44 +972,61 @@ where
 }
 
 impl MockLayer {
+    /// Records a formatted expectation failure.
+    fn record_failure(&self, args: fmt::Arguments<'_>) {
+        self.failures.record(ExpectationError::from_args(args));
+    }
+
+    /// Records a fallible expectation result.
+    fn record_result<T>(&self, result: ExpectationResult<T>) -> Option<T> {
+        self.failures.record_result(result)
+    }
+
+    /// Checks an event's observed scope against expected spans.
     fn check_event_scope<C>(
         &self,
-        current_scope: Option<tracing_subscriber::registry::Scope<'_, C>>,
+        current_scope: Option<Scope<'_, C>>,
         expected_scope: &mut [ExpectedSpan],
-    ) where
+    ) -> ExpectationResult
+    where
         C: for<'lookup> LookupSpan<'lookup>,
     {
-        let mut current_scope = current_scope.into_iter().flatten();
-        let mut i = 0;
-        for (expected, actual) in expected_scope.iter_mut().zip(&mut current_scope) {
-            println!(
-                "[{}] event_scope[{}] actual={} ({:?}); expected={}",
-                self.name,
-                i,
-                actual.name(),
-                actual.id(),
-                expected
-            );
+        let mut observed_scope = current_scope.into_iter().flatten();
+        let mut matched_count = 0_usize;
+        for (expected, actual) in expected_scope.iter_mut().zip(&mut observed_scope) {
+            let actual_span = ActualSpan::from(&actual);
             expected.check(
-                &(&actual).into(),
-                format_args!("the {}th span in the event's scope to be", i),
+                &actual_span,
+                format_args!("the {matched_count}th span in the event's scope to be"),
                 &self.name,
-            );
-            i += 1;
+            )?;
+            matched_count = matched_count.checked_add(1).ok_or_else(|| {
+                ExpectationError::from_args(format_args!(
+                    "[{}] event scope match count overflowed",
+                    self.name
+                ))
+            })?;
         }
-        let remaining_expected = &expected_scope[i..];
-        assert!(
-            remaining_expected.is_empty(),
-            "\n[{}] did not observe all expected spans in event scope!\n[{}] missing: {:#?}",
-            self.name,
-            self.name,
-            remaining_expected,
-        );
-        assert!(
-            current_scope.next().is_none(),
-            "\n[{}] did not expect all spans in the actual event scope!",
-            self.name,
-        );
+        let mut missing = String::new();
+        for expected in expected_scope.iter().skip(matched_count) {
+            if !missing.is_empty() {
+                missing.push_str(", ");
+            }
+            missing.push_str(&expected.to_string());
+        }
+        if !missing.is_empty() {
+            return Err(ExpectationError::from_args(format_args!(
+                "\n[{}] did not observe all expected spans in event scope!\n[{}] missing: {}",
+                self.name, self.name, missing
+            )));
+        }
+        if observed_scope.next().is_some() {
+            return Err(ExpectationError::from_args(format_args!(
+                "\n[{}] did not expect all spans in the actual event scope!",
+                self.name
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -912,199 +1034,264 @@ impl<C> Layer<C> for MockLayer
 where
     C: Subscriber + for<'a> LookupSpan<'a>,
 {
-    fn on_register_dispatch(&self, _subscriber: &tracing::Dispatch) {
-        println!("[{}] on_register_dispatch", self.name);
-        let mut expected = self.expected.lock();
-        if matches!(expected.front(), Some(Expect::OnRegisterDispatch)) {
-            let _matched = expected.pop_front();
+    fn on_register_dispatch(&self, _subscriber: &tracing::Dispatch) -> SubscriberResult {
+        {
+            let mut expected = self.expected.lock();
+            if matches!(expected.front(), Some(Expect::OnRegisterDispatch)) {
+                let _matched = expected.pop_front();
+            }
         }
+        Ok(())
     }
 
     fn register_callsite(
         &self,
-        metadata: &'static tracing::Metadata<'static>,
-    ) -> tracing_core::Interest {
-        println!("[{}] register_callsite {:#?}", self.name, metadata);
-        tracing_core::Interest::always()
+        _metadata: &'static tracing::Metadata<'static>,
+    ) -> SubscriberResult<tracing_core::Interest> {
+        Ok(tracing_core::Interest::always())
     }
 
-    fn on_record(&self, _: &Id, _: &Record<'_>, _: Context<'_, C>) {
-        unimplemented!(
+    fn on_record(&self, _: Id, _: &Record<'_>, _: Context<'_, C>) -> SubscriberResult {
+        self.record_failure(format_args!(
             "so far, we don't have any tests that need an `on_record` \
             implementation.\nif you just wrote one that does, feel free to \
             implement it!"
-        );
+        ));
+        Ok(())
     }
 
-    fn on_event(&self, event: &Event<'_>, cx: Context<'_, C>) {
+    fn on_event(&self, event: &Event<'_>, cx: Context<'_, C>) -> SubscriberResult {
         let name = event.metadata().name();
-        println!(
-            "[{}] event: {}; level: {}; target: {}",
-            self.name,
-            name,
-            event.metadata().level(),
-            event.metadata().target(),
-        );
-        match self.expected.lock().pop_front() {
+        let next = {
+            let mut expected = self.expected.lock();
+            expected.pop_front()
+        };
+        match next {
             None => {}
             Some(Expect::Event(mut expected)) => {
-                expected.check(event, || context_get_ancestry(event, &cx), &self.name);
-
-                if let Some(expected_scope) = expected.scope_mut() {
-                    self.check_event_scope(cx.event_scope(event), expected_scope);
+                if self
+                    .record_result(expected.check(
+                        event,
+                        || context_get_ancestry(&event, &cx),
+                        &self.name,
+                    ))
+                    .is_some()
+                    && let Some(expected_scope) = expected.scope_mut()
+                {
+                    let _result = self.record_result(
+                        self.check_event_scope(cx.event_scope(event), expected_scope),
+                    );
                 }
             }
-            Some(ex) => ex.bad(&self.name, format_args!("observed event {:#?}", event)),
+            Some(ex) => {
+                let _result =
+                    self.record_result(ex.bad(&self.name, format_args!("observed event `{name}`")));
+            }
         }
+        Ok(())
     }
 
-    fn on_follows_from(&self, _span: &Id, _follows: &Id, _: Context<'_, C>) {
-        unimplemented!(
+    fn on_follows_from(&self, _span: Id, _follows: Id, _: Context<'_, C>) -> SubscriberResult {
+        self.record_failure(format_args!(
             "so far, we don't have any tests that need an `on_follows_from` \
             implementation.\nif you just wrote one that does, feel free to \
             implement it!"
-        );
+        ));
+        Ok(())
     }
 
-    fn on_new_span(&self, span: &Attributes<'_>, id: &Id, cx: Context<'_, C>) {
-        let meta = span.metadata();
-        println!(
-            "[{}] new_span: name={:?}; target={:?}; id={:?};",
-            self.name,
-            meta.name(),
-            meta.target(),
-            id
-        );
-        let mut expected = self.expected.lock();
-        let was_expected = matches!(expected.front(), Some(Expect::NewSpan(_)));
-        if was_expected && let Expect::NewSpan(mut expected) = expected.pop_front().unwrap() {
-            expected.check(span, || context_get_ancestry(span, &cx), &self.name);
+    fn on_new_span(&self, span: &Attributes<'_>, id: Id, cx: Context<'_, C>) -> SubscriberResult {
+        let next_new_span = {
+            let mut expected = self.expected.lock();
+            if matches!(expected.front(), Some(Expect::NewSpan(_))) {
+                expected.pop_front()
+            } else {
+                None
+            }
+        };
+        if let Some(Expect::NewSpan(mut expected_span)) = next_new_span {
+            if let Some(ref expected_id) = expected_span.span.id
+                && let Err(error) = expected_id.set(id.into_u64())
+            {
+                self.record_failure(format_args!(
+                    "[{}] could not set expected span ID: {}",
+                    self.name, error
+                ));
+            }
+
+            let _result = self.record_result(expected_span.check(
+                span,
+                || context_get_ancestry(&span, &cx),
+                &self.name,
+            ));
         }
+        Ok(())
     }
 
-    fn on_enter(&self, id: &Id, cx: Context<'_, C>) {
-        let span = cx
-            .span(id)
-            .unwrap_or_else(|| panic!("[{}] no span for ID {:?}", self.name, id));
-        println!("[{}] enter: {}; id={:?};", self.name, span.name(), id);
-        match self.expected.lock().pop_front() {
+    fn on_enter(&self, id: Id, cx: Context<'_, C>) -> SubscriberResult {
+        let Some(span) = cx.span(id) else {
+            self.record_failure(format_args!(
+                "[{}] no span for ID `{}`",
+                self.name,
+                id.into_u64()
+            ));
+            return Ok(());
+        };
+        let next = {
+            let mut expected = self.expected.lock();
+            expected.pop_front()
+        };
+        match next {
             None => {}
             Some(Expect::Enter(ref expected_span)) => {
-                expected_span.check(&(&span).into(), "to enter", &self.name);
+                let _result = self.record_result(expected_span.check(
+                    &(&span).into(),
+                    "to enter",
+                    &self.name,
+                ));
             }
-            Some(ex) => ex.bad(&self.name, format_args!("entered span {:?}", span.name())),
-        }
-        self.current.lock().push(id.clone());
-    }
-
-    fn on_exit(&self, id: &Id, cx: Context<'_, C>) {
-        if std::thread::panicking() {
-            // `exit()` can be called in `drop` impls, so we must guard against
-            // double panics.
-            println!("[{}] exit {:?} while panicking", self.name, id);
-            return;
-        }
-        let span = cx
-            .span(id)
-            .unwrap_or_else(|| panic!("[{}] no span for ID {:?}", self.name, id));
-        println!("[{}] exit: {}; id={:?};", self.name, span.name(), id);
-        match self.expected.lock().pop_front() {
-            None => {}
-            Some(Expect::Exit(ref expected_span)) => {
-                expected_span.check(&(&span).into(), "to exit", &self.name);
-                let curr = self.current.lock().pop();
-                assert_eq!(
-                    Some(id),
-                    curr.as_ref(),
-                    "[{}] exited span {:?}, but the current span was {:?}",
-                    self.name,
-                    span.name(),
-                    curr.as_ref().and_then(|id| cx.span(id)).map(|s| s.name())
+            Some(ex) => {
+                let _result = self.record_result(
+                    ex.bad(&self.name, format_args!("entered span `{}`", span.name())),
                 );
             }
-            Some(ex) => ex.bad(&self.name, format_args!("exited span {:?}", span.name())),
-        };
+        }
+        self.current.lock().push(id);
+        Ok(())
     }
 
-    fn on_close(&self, id: Id, cx: Context<'_, C>) {
-        if std::thread::panicking() {
-            // `try_close` can be called in `drop` impls, so we must guard against
-            // double panics.
-            println!("[{}] close {:?} while panicking", self.name, id);
-            return;
+    fn on_exit(&self, id: Id, cx: Context<'_, C>) -> SubscriberResult {
+        let Some(span) = cx.span(id) else {
+            self.record_failure(format_args!(
+                "[{}] no span for ID `{}`",
+                self.name,
+                id.into_u64()
+            ));
+            return Ok(());
+        };
+        let next = {
+            let mut expected = self.expected.lock();
+            expected.pop_front()
+        };
+        match next {
+            None => {}
+            Some(Expect::Exit(ref expected_span)) => {
+                let _result =
+                    self.record_result(expected_span.check(&(&span).into(), "to exit", &self.name));
+                let curr = self.current.lock().pop();
+                if curr.as_ref() != Some(&id) {
+                    let current_name = curr
+                        .as_ref()
+                        .and_then(|current_id| cx.span(*current_id))
+                        .map_or("<unknown>", |state| state.name());
+                    self.record_failure(format_args!(
+                        "[{}] exited span `{}`, but the current span was `{}`",
+                        self.name,
+                        span.name(),
+                        current_name
+                    ));
+                }
+            }
+            Some(ex) => {
+                let _result = self.record_result(
+                    ex.bad(&self.name, format_args!("exited span `{}`", span.name())),
+                );
+            }
         }
-        let span = cx.span(&id);
-        let name = span.as_ref().map(|span| {
-            println!("[{}] close_span: {}; id={:?};", self.name, span.name(), id,);
-            span.name()
-        });
-        if name.is_none() {
-            println!("[{}] drop_span: id={:?}", self.name, id);
-        }
+        Ok(())
+    }
+
+    fn on_close(&self, id: Id, cx: Context<'_, C>) -> SubscriberResult {
+        let span = cx.span(id);
+        let name = span.as_ref().map(SpanRef::name);
         if let Some(mut expected) = self.expected.try_lock() {
             let was_expected = match expected.front() {
-                Some(Expect::DropSpan(expected_span)) => {
-                    // Don't assert if this function was called while panicking,
-                    // as failing the assertion can cause a double panic.
-                    if !::std::thread::panicking()
-                        && let Some(ref span) = span
-                    {
-                        expected_span.check(&span.into(), "to close a span", &self.name);
+                Some(expectation) if expectation.close_span().is_some() => {
+                    let Some(expected_span) = expectation.close_span() else {
+                        return Ok(());
+                    };
+                    if let Some(ref observed_span) = span {
+                        let _result = self.record_result(expected_span.check(
+                            &observed_span.into(),
+                            "to close a span",
+                            &self.name,
+                        ));
+                    } else {
+                        let actual_span = (&id).into();
+                        let _result = self.record_result(expected_span.check(
+                            &actual_span,
+                            "to close a span",
+                            &self.name,
+                        ));
                     }
                     true
                 }
-                Some(Expect::Event(_)) => {
-                    if !::std::thread::panicking() {
-                        panic!(
-                            "[{}] expected an event, but dropped span {} (id={:?}) instead",
-                            self.name,
-                            name.unwrap_or("<unknown name>"),
-                            id
-                        );
-                    }
+                Some(&Expect::Event(_)) => {
+                    self.record_failure(format_args!(
+                        "[{}] expected an event, but closed span {} (id={}) instead",
+                        self.name,
+                        name.unwrap_or("<unknown name>"),
+                        id.into_u64()
+                    ));
                     true
                 }
-                _ => false,
+                Some(_) | None => false,
             };
             if was_expected {
                 let _matched = expected.pop_front();
             }
         }
+        Ok(())
     }
 
-    fn on_id_change(&self, _old: &Id, _new: &Id, _ctx: Context<'_, C>) {
-        panic!("well-behaved subscribers should never do this to us, lol");
+    fn on_id_change(&self, _old: Id, _new: Id, _ctx: Context<'_, C>) -> SubscriberResult {
+        self.record_failure(format_args!(
+            "well-behaved subscribers should never change span IDs"
+        ));
+        Ok(())
     }
 }
 
-fn context_get_ancestry<C>(item: impl HasAncestry, ctx: &Context<'_, C>) -> ActualAncestry
+/// Resolves ancestry through a layer context.
+fn context_get_ancestry<C>(
+    item: &impl HasAncestry,
+    ctx: &Context<'_, C>,
+) -> ExpectationResult<ActualAncestry>
 where
     C: Subscriber + for<'a> LookupSpan<'a>,
 {
     get_ancestry(
         item,
-        || ctx.lookup_current().map(|s| s.id()),
-        |span_id| ctx.span(span_id).map(|span| (&span).into()),
+        || ctx.lookup_current().map(|span_ref| span_ref.id()),
+        |span_id| ctx.span(*span_id).map(|span_ref| (&span_ref).into()),
     )
 }
 
 impl fmt::Debug for MockLayer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut s = f.debug_struct("ExpectSubscriber");
-        let _builder = s.field("name", &self.name);
+        let mut debug = f.debug_struct("ExpectSubscriber");
+        let _name = debug.field("name", &self.name);
 
         if let Some(expected) = self.expected.try_lock() {
-            let _builder = s.field("expected", &expected);
+            let _expected = debug.field("expected", &expected);
         } else {
-            let _builder = s.field("expected", &format_args!("<locked>"));
+            let _expected = debug.field("expected", &format_args!("<locked>"));
         }
+        let _failures = debug.field("failures", &self.failures);
 
         if let Some(current) = self.current.try_lock() {
-            let _builder = s.field("current", &format_args!("{:?}", &current));
+            let mut current_ids = String::new();
+            for id in &*current {
+                if !current_ids.is_empty() {
+                    current_ids.push_str(", ");
+                }
+                current_ids.push_str(&id.into_u64().to_string());
+            }
+            let _current = debug.field("current", &current_ids);
         } else {
-            let _builder = s.field("current", &format_args!("<locked>"));
+            let _current = debug.field("current", &format_args!("<locked>"));
         }
 
-        s.finish()
+        debug.finish()
     }
 }

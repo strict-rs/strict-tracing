@@ -4,20 +4,26 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use tracing::{Level, span};
 
-mod shared;
+pub mod shared;
+use shared::BenchmarkMatrix as _;
 
-fn bench(c: &mut Criterion) {
-    shared::for_all_recording(&mut c.benchmark_group("span_repeated"), |b| {
-        let n = black_box(N_SPANS);
-        b.iter(|| (0..n).fold(mk_span(0), |_, i| mk_span(i as u64)))
+/// Benchmarks constructing repeated spans.
+#[allow(
+    clippy::single_call_fn,
+    reason = "Criterion invokes this benchmark entrypoint through criterion_group"
+)]
+fn bench(criterion: &mut Criterion) {
+    shared::Recording.bench(&mut criterion.benchmark_group("span_repeated"), |bencher| {
+        let span_count = black_box(N_SPANS);
+        bencher.iter(|| {
+            (0..span_count).fold(span!(Level::TRACE, "span", i = 0), |_, index| {
+                span!(Level::TRACE, "span", i = index)
+            })
+        });
     });
 }
 
-#[inline]
-fn mk_span(i: u64) -> tracing::Span {
-    span!(Level::TRACE, "span", i = i)
-}
-
-const N_SPANS: usize = 100;
+/// Number of spans to create per repeated-span iteration.
+const N_SPANS: u64 = 100;
 criterion_group!(benches, bench);
 criterion_main!(benches);

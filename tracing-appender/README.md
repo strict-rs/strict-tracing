@@ -58,13 +58,21 @@ This crate can be used in a few ways to record spans/events:
 ## Rolling File Appender
 
 ```rust
-fn main(){
-    let file_appender = tracing_appender::rolling::hourly("/some/directory", "prefix.log");
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let file_appender = tracing_appender::rolling::hourly("/some/directory", "prefix.log")?;
+
+    Ok(())
 }
 ```
 This creates an hourly rotating file appender that writes to 
 `/some/directory/prefix.log.YYYY-MM-DD-HH`. [`Rotation::DAILY`] and 
 [`Rotation::NEVER`] are the other available options.
+
+Rolling file appender constructors return a `Result` because initialization
+opens the initial log file and can fail. Use `?` to propagate initialization
+errors, or use `RollingFileAppender::builder().build(...)` when you need
+additional configuration such as filename suffixes, latest-log symlinks, or
+log-file retention.
 
 The file appender implements [`std::io::Write`][write]. To be used with 
 [`tracing_subscriber::FmtSubscriber`][fmt_subscriber], it must be combined 
@@ -96,9 +104,11 @@ impl std::io::Write for TestWriter {
     }
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     let (non_blocking, _guard) = tracing_appender::non_blocking(TestWriter);
-    tracing_subscriber::fmt().with_writer(non_blocking).init();
+    tracing_subscriber::fmt().with_writer(non_blocking).try_init()?;
+
+    Ok(())
 }
 ```
 **Note:** `_guard` is a [`WorkerGuard`][guard] which is returned by 
@@ -111,11 +121,13 @@ The example below demonstrates the construction of a
 a [`std::io::Write`][write]:
 
 ```rust
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     let (non_blocking, _guard) = tracing_appender::non_blocking(std::io::stdout());
     tracing_subscriber::fmt()
         .with_writer(non_blocking)
-        .init();
+        .try_init()?;
+
+    Ok(())
 }
 ```
 
@@ -125,12 +137,14 @@ use `non_blocking`.
 ## Non-Blocking Rolling File Appender
 
 ```rust
-fn main() {
-    let file_appender = tracing_appender::rolling::hourly("/some/directory", "prefix.log");
+fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+    let file_appender = tracing_appender::rolling::hourly("/some/directory", "prefix.log")?;
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-   tracing_subscriber::fmt()
-       .with_writer(non_blocking)
-       .init();
+    tracing_subscriber::fmt()
+        .with_writer(non_blocking)
+        .try_init()?;
+
+    Ok(())
 }
 ```
 

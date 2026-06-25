@@ -1,3 +1,5 @@
+//! Span trace capture, status, and formatting support.
+
 use crate::layer::WithContext;
 use std::fmt;
 use tracing::{Metadata, Span};
@@ -62,6 +64,7 @@ use tracing::{Metadata, Span};
 /// [`with_spans`]: SpanTrace::with_spans()
 #[derive(Clone)]
 pub struct SpanTrace {
+    /// The innermost captured span.
     span: Span,
 }
 
@@ -69,8 +72,13 @@ pub struct SpanTrace {
 
 impl SpanTrace {
     /// Create a new span trace with the given span as the innermost span.
-    pub fn new(span: Span) -> Self {
-        SpanTrace { span }
+    #[must_use]
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public constructor remains the API for building a trace from an explicit span"
+    )]
+    pub const fn new(span: Span) -> Self {
+        Self { span }
     }
 
     /// Capture the current span trace.
@@ -86,8 +94,10 @@ impl SpanTrace {
     ///
     /// # fn some_error_condition() -> bool { true }
     ///
-    /// #[tracing::instrument]
     /// pub fn my_function(arg: &str) -> Result<(), MyError> {
+    ///     let span = tracing::info_span!("my_function", arg);
+    ///     let _guard = span.enter();
+    ///
     ///     if some_error_condition() {
     ///         return Err(MyError {
     ///             span_trace: SpanTrace::capture(),
@@ -99,8 +109,13 @@ impl SpanTrace {
     /// #   Ok(())
     /// }
     /// ```
+    #[must_use]
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public capture entry point names the core SpanTrace operation"
+    )]
     pub fn capture() -> Self {
-        SpanTrace::new(Span::current())
+        Self::new(Span::current())
     }
 
     /// Apply a function to all captured spans in the trace until it returns
@@ -116,9 +131,9 @@ impl SpanTrace {
     /// [fields]: tracing::field
     /// [`Metadata`]: tracing::Metadata
     pub fn with_spans(&self, f: impl FnMut(&'static Metadata<'static>, &str) -> bool) {
-        let _result = self.span.with_subscriber(|(id, s)| {
-            if let Some(getcx) = s.downcast_ref::<WithContext>() {
-                getcx.with_context(s, id, f);
+        let _result = self.span.with_subscriber(|(id, subscriber)| {
+            if let Some(getcx) = subscriber.downcast_ref::<WithContext>() {
+                getcx.with_context(subscriber, id, f);
             }
         });
     }
@@ -129,13 +144,14 @@ impl SpanTrace {
     /// * the current subscriber does not support capturing `SpanTrace`s
     /// * there was no current span, so a trace was not captured
     /// * a span trace was successfully captured
+    #[must_use]
     pub fn status(&self) -> SpanTraceStatus {
         let inner = if self.span.is_none() {
             SpanTraceStatusInner::Empty
         } else {
             let mut status = None;
-            let _result = self.span.with_subscriber(|(_, s)| {
-                if s.downcast_ref::<WithContext>().is_some() {
+            let _result = self.span.with_subscriber(|(_, subscriber)| {
+                if subscriber.downcast_ref::<WithContext>().is_some() {
                     status = Some(SpanTraceStatusInner::Captured);
                 }
             });
@@ -147,36 +163,41 @@ impl SpanTrace {
     }
 }
 
-/// The current status of a SpanTrace, indicating whether it was captured or
+/// The current status of a `SpanTrace`, indicating whether it was captured or
 /// whether it is empty for some other reason.
 #[derive(Debug, PartialEq, Eq)]
 pub struct SpanTraceStatus(SpanTraceStatusInner);
 
 impl SpanTraceStatus {
-    /// Formatting a SpanTrace is not supported, likely because there is no
-    /// ErrorLayer or the ErrorLayer is from a different version of
-    /// tracing_error
-    pub const UNSUPPORTED: SpanTraceStatus = SpanTraceStatus(SpanTraceStatusInner::Unsupported);
+    /// Formatting a `SpanTrace` is not supported, likely because there is no
+    /// `ErrorLayer` or the `ErrorLayer` is from a different version of
+    /// `tracing_error`.
+    pub const UNSUPPORTED: Self = Self(SpanTraceStatusInner::Unsupported);
 
-    /// The SpanTrace is empty, likely because it was captured outside of any
+    /// The `SpanTrace` is empty, likely because it was captured outside of any
     /// `span`s
-    pub const EMPTY: SpanTraceStatus = SpanTraceStatus(SpanTraceStatusInner::Empty);
+    pub const EMPTY: Self = Self(SpanTraceStatusInner::Empty);
 
     /// A span trace has been captured and the `SpanTrace` should print
     /// reasonable information when rendered.
-    pub const CAPTURED: SpanTraceStatus = SpanTraceStatus(SpanTraceStatusInner::Captured);
+    pub const CAPTURED: Self = Self(SpanTraceStatusInner::Captured);
 }
 
+/// The representation for a [`SpanTraceStatus`].
 #[derive(Debug, PartialEq, Eq)]
 enum SpanTraceStatusInner {
+    /// Capturing the current span trace is unsupported.
     Unsupported,
+    /// No active span was captured.
     Empty,
+    /// An active span trace was captured.
     Captured,
 }
 
+/// Return `false` from a span visitor when formatting fails.
 macro_rules! try_bool {
-    ($e:expr, $dest:ident) => {{
-        let ret = $e.unwrap_or_else(|e| $dest = Err(e));
+    ($result:expr, $dest:ident) => {{
+        let ret = $result.unwrap_or_else(|error| $dest = Err(error));
 
         if $dest.is_err() {
             return false;
@@ -189,11 +210,11 @@ macro_rules! try_bool {
 impl fmt::Display for SpanTrace {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut err = Ok(());
-        let mut span = 0;
+        let mut span: usize = 0;
 
         self.with_spans(|metadata, fields| {
             if span > 0 {
-                try_bool!(write!(f, "\n",), err);
+                try_bool!(f.write_str("\n"), err);
             }
 
             try_bool!(
@@ -202,14 +223,14 @@ impl fmt::Display for SpanTrace {
             );
 
             if !fields.is_empty() {
-                try_bool!(write!(f, "\n           with {}", fields), err);
+                try_bool!(write!(f, "\n           with {fields}"), err);
             }
 
             if let Some((file, line)) = metadata.file().zip(metadata.line()) {
-                try_bool!(write!(f, "\n             at {}:{}", file, line), err);
+                try_bool!(write!(f, "\n             at {file}:{line}"), err);
             }
 
-            span += 1;
+            span = span.saturating_add(1);
             true
         });
 
@@ -238,7 +259,7 @@ impl fmt::Debug for SpanTrace {
                 }
 
                 if let Some((file, line)) = self.metadata.file().zip(self.metadata.line()) {
-                    write!(f, ", file: {:?}, line: {:?}", file, line)?;
+                    write!(f, ", file: {file:?}, line: {line:?}")?;
                 }
 
                 write!(f, " }}")?;
@@ -261,52 +282,56 @@ impl fmt::Debug for SpanTrace {
 mod tests {
     use super::*;
     use crate::ErrorLayer;
+    use strict_test_support::{TestFailure, ensure};
     use tracing::subscriber::with_default;
     use tracing::{Level, span};
     use tracing_subscriber::{prelude::*, registry::Registry};
 
     #[test]
-    fn capture_supported() {
+    fn capture_supported() -> Result<(), TestFailure> {
         let subscriber = Registry::default().with(ErrorLayer::default());
 
-        with_default(subscriber, || {
+        with_default(subscriber, || -> Result<(), TestFailure> {
             let span = span!(Level::ERROR, "test span");
             let _guard = span.enter();
 
             let span_trace = SpanTrace::capture();
 
-            dbg!(&span_trace);
-
-            assert_eq!(SpanTraceStatus::CAPTURED, span_trace.status())
-        });
+            ensure(
+                span_trace.status() == SpanTraceStatus::CAPTURED,
+                "active span with error layer captures a span trace",
+            )
+        })
     }
 
     #[test]
-    fn capture_empty() {
+    fn capture_empty() -> Result<(), TestFailure> {
         let subscriber = Registry::default().with(ErrorLayer::default());
 
-        with_default(subscriber, || {
+        with_default(subscriber, || -> Result<(), TestFailure> {
             let span_trace = SpanTrace::capture();
 
-            dbg!(&span_trace);
-
-            assert_eq!(SpanTraceStatus::EMPTY, span_trace.status())
-        });
+            ensure(
+                span_trace.status() == SpanTraceStatus::EMPTY,
+                "error layer without an active span captures an empty trace",
+            )
+        })
     }
 
     #[test]
-    fn capture_unsupported() {
+    fn capture_unsupported() -> Result<(), TestFailure> {
         let subscriber = Registry::default();
 
-        with_default(subscriber, || {
+        with_default(subscriber, || -> Result<(), TestFailure> {
             let span = span!(Level::ERROR, "test span");
             let _guard = span.enter();
 
             let span_trace = SpanTrace::capture();
 
-            dbg!(&span_trace);
-
-            assert_eq!(SpanTraceStatus::UNSUPPORTED, span_trace.status())
-        });
+            ensure(
+                span_trace.status() == SpanTraceStatus::UNSUPPORTED,
+                "subscriber without error layer cannot capture span traces",
+            )
+        })
     }
 }

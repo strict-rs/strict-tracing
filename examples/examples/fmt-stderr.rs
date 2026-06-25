@@ -1,12 +1,13 @@
 //! Example binary for tracing workspace checks.
 #![deny(rust_2018_idioms)]
-use std::io;
-use tracing::error;
+use std::io::stderr;
+use tracing::{error, subscriber::with_default};
+use tracing_subscriber::fmt;
 
 fn main() {
-    let subscriber = tracing_subscriber::fmt().with_writer(io::stderr).finish();
+    let subscriber = fmt().with_writer(stderr).finish();
 
-    tracing::subscriber::with_default(subscriber, || {
+    with_default(subscriber, || {
         error!("This event will be printed to `stderr`.");
     });
 }

@@ -5,12 +5,21 @@ use crate::{
     registry::{self, LookupSpan, SpanRef},
 };
 use alloc::{fmt, format, string::String};
-use core::{any::{Any, TypeId}, marker::PhantomData, ops::Deref};
+use core::{
+    any::{type_name, Any, TypeId},
+    marker::PhantomData,
+    ops::Deref,
+};
 use format::{FmtSpan, TimingDisplay};
-use std::{cell::RefCell, env, eprintln, io, thread_local, time::Instant};
+use std::{
+    cell::{RefCell, RefMut},
+    env, io, thread_local,
+    time::Instant,
+};
 use tracing_core::{
     field,
     span::{Attributes, Current, Id, Record},
+    subscriber::SubscriberResult,
     Event, Metadata, Subscriber,
 };
 
@@ -24,10 +33,12 @@ use tracing_core::{
 /// use tracing_subscriber::{fmt, Registry};
 /// use tracing_subscriber::prelude::*;
 ///
+/// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 /// let subscriber = Registry::default()
 ///     .with(fmt::Layer::default());
 ///
-/// tracing::subscriber::set_global_default(subscriber).unwrap();
+/// tracing::subscriber::set_global_default(subscriber)?;
+/// # Ok(()) }
 /// ```
 ///
 /// Overriding the layer's behavior:
@@ -41,7 +52,7 @@ use tracing_core::{
 ///    .with_level(false); // don't include event levels when logging
 ///
 /// let subscriber = Registry::default().with(fmt_layer);
-/// # tracing::subscriber::set_global_default(subscriber).unwrap();
+/// # let _result = tracing::subscriber::set_global_default(subscriber);
 /// ```
 ///
 /// Setting a custom event formatter:
@@ -55,11 +66,15 @@ use tracing_core::{
 ///     .event_format(fmt)
 ///     .with_target(false);
 /// # let subscriber = fmt_layer.with_subscriber(tracing_subscriber::registry::Registry::default());
-/// # tracing::subscriber::set_global_default(subscriber).unwrap();
+/// # let _result = tracing::subscriber::set_global_default(subscriber);
 /// ```
 ///
 /// [`Layer`]: super::layer::Layer
 #[cfg_attr(docsrs, doc(cfg(all(feature = "fmt", feature = "std"))))]
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "private formatter configuration stores independent public builder flags"
+)]
 #[derive(Debug)]
 pub struct Layer<
     S,
@@ -67,20 +82,49 @@ pub struct Layer<
     E = format::Format<format::Full>,
     W = fn() -> io::Stdout,
 > {
+    /// Produces writers for formatted events.
     make_writer: W,
+    /// Formats fields attached to spans and events.
     fmt_fields: N,
+    /// Formats complete events.
     fmt_event: E,
+    /// Configures synthesized span lifecycle events.
     fmt_span: format::FmtSpanConfig,
+    /// Whether ANSI escape sequences are enabled.
     is_ansi: bool,
+    /// Whether ANSI escape sequences in values are sanitized.
     ansi_sanitization: bool,
+    /// Whether internal formatter errors are written to the configured writer.
     log_internal_errors: bool,
+    /// Tracks the wrapped subscriber type.
     _inner: PhantomData<fn(S)>,
 }
 
 impl<S> Layer<S> {
     /// Returns a new [`Layer`][self::Layer] with the default configuration.
+    #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Returns a default layer using an explicit `NO_COLOR` environment value.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "`NO_COLOR` handling is injected separately so tests can cover default ANSI policy"
+    )]
+    fn default_with_no_color(no_color: Option<&str>) -> Self {
+        let ansi = default_ansi_enabled(no_color);
+
+        Self {
+            fmt_fields: format::DefaultFields::default(),
+            fmt_event: format::Format::default(),
+            fmt_span: format::FmtSpanConfig::default(),
+            make_writer: io::stdout,
+            is_ansi: ansi,
+            ansi_sanitization: true,
+            log_internal_errors: false,
+            _inner: PhantomData,
+        }
     }
 }
 
@@ -113,13 +157,13 @@ where
     /// [`FormatEvent`]: format::FormatEvent
     /// [`Event`]: tracing::Event
     /// [`Writer`]: format::Writer
-    pub fn event_format<E2>(self, e: E2) -> Layer<S, N, E2, W>
+    pub fn event_format<E2>(self, fmt_event: E2) -> Layer<S, N, E2, W>
     where
         E2: FormatEvent<S, N> + 'static,
     {
         Layer {
             fmt_fields: self.fmt_fields,
-            fmt_event: e,
+            fmt_event,
             fmt_span: self.fmt_span,
             make_writer: self.make_writer,
             is_ansi: self.is_ansi,
@@ -198,7 +242,7 @@ impl<S, N, E, W> Layer<S, N, E, W> {
     /// Borrows the [writer] for this [`Layer`].
     ///
     /// [writer]: MakeWriter
-    pub fn writer(&self) -> &W {
+    pub const fn writer(&self) -> &W {
         &self.make_writer
     }
 
@@ -229,7 +273,7 @@ impl<S, N, E, W> Layer<S, N, E, W> {
     /// ```
     ///
     /// [writer]: MakeWriter
-    pub fn writer_mut(&mut self) -> &mut W {
+    pub const fn writer_mut(&mut self) -> &mut W {
         &mut self.make_writer
     }
 
@@ -241,7 +285,7 @@ impl<S, N, E, W> Layer<S, N, E, W> {
     /// the writer.
     #[cfg(feature = "ansi")]
     #[cfg_attr(docsrs, doc(cfg(feature = "ansi")))]
-    pub fn set_ansi(&mut self, ansi: bool) {
+    pub const fn set_ansi(&mut self, ansi: bool) {
         self.is_ansi = ansi;
     }
 
@@ -259,7 +303,7 @@ impl<S, N, E, W> Layer<S, N, E, W> {
     /// exit event for currently entered events not to be formatted
     ///
     /// [lifecycle]: mod@tracing::span#the-span-lifecycle
-    pub fn set_span_events(&mut self, kind: FmtSpan) {
+    pub const fn set_span_events(&mut self, kind: FmtSpan) {
         self.fmt_span = format::FmtSpanConfig {
             kind,
             fmt_timing: self.fmt_span.fmt_timing,
@@ -313,11 +357,6 @@ impl<S, N, E, W> Layer<S, N, E, W> {
     ///
     /// [`NO_COLOR`]: https://no-color.org/
     ///
-    /// Enabling ANSI escapes (calling `with_ansi(true)`) requires the "ansi"
-    /// crate feature flag. Calling `with_ansi(true)` without the "ansi"
-    /// feature flag enabled will panic if debug assertions are enabled, or
-    /// print a warning otherwise.
-    ///
     /// This method itself is still available without the feature flag. This
     /// is to allow ANSI escape codes to be explicitly *disabled* without
     /// having to opt-in to the dependencies required to emit ANSI formatting.
@@ -328,19 +367,26 @@ impl<S, N, E, W> Layer<S, N, E, W> {
     ///
     /// [`with_ansi`]: Layer::with_ansi
     /// [`set_ansi`]: Layer::set_ansi
+    #[cfg(feature = "ansi")]
+    #[must_use]
     pub fn with_ansi(self, ansi: bool) -> Self {
-        #[cfg(not(feature = "ansi"))]
-        if ansi {
-            const ERROR: &str =
-                "tracing-subscriber: the `ansi` crate feature is required to enable ANSI terminal colors";
-            #[cfg(debug_assertions)]
-            panic!("{}", ERROR);
-            #[cfg(not(debug_assertions))]
-            eprintln!("{}", ERROR);
-        }
-
         Self {
             is_ansi: ansi,
+            ..self
+        }
+    }
+
+    /// Sets whether or not the formatter emits ANSI terminal escape codes
+    /// for colors and other text formatting.
+    ///
+    /// ANSI output is unavailable because this crate was built without the
+    /// "ansi" feature. Calling this method is therefore a no-op; the returned
+    /// layer leaves ANSI disabled even when passed `true`.
+    #[cfg(not(feature = "ansi"))]
+    #[must_use]
+    pub fn with_ansi(self, _requested_ansi: bool) -> Self {
+        Self {
+            is_ansi: false,
             ..self
         }
     }
@@ -351,6 +397,7 @@ impl<S, N, E, W> Layer<S, N, E, W> {
     /// injection attacks. If this is set to `false`, ANSI sanitization is
     /// disabled and trusted ANSI control sequences in logged values are passed
     /// through unchanged.
+    #[must_use]
     pub fn with_ansi_sanitization(self, ansi_sanitization: bool) -> Self {
         Self {
             ansi_sanitization,
@@ -369,6 +416,7 @@ impl<S, N, E, W> Layer<S, N, E, W> {
     /// as a fallback.
     ///
     /// [`FormatEvent`]: crate::fmt::FormatEvent
+    #[must_use]
     pub fn log_internal_errors(self, log_internal_errors: bool) -> Self {
         Self {
             log_internal_errors,
@@ -407,6 +455,56 @@ impl<S, N, E, W> Layer<S, N, E, W> {
             ansi_sanitization: self.ansi_sanitization,
             log_internal_errors: self.log_internal_errors,
             make_writer: f(self.make_writer),
+            _inner: self._inner,
+        }
+    }
+
+    /// Sets the field formatter that the layer being built will use to record
+    /// fields.
+    pub fn fmt_fields<N2>(self, fmt_fields: N2) -> Layer<S, N2, E, W>
+    where
+        N2: for<'writer> FormatFields<'writer> + 'static,
+    {
+        Layer {
+            fmt_event: self.fmt_event,
+            fmt_fields,
+            fmt_span: self.fmt_span,
+            make_writer: self.make_writer,
+            is_ansi: self.is_ansi,
+            ansi_sanitization: self.ansi_sanitization,
+            log_internal_errors: self.log_internal_errors,
+            _inner: self._inner,
+        }
+    }
+
+    /// Updates the field formatter by applying a function to the existing field formatter.
+    ///
+    /// This sets the field formatter that the layer being built will use to record fields.
+    ///
+    /// # Examples
+    ///
+    /// Updating a field formatter:
+    ///
+    /// ```rust
+    /// use tracing_subscriber::field::MakeExt;
+    /// let layer = tracing_subscriber::fmt::layer()
+    ///     .map_fmt_fields(|f| f.debug_alt());
+    /// # // this is necessary for type inference.
+    /// # use tracing_subscriber::Layer as _;
+    /// # let _ = layer.with_subscriber(tracing_subscriber::registry::Registry::default());
+    /// ```
+    pub fn map_fmt_fields<N2>(self, f: impl FnOnce(N) -> N2) -> Layer<S, N2, E, W>
+    where
+        N2: for<'writer> FormatFields<'writer> + 'static,
+    {
+        Layer {
+            fmt_event: self.fmt_event,
+            fmt_fields: f(self.fmt_fields),
+            fmt_span: self.fmt_span,
+            make_writer: self.make_writer,
+            is_ansi: self.is_ansi,
+            ansi_sanitization: self.ansi_sanitization,
+            log_internal_errors: self.log_internal_errors,
             _inner: self._inner,
         }
     }
@@ -498,16 +596,18 @@ where
     ///
     /// [lifecycle]: https://docs.rs/tracing/latest/tracing/span/index.html#the-span-lifecycle
     /// [time]: Layer::without_time()
+    #[must_use]
     pub fn with_span_events(self, kind: FmtSpan) -> Self {
-        Layer {
+        Self {
             fmt_span: self.fmt_span.with_kind(kind),
             ..self
         }
     }
 
     /// Sets whether or not an event's target is displayed.
-    pub fn with_target(self, display_target: bool) -> Layer<S, N, format::Format<L, T>, W> {
-        Layer {
+    #[must_use]
+    pub fn with_target(self, display_target: bool) -> Self {
+        Self {
             fmt_event: self.fmt_event.with_target(display_target),
             ..self
         }
@@ -516,8 +616,9 @@ where
     /// displayed.
     ///
     /// [file]: tracing_core::Metadata::file
-    pub fn with_file(self, display_filename: bool) -> Layer<S, N, format::Format<L, T>, W> {
-        Layer {
+    #[must_use]
+    pub fn with_file(self, display_filename: bool) -> Self {
+        Self {
             fmt_event: self.fmt_event.with_file(display_filename),
             ..self
         }
@@ -527,19 +628,21 @@ where
     /// displayed.
     ///
     /// [line]: tracing_core::Metadata::line
+    #[must_use]
     pub fn with_line_number(
         self,
         display_line_number: bool,
-    ) -> Layer<S, N, format::Format<L, T>, W> {
-        Layer {
+    ) -> Self {
+        Self {
             fmt_event: self.fmt_event.with_line_number(display_line_number),
             ..self
         }
     }
 
     /// Sets whether or not an event's level is displayed.
-    pub fn with_level(self, display_level: bool) -> Layer<S, N, format::Format<L, T>, W> {
-        Layer {
+    #[must_use]
+    pub fn with_level(self, display_level: bool) -> Self {
+        Self {
             fmt_event: self.fmt_event.with_level(display_level),
             ..self
         }
@@ -549,8 +652,9 @@ where
     /// when formatting events.
     ///
     /// [thread ID]: std::thread::ThreadId
-    pub fn with_thread_ids(self, display_thread_ids: bool) -> Layer<S, N, format::Format<L, T>, W> {
-        Layer {
+    #[must_use]
+    pub fn with_thread_ids(self, display_thread_ids: bool) -> Self {
+        Self {
             fmt_event: self.fmt_event.with_thread_ids(display_thread_ids),
             ..self
         }
@@ -560,11 +664,12 @@ where
     /// when formatting events.
     ///
     /// [name]: std::thread#naming-threads
+    #[must_use]
     pub fn with_thread_names(
         self,
         display_thread_names: bool,
-    ) -> Layer<S, N, format::Format<L, T>, W> {
-        Layer {
+    ) -> Self {
+        Self {
             fmt_event: self.fmt_event.with_thread_names(display_thread_names),
             ..self
         }
@@ -587,7 +692,7 @@ where
         }
     }
 
-    /// Sets the layer being built to use an [excessively pretty, human-readable formatter](crate::fmt::format::Pretty).
+    /// Sets the layer being built to use an [excessively pretty, human-readable formatter][format::Pretty].
     #[cfg(feature = "ansi")]
     #[cfg_attr(docsrs, doc(cfg(feature = "ansi")))]
     pub fn pretty(self) -> Layer<S, format::Pretty, format::Format<format::Pretty, T>, W> {
@@ -642,11 +747,12 @@ impl<S, T, W> Layer<S, format::JsonFields, format::Format<format::Json, T>, W> {
     /// Sets the JSON layer being built to flatten event metadata.
     ///
     /// See [`format::Json`][super::format::Json]
+    #[must_use]
     pub fn flatten_event(
         self,
         flatten_event: bool,
-    ) -> Layer<S, format::JsonFields, format::Format<format::Json, T>, W> {
-        Layer {
+    ) -> Self {
+        Self {
             fmt_event: self.fmt_event.flatten_event(flatten_event),
             fmt_fields: format::JsonFields::new(),
             ..self
@@ -657,11 +763,12 @@ impl<S, T, W> Layer<S, format::JsonFields, format::Format<format::Json, T>, W> {
     /// formatted events.
     ///
     /// See [`format::Json`][super::format::Json]
+    #[must_use]
     pub fn with_current_span(
         self,
         display_current_span: bool,
-    ) -> Layer<S, format::JsonFields, format::Format<format::Json, T>, W> {
-        Layer {
+    ) -> Self {
+        Self {
             fmt_event: self.fmt_event.with_current_span(display_current_span),
             fmt_fields: format::JsonFields::new(),
             ..self
@@ -672,66 +779,15 @@ impl<S, T, W> Layer<S, format::JsonFields, format::Format<format::Json, T>, W> {
     /// of all currently entered spans in formatted events.
     ///
     /// See [`format::Json`][super::format::Json]
+    #[must_use]
     pub fn with_span_list(
         self,
         display_span_list: bool,
-    ) -> Layer<S, format::JsonFields, format::Format<format::Json, T>, W> {
-        Layer {
+    ) -> Self {
+        Self {
             fmt_event: self.fmt_event.with_span_list(display_span_list),
             fmt_fields: format::JsonFields::new(),
             ..self
-        }
-    }
-}
-
-impl<S, N, E, W> Layer<S, N, E, W> {
-    /// Sets the field formatter that the layer being built will use to record
-    /// fields.
-    pub fn fmt_fields<N2>(self, fmt_fields: N2) -> Layer<S, N2, E, W>
-    where
-        N2: for<'writer> FormatFields<'writer> + 'static,
-    {
-        Layer {
-            fmt_event: self.fmt_event,
-            fmt_fields,
-            fmt_span: self.fmt_span,
-            make_writer: self.make_writer,
-            is_ansi: self.is_ansi,
-            ansi_sanitization: self.ansi_sanitization,
-            log_internal_errors: self.log_internal_errors,
-            _inner: self._inner,
-        }
-    }
-
-    /// Updates the field formatter by applying a function to the existing field formatter.
-    ///
-    /// This sets the field formatter that the layer being built will use to record fields.
-    ///
-    /// # Examples
-    ///
-    /// Updating a field formatter:
-    ///
-    /// ```rust
-    /// use tracing_subscriber::field::MakeExt;
-    /// let layer = tracing_subscriber::fmt::layer()
-    ///     .map_fmt_fields(|f| f.debug_alt());
-    /// # // this is necessary for type inference.
-    /// # use tracing_subscriber::Layer as _;
-    /// # let _ = layer.with_subscriber(tracing_subscriber::registry::Registry::default());
-    /// ```
-    pub fn map_fmt_fields<N2>(self, f: impl FnOnce(N) -> N2) -> Layer<S, N2, E, W>
-    where
-        N2: for<'writer> FormatFields<'writer> + 'static,
-    {
-        Layer {
-            fmt_event: self.fmt_event,
-            fmt_fields: f(self.fmt_fields),
-            fmt_span: self.fmt_span,
-            make_writer: self.make_writer,
-            is_ansi: self.is_ansi,
-            ansi_sanitization: self.ansi_sanitization,
-            log_internal_errors: self.log_internal_errors,
-            _inner: self._inner,
         }
     }
 }
@@ -743,27 +799,31 @@ impl<S> Default for Layer<S> {
     }
 }
 
-impl<S> Layer<S> {
-    fn default_with_no_color(no_color: Option<&str>) -> Self {
-        let ansi = default_ansi_enabled(no_color);
-
-        Layer {
-            fmt_fields: format::DefaultFields::default(),
-            fmt_event: format::Format::default(),
-            fmt_span: format::FmtSpanConfig::default(),
-            make_writer: io::stdout,
-            is_ansi: ansi,
-            ansi_sanitization: true,
-            log_internal_errors: false,
-            _inner: PhantomData,
-        }
-    }
-}
-
+/// Returns whether ANSI escapes are enabled for the provided `NO_COLOR` value.
+#[allow(
+    clippy::single_call_fn,
+    reason = "`NO_COLOR` policy is kept as a named predicate shared by defaults and tests"
+)]
 fn default_ansi_enabled(no_color: Option<&str>) -> bool {
     // Only enable ANSI when the feature is enabled, and the NO_COLOR
     // environment variable is unset or empty.
-    cfg!(feature = "ansi") && no_color.map_or(true, str::is_empty)
+    cfg!(feature = "ansi") && no_color.is_none_or(str::is_empty)
+}
+
+/// Returns the saturating nanoseconds between two [`Instant`] values.
+#[allow(
+    clippy::single_call_fn,
+    reason = "span timing accounting centralizes saturating `Instant` conversion"
+)]
+fn nanos_between(start: Instant, end: Instant) -> u64 {
+    let nanos = end.duration_since(start).as_nanos();
+    u64::try_from(nanos).unwrap_or(u64::MAX)
+}
+
+/// Writes a best-effort internal formatter error to stderr.
+fn write_internal_error(args: fmt::Arguments<'_>) {
+    let mut stderr = io::stderr();
+    let _result: io::Result<()> = io::Write::write_fmt(&mut stderr, args);
 }
 
 impl<S, N, E, W> Layer<S, N, E, W>
@@ -774,7 +834,8 @@ where
     W: for<'writer> MakeWriter<'writer> + 'static,
 {
     #[inline]
-    fn make_ctx<'a>(&'a self, ctx: Context<'a, S>, event: &'a Event<'a>) -> FmtContext<'a, S, N> {
+    /// Builds the formatting context for an event.
+    const fn make_ctx<'a>(&'a self, ctx: Context<'a, S>, event: &'a Event<'a>) -> FmtContext<'a, S, N> {
         FmtContext {
             ctx,
             fmt_fields: &self.fmt_fields,
@@ -793,26 +854,48 @@ where
 ///
 /// [extensions]: crate::registry::Extensions
 pub struct FormattedFields<E: ?Sized> {
+    /// The rendered field string.
+    fields: String,
+    /// Associates this field string with its field formatter type.
     _format_fields: PhantomData<fn(E)>,
+    /// Whether ANSI escapes were enabled when the fields were formatted.
     was_ansi: bool,
+    /// Whether ANSI escapes were sanitized when the fields were formatted.
     was_ansi_sanitized: bool,
-    /// The formatted fields of a span.
-    pub fields: String,
+}
+
+/// A mutable event-formatting buffer borrowed from thread-local storage or allocated as a fallback.
+enum EventBuffer<'a> {
+    /// A successfully borrowed thread-local buffer.
+    ThreadLocal(RefMut<'a, String>),
+    /// An owned fallback buffer used during recursive formatter entry.
+    Fallback(String),
+}
+
+impl EventBuffer<'_> {
+    /// Returns mutable access to the underlying string buffer.
+    fn as_mut_string(&mut self) -> &mut String {
+        match *self {
+            Self::ThreadLocal(ref mut buffer) => buffer,
+            Self::Fallback(ref mut buffer) => buffer,
+        }
+    }
 }
 
 impl<E: ?Sized> Default for FormattedFields<E> {
     fn default() -> Self {
         Self {
-            _format_fields: Default::default(),
+            _format_fields: PhantomData,
             was_ansi: Default::default(),
             was_ansi_sanitized: true,
-            fields: Default::default(),
+            fields: String::default(),
         }
     }
 }
 
 impl<E: ?Sized> FormattedFields<E> {
     /// Returns a new `FormattedFields`.
+    #[must_use]
     pub fn new(fields: String) -> Self {
         Self {
             fields,
@@ -831,13 +914,24 @@ impl<E: ?Sized> FormattedFields<E> {
             .with_ansi(self.was_ansi)
             .with_ansi_sanitization(self.was_ansi_sanitized)
     }
+
+    /// Returns the formatted field string.
+    #[must_use]
+    pub fn fields(&self) -> &str {
+        &self.fields
+    }
+
+    /// Returns mutable access to the formatted field string for formatters.
+    pub(in crate::fmt) const fn fields_mut(&mut self) -> &mut String {
+        &mut self.fields
+    }
 }
 
 impl<E: ?Sized> fmt::Debug for FormattedFields<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("FormattedFields")
             .field("fields", &self.fields)
-            .field("formatter", &format_args!("{}", std::any::type_name::<E>()))
+            .field("formatter", &format_args!("{}", type_name::<E>()))
             .field("was_ansi", &self.was_ansi)
             .field("was_ansi_sanitized", &self.was_ansi_sanitized)
             .finish()
@@ -859,20 +953,20 @@ impl<E: ?Sized> Deref for FormattedFields<E> {
 
 // === impl FmtLayer ===
 
+/// Builds a synthetic event from a span and passes it to a local block.
 macro_rules! with_event_from_span {
     ($id:ident, $span:ident, $($field:literal = $value:expr),*, |$event:ident| $code:block) => {
         let meta = $span.metadata();
         let cs = meta.callsite();
         let fs = field::FieldSet::new(&[$($field),*], cs);
-        let mut iter = fs.iter();
-        let v = [$(
-            (&iter.next().unwrap(), {
+        let values = [$(
+            {
                 let value: &dyn field::Value = &$value;
                 ::core::option::Option::Some(value)
-            }),
+            },
         )*];
-        let vs = fs.value_set(&v);
-        let $event = Event::new_child_of($id, meta, &vs);
+        let value_set = fs.value_set_all(&values);
+        let $event = Event::new_child_of($id, meta, &value_set);
         $code
     };
 }
@@ -884,8 +978,10 @@ where
     E: FormatEvent<S, N> + 'static,
     W: for<'writer> MakeWriter<'writer> + 'static,
 {
-    fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
+    fn on_new_span(&self, attrs: &Attributes<'_>, id: Id, ctx: Context<'_, S>) -> SubscriberResult {
+        let Some(span) = ctx.span(id) else {
+            return Ok(());
+        };
         let mut extensions = span.extensions_mut();
 
         if extensions.get_mut::<FormattedFields<N>>().is_none() {
@@ -897,12 +993,12 @@ where
                 .format_fields(fields.as_writer(), attrs)
                 .is_ok()
             {
-                extensions.insert(fields);
+                let _previous = extensions.insert(fields);
             } else {
-                eprintln!(
-                    "[tracing-subscriber] Unable to format the following event, ignoring: {:?}",
-                    attrs
-                );
+                write_internal_error(format_args!(
+                    "[tracing-subscriber] Unable to format span fields, ignoring fields for span `{}`\n",
+                    attrs.metadata().name()
+                ));
             }
         }
 
@@ -910,24 +1006,31 @@ where
             && self.fmt_span.trace_close()
             && extensions.get_mut::<Timings>().is_none()
         {
-            extensions.insert(Timings::new());
+            let _previous = extensions.insert(Timings::new());
         }
 
         if self.fmt_span.trace_new() {
             with_event_from_span!(id, span, "message" = "new", |event| {
                 drop(extensions);
                 drop(span);
-                self.on_event(&event, ctx);
+                self.on_event(&event, ctx)?;
             });
         }
+
+        Ok(())
     }
 
-    fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
-        let span = ctx.span(id).expect("Span not found, this is a bug");
-        let mut extensions = span.extensions_mut();
-        if let Some(fields) = extensions.get_mut::<FormattedFields<N>>() {
-            let _ = self.fmt_fields.add_fields(fields, values);
-            return;
+    fn on_record(&self, id: Id, values: &Record<'_>, ctx: Context<'_, S>) -> SubscriberResult {
+        let Some(span) = ctx.span(id) else {
+            return Ok(());
+        };
+
+        {
+            let mut extensions = span.extensions_mut();
+            if let Some(fields) = extensions.get_mut::<FormattedFields<N>>() {
+                let _result: fmt::Result = self.fmt_fields.add_fields(fields, values);
+                return Ok(());
+            }
         }
 
         let mut fields = FormattedFields::<N>::new(String::new());
@@ -938,42 +1041,53 @@ where
             .format_fields(fields.as_writer(), values)
             .is_ok()
         {
-            extensions.insert(fields);
+            let mut extensions = span.extensions_mut();
+            let _previous = extensions.insert(fields);
         }
+
+        Ok(())
     }
 
-    fn on_enter(&self, id: &Id, ctx: Context<'_, S>) {
+    fn on_enter(&self, id: Id, ctx: Context<'_, S>) -> SubscriberResult {
         if self.fmt_span.trace_enter() || self.fmt_span.trace_close() && self.fmt_span.fmt_timing {
-            let span = ctx.span(id).expect("Span not found, this is a bug");
+            let Some(span) = ctx.span(id) else {
+                return Ok(());
+            };
             let mut extensions = span.extensions_mut();
             if let Some(timings) = extensions.get_mut::<Timings>() {
                 if timings.entered_count == 0 {
                     let now = Instant::now();
-                    timings.idle += (now - timings.last).as_nanos() as u64;
+                    timings.idle =
+                        timings.idle.saturating_add(nanos_between(timings.last, now));
                     timings.last = now;
                 }
-                timings.entered_count += 1;
+                timings.entered_count = timings.entered_count.saturating_add(1);
             }
 
             if self.fmt_span.trace_enter() {
                 with_event_from_span!(id, span, "message" = "enter", |event| {
                     drop(extensions);
                     drop(span);
-                    self.on_event(&event, ctx);
+                    self.on_event(&event, ctx)?;
                 });
             }
         }
+
+        Ok(())
     }
 
-    fn on_exit(&self, id: &Id, ctx: Context<'_, S>) {
+    fn on_exit(&self, id: Id, ctx: Context<'_, S>) -> SubscriberResult {
         if self.fmt_span.trace_exit() || self.fmt_span.trace_close() && self.fmt_span.fmt_timing {
-            let span = ctx.span(id).expect("Span not found, this is a bug");
+            let Some(span) = ctx.span(id) else {
+                return Ok(());
+            };
             let mut extensions = span.extensions_mut();
             if let Some(timings) = extensions.get_mut::<Timings>() {
-                timings.entered_count -= 1;
+                timings.entered_count = timings.entered_count.saturating_sub(1);
                 if timings.entered_count == 0 {
                     let now = Instant::now();
-                    timings.busy += (now - timings.last).as_nanos() as u64;
+                    timings.busy =
+                        timings.busy.saturating_add(nanos_between(timings.last, now));
                     timings.last = now;
                 }
             }
@@ -982,15 +1096,19 @@ where
                 with_event_from_span!(id, span, "message" = "exit", |event| {
                     drop(extensions);
                     drop(span);
-                    self.on_event(&event, ctx);
+                    self.on_event(&event, ctx)?;
                 });
             }
         }
+
+        Ok(())
     }
 
-    fn on_close(&self, id: Id, ctx: Context<'_, S>) {
+    fn on_close(&self, id: Id, ctx: Context<'_, S>) -> SubscriberResult {
         if self.fmt_span.trace_close() {
-            let span = ctx.span(&id).expect("Span not found, this is a bug");
+            let Some(span) = ctx.span(id) else {
+                return Ok(());
+            };
             let extensions = span.extensions();
             if let Some(timing) = extensions.get::<Timings>() {
                 let Timings {
@@ -999,8 +1117,9 @@ where
                     last,
                     entered_count,
                 } = *timing;
-                debug_assert_eq!(entered_count, 0);
-                idle += (Instant::now() - last).as_nanos() as u64;
+                if entered_count == 0 {
+                    idle = idle.saturating_add(nanos_between(last, Instant::now()));
+                }
 
                 let t_idle = field::display(TimingDisplay(idle));
                 let t_busy = field::display(TimingDisplay(busy));
@@ -1014,70 +1133,76 @@ where
                     |event| {
                         drop(extensions);
                         drop(span);
-                        self.on_event(&event, ctx);
+                        self.on_event(&event, ctx)?;
                     }
                 );
             } else {
                 with_event_from_span!(id, span, "message" = "close", |event| {
                     drop(extensions);
                     drop(span);
-                    self.on_event(&event, ctx);
+                    self.on_event(&event, ctx)?;
                 });
             }
         }
+
+        Ok(())
     }
 
-    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) -> SubscriberResult {
         thread_local! {
             static BUF: RefCell<String> = const { RefCell::new(String::new()) };
         }
 
-        BUF.with(|buf| {
-            let borrow = buf.try_borrow_mut();
-            let mut a;
-            let mut b;
-            let mut buf = match borrow {
-                Ok(buf) => {
-                    a = buf;
-                    &mut *a
-                }
-                _ => {
-                    b = String::new();
-                    &mut b
-                }
-            };
+        BUF.with(|thread_local_cell| {
+            let mut event_buffer = thread_local_cell
+                .try_borrow_mut()
+                .map_or_else(
+                    |_| EventBuffer::Fallback(String::new()),
+                    EventBuffer::ThreadLocal,
+                );
+            let buf = event_buffer.as_mut_string();
 
-            let ctx = self.make_ctx(ctx, event);
-            if self
+            let format_context = self.make_ctx(ctx, event);
+            match self
                 .fmt_event
                 .format_event(
-                    &ctx,
-                    format::Writer::new(&mut buf)
+                    &format_context,
+                    format::Writer::new(buf)
                         .with_ansi(self.is_ansi)
                         .with_ansi_sanitization(self.ansi_sanitization),
                     event,
-                )
-                .is_ok()
-            {
-                let mut writer = self.make_writer.make_writer_for(event.metadata());
-                let res = io::Write::write_all(&mut writer, buf.as_bytes());
-                if self.log_internal_errors
-                    && let Err(e) = res
-                {
-                    eprintln!("[tracing-subscriber] Unable to write an event to the Writer for this Subscriber! Error: {}\n", e);
+                ) {
+                Ok(()) => {
+                    let mut writer = self.make_writer.make_writer_for(event.metadata());
+                    let res = io::Write::write_all(&mut writer, buf.as_bytes());
+                    if self.log_internal_errors
+                        && let Err(error) = res
+                    {
+                        write_internal_error(format_args!(
+                            "[tracing-subscriber] Unable to write an event to the Writer for this Subscriber! Error: {error}\n"
+                        ));
+                    }
                 }
-            } else if self.log_internal_errors {
-                let err_msg = format!("Unable to format the following event. Name: {}; Fields: {:?}\n",
-                    event.metadata().name(), event.fields());
-                let mut writer = self.make_writer.make_writer_for(event.metadata());
-                let res = io::Write::write_all(&mut writer, err_msg.as_bytes());
-                if let Err(e) = res {
-                    eprintln!("[tracing-subscriber] Unable to write an \"event formatting error\" to the Writer for this Subscriber! Error: {}\n", e);
+                Err(_) if self.log_internal_errors => {
+                    let err_msg = format!(
+                        "Unable to format the following event. Name: {}\n",
+                        event.metadata().name()
+                    );
+                    let mut writer = self.make_writer.make_writer_for(event.metadata());
+                    let res = io::Write::write_all(&mut writer, err_msg.as_bytes());
+                    if let Err(error) = res {
+                        write_internal_error(format_args!(
+                            "[tracing-subscriber] Unable to write an \"event formatting error\" to the Writer for this Subscriber! Error: {error}\n"
+                        ));
+                    }
                 }
+                Err(_) => {}
             }
 
             buf.clear();
         });
+
+        Ok(())
     }
 
     fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
@@ -1086,19 +1211,22 @@ where
         // as well as to the layer's type itself. The potential use-cases for
         // this *may* be somewhat niche, though...
         match () {
-            _ if id == TypeId::of::<Self>() => Some(self),
-            _ if id == TypeId::of::<E>() => Some(&self.fmt_event),
-            _ if id == TypeId::of::<N>() => Some(&self.fmt_fields),
-            _ if id == TypeId::of::<W>() => Some(&self.make_writer),
-            _ => None,
+            () if id == TypeId::of::<Self>() => Some(self),
+            () if id == TypeId::of::<E>() => Some(&self.fmt_event),
+            () if id == TypeId::of::<N>() => Some(&self.fmt_fields),
+            () if id == TypeId::of::<W>() => Some(&self.make_writer),
+            () => None,
         }
     }
 }
 
 /// Provides the current span context to a formatter.
 pub struct FmtContext<'a, S, N> {
+    /// The layer context for looking up spans.
     pub(crate) ctx: Context<'a, S>,
+    /// The field formatter configured for this layer.
     pub(crate) fmt_fields: &'a N,
+    /// The event currently being formatted.
     pub(crate) event: &'a Event<'a>,
 }
 
@@ -1132,13 +1260,17 @@ where
     /// The provided closure will be called first with the current span,
     /// and then with that span's parent, and then that span's parent,
     /// and so on until a root span is reached.
+    ///
+    /// # Errors
+    ///
+    /// Returns the first error produced by the visitor closure.
     pub fn visit_spans<E, F>(&self, mut f: F) -> Result<(), E>
     where
         F: FnMut(&SpanRef<'_, S>) -> Result<(), E>,
     {
         // visit all the current spans
         if let Some(scope) = self.event_scope() {
-            for span in scope.from_root() {
+            for span in scope.root_to_leaf() {
                 f(&span)?;
             }
         }
@@ -1150,7 +1282,8 @@ where
     /// If this returns `None`, then no span exists for that ID (either it has
     /// closed or the ID is invalid).
     #[inline]
-    pub fn metadata(&self, id: &Id) -> Option<&'static Metadata<'static>>
+    #[must_use]
+    pub fn metadata(&self, id: Id) -> Option<&'static Metadata<'static>>
     where
         S: for<'lookup> LookupSpan<'lookup>,
     {
@@ -1164,7 +1297,8 @@ where
     ///
     /// [stored data]: crate::registry::SpanRef
     #[inline]
-    pub fn span(&self, id: &Id) -> Option<SpanRef<'_, S>>
+    #[must_use]
+    pub fn span(&self, id: Id) -> Option<SpanRef<'_, S>>
     where
         S: for<'lookup> LookupSpan<'lookup>,
     {
@@ -1173,7 +1307,8 @@ where
 
     /// Returns `true` if an active span exists for the given `Id`.
     #[inline]
-    pub fn exists(&self, id: &Id) -> bool
+    #[must_use]
+    pub fn exists(&self, id: Id) -> bool
     where
         S: for<'lookup> LookupSpan<'lookup>,
     {
@@ -1187,6 +1322,7 @@ where
     ///
     /// [stored data]: crate::registry::SpanRef
     #[inline]
+    #[must_use]
     pub fn lookup_current(&self) -> Option<SpanRef<'_, S>>
     where
         S: for<'lookup> LookupSpan<'lookup>,
@@ -1195,6 +1331,7 @@ where
     }
 
     /// Returns the current span for this formatter.
+    #[must_use]
     pub fn current_span(&self) -> Current {
         self.ctx.current_span()
     }
@@ -1207,6 +1344,7 @@ where
     /// the event does not have a parent span, this will return `None`.
     ///
     /// [stored data]: SpanRef
+    #[must_use]
     pub fn parent_span(&self) -> Option<SpanRef<'_, S>> {
         self.ctx.event_span(self.event)
     }
@@ -1224,7 +1362,7 @@ where
     /// <pre class="ignore" style="white-space:normal;font:inherit;">
     /// <strong>Note</strong>: Compared to <a href="#method.scope"><code>scope</code></a> this
     /// returns the spans in reverse order (from leaf to root). Use
-    /// <a href="../registry/struct.Scope.html#method.from_root"><code>Scope::from_root</code></a>
+    /// <a href="../registry/struct.Scope.html#method.root_to_leaf"><code>Scope::root_to_leaf</code></a>
     /// in case root-to-leaf ordering is desired.
     /// </pre></div>
     ///
@@ -1237,7 +1375,8 @@ where
     /// </pre></div>
     ///
     /// [stored data]: crate::registry::SpanRef
-    pub fn span_scope(&self, id: &Id) -> Option<registry::Scope<'_, S>>
+    #[must_use]
+    pub fn span_scope(&self, id: Id) -> Option<registry::Scope<'_, S>>
     where
         S: for<'lookup> LookupSpan<'lookup>,
     {
@@ -1255,7 +1394,7 @@ where
     /// <pre class="ignore" style="white-space:normal;font:inherit;">
     /// <strong>Note</strong>: Compared to <a href="#method.scope"><code>scope</code></a> this
     /// returns the spans in reverse order (from leaf to root). Use
-    /// <a href="../registry/struct.Scope.html#method.from_root"><code>Scope::from_root</code></a>
+    /// <a href="../registry/struct.Scope.html#method.root_to_leaf"><code>Scope::root_to_leaf</code></a>
     /// in case root-to-leaf ordering is desired.
     /// </pre></div>
     ///
@@ -1268,6 +1407,7 @@ where
     /// </pre></div>
     ///
     /// [stored data]: crate::registry::SpanRef
+    #[must_use]
     pub fn event_scope(&self) -> Option<registry::Scope<'_, S>>
     where
         S: for<'lookup> LookupSpan<'lookup>,
@@ -1282,19 +1422,30 @@ where
     /// fields of any events it records.
     ///
     /// [field formatter]: FormatFields
-    pub fn field_format(&self) -> &N {
+    #[must_use]
+    pub const fn field_format(&self) -> &N {
         self.fmt_fields
     }
 }
 
+/// Tracks span busy and idle time for synthesized close events.
 struct Timings {
+    /// Accumulated idle time in nanoseconds.
     idle: u64,
+    /// Accumulated busy time in nanoseconds.
     busy: u64,
+    /// The last timing transition.
     last: Instant,
+    /// Number of currently active enters.
     entered_count: u64,
 }
 
 impl Timings {
+    /// Returns a new timing accumulator.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "span timing state has a named initializer with the current `Instant`"
+    )]
     fn new() -> Self {
         Self {
             idle: 0,
@@ -1315,49 +1466,60 @@ mod test {
         test::{MockMakeWriter, MockWriter},
         time,
     };
-    use crate::{Registry, registry::LookupSpan};
-    use alloc::{string::ToString, vec, vec::Vec};
+    use crate::{Registry, registry::LookupSpan, reload};
+    use core::fmt::{Formatter, Result as FmtResult};
     use format::FmtSpan;
     use regex::Regex;
+    use std::fmt::{Debug as StdDebug, Error as FmtError};
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_ok};
     use tracing::subscriber::with_default;
     use tracing_core::dispatcher::Dispatch;
 
     #[test]
     fn impls() {
-        let f = Format::default().with_timer(time::Uptime::default());
-        let fmt = Layer::default().event_format(f);
-        let subscriber = fmt.with_subscriber(Registry::default());
-        let _dispatch = Dispatch::new(subscriber);
+        let uptime_format = Format::default().with_timer(time::Uptime::default());
+        let uptime_layer = Layer::default().event_format(uptime_format);
+        let uptime_subscriber = uptime_layer.with_subscriber(Registry::default());
+        let _uptime_dispatch = Dispatch::new(uptime_subscriber);
 
-        let f = Format::default();
-        let fmt = Layer::default().event_format(f);
-        let subscriber = fmt.with_subscriber(Registry::default());
-        let _dispatch = Dispatch::new(subscriber);
+        let default_format = Format::default();
+        let default_layer = Layer::default().event_format(default_format);
+        let default_subscriber = default_layer.with_subscriber(Registry::default());
+        let _default_dispatch = Dispatch::new(default_subscriber);
 
-        let f = Format::default().compact();
-        let fmt = Layer::default().event_format(f);
-        let subscriber = fmt.with_subscriber(Registry::default());
-        let _dispatch = Dispatch::new(subscriber);
+        let compact_format = Format::default().compact();
+        let compact_layer = Layer::default().event_format(compact_format);
+        let compact_subscriber = compact_layer.with_subscriber(Registry::default());
+        let _compact_dispatch = Dispatch::new(compact_subscriber);
     }
 
     #[test]
-    fn fmt_layer_downcasts() {
-        let f = Format::default();
-        let fmt = Layer::default().event_format(f);
-        let subscriber = fmt.with_subscriber(Registry::default());
+    fn fmt_layer_downcasts() -> Result<(), TestFailure> {
+        let default_format = Format::default();
+        let fmt_layer = Layer::default().event_format(default_format);
+        let subscriber = fmt_layer.with_subscriber(Registry::default());
 
         let dispatch = Dispatch::new(subscriber);
-        assert!(dispatch.downcast_ref::<Layer<Registry>>().is_some());
+        ensure(
+            dispatch.downcast_ref::<Layer<Registry>>().is_some(),
+            "dispatch downcasts to fmt layer",
+        )
     }
 
     #[test]
-    fn fmt_layer_downcasts_to_parts() {
-        let f = Format::default();
-        let fmt = Layer::default().event_format(f);
-        let subscriber = fmt.with_subscriber(Registry::default());
+    fn fmt_layer_downcasts_to_parts() -> Result<(), TestFailure> {
+        let default_format = Format::default();
+        let fmt_layer = Layer::default().event_format(default_format);
+        let subscriber = fmt_layer.with_subscriber(Registry::default());
         let dispatch = Dispatch::new(subscriber);
-        assert!(dispatch.downcast_ref::<format::DefaultFields>().is_some());
-        assert!(dispatch.downcast_ref::<Format>().is_some())
+        ensure(
+            dispatch.downcast_ref::<format::DefaultFields>().is_some(),
+            "dispatch downcasts to default fields",
+        )?;
+        ensure(
+            dispatch.downcast_ref::<Format>().is_some(),
+            "dispatch downcasts to default format",
+        )
     }
 
     #[test]
@@ -1365,21 +1527,24 @@ mod test {
         fn assert_lookup_span<T: for<'a> LookupSpan<'a>>(_: T) {}
         let fmt = Layer::default();
         let subscriber = fmt.with_subscriber(Registry::default());
-        assert_lookup_span(subscriber)
+        assert_lookup_span(subscriber);
     }
 
-    fn sanitize_timings(s: String) -> String {
-        let re = Regex::new("time\\.(idle|busy)=([0-9.]+)[mµn]s").unwrap();
-        re.replace_all(s.as_str(), "timing").to_string()
+    fn sanitize_timings(input: &str) -> Result<String, TestFailure> {
+        let timing_pattern = ensure_ok(
+            Regex::new("time\\.(idle|busy)=([0-9.]+)[m\u{b5}n]s"),
+            "timing sanitizer regex compiles",
+        )?;
+        Ok(timing_pattern.replace_all(input, "timing").into_owned())
     }
 
     #[test]
-    fn format_error_print_to_stderr() {
+    fn format_error_print_to_stderr() -> Result<(), TestFailure> {
         struct AlwaysError;
 
-        impl std::fmt::Debug for AlwaysError {
-            fn fmt(&self, _f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                Err(std::fmt::Error)
+        impl StdDebug for AlwaysError {
+            fn fmt(&self, _formatter: &mut Formatter<'_>) -> FmtResult {
+                Err(FmtError)
             }
         }
 
@@ -1394,7 +1559,7 @@ mod test {
         with_default(subscriber, || {
             tracing::info!(?AlwaysError);
         });
-        let actual = sanitize_timings(make_writer.get_string());
+        let actual = sanitize_timings(&make_writer.get_string())?;
 
         // Only assert the start because the line number and callsite may change.
         let expected = concat!(
@@ -1402,21 +1567,19 @@ mod test {
             file!(),
             ":"
         );
-        assert!(
+        ensure(
             actual.as_str().starts_with(expected),
-            "\nactual = {}\nshould start with expected = {}\n",
-            actual,
-            expected
-        );
+            "format errors are written to stderr",
+        )
     }
 
     #[test]
-    fn format_error_ignore_if_log_internal_errors_is_false() {
+    fn format_error_ignore_if_log_internal_errors_is_false() -> Result<(), TestFailure> {
         struct AlwaysError;
 
-        impl std::fmt::Debug for AlwaysError {
-            fn fmt(&self, _f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                Err(std::fmt::Error)
+        impl StdDebug for AlwaysError {
+            fn fmt(&self, _formatter: &mut Formatter<'_>) -> FmtResult {
+                Err(FmtError)
             }
         }
 
@@ -1432,12 +1595,16 @@ mod test {
         with_default(subscriber, || {
             tracing::info!(?AlwaysError);
         });
-        let actual = sanitize_timings(make_writer.get_string());
-        assert_eq!("", actual.as_str());
+        let actual = sanitize_timings(&make_writer.get_string())?;
+        ensure_eq(
+            &actual.as_str(),
+            &"",
+            "format errors are ignored when internal logging is disabled",
+        )
     }
 
     #[test]
-    fn synthesize_span_none() {
+    fn synthesize_span_none() -> Result<(), TestFailure> {
         let make_writer = MockMakeWriter::default();
         let subscriber = fmt::Subscriber::builder()
             .with_writer(make_writer.clone())
@@ -1449,14 +1616,18 @@ mod test {
 
         with_default(subscriber, || {
             let span1 = tracing::info_span!("span1", x = 42);
-            let _e = span1.enter();
+            let _entered = span1.enter();
         });
-        let actual = sanitize_timings(make_writer.get_string());
-        assert_eq!("", actual.as_str());
+        let actual = sanitize_timings(&make_writer.get_string())?;
+        ensure_eq(
+            &actual.as_str(),
+            &"",
+            "span events default to not synthesizing output",
+        )
     }
 
     #[test]
-    fn synthesize_span_active() {
+    fn synthesize_span_active() -> Result<(), TestFailure> {
         let make_writer = MockMakeWriter::default();
         let subscriber = fmt::Subscriber::builder()
             .with_writer(make_writer.clone())
@@ -1468,18 +1639,16 @@ mod test {
 
         with_default(subscriber, || {
             let span1 = tracing::info_span!("span1", x = 42);
-            let _e = span1.enter();
+            let _entered = span1.enter();
         });
-        let actual = sanitize_timings(make_writer.get_string());
-        assert_eq!(
-            "fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: enter\n\
-             fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: exit\n",
-            actual.as_str()
-        );
+        let actual = sanitize_timings(&make_writer.get_string())?;
+        let expected = "fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: enter\n\
+                        fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: exit\n";
+        ensure_eq(&actual.as_str(), &expected, "active span events are synthesized")
     }
 
     #[test]
-    fn synthesize_span_close() {
+    fn synthesize_span_close() -> Result<(), TestFailure> {
         let make_writer = MockMakeWriter::default();
         let subscriber = fmt::Subscriber::builder()
             .with_writer(make_writer.clone())
@@ -1491,17 +1660,16 @@ mod test {
 
         with_default(subscriber, || {
             let span1 = tracing::info_span!("span1", x = 42);
-            let _e = span1.enter();
+            let _entered = span1.enter();
         });
-        let actual = sanitize_timings(make_writer.get_string());
-        assert_eq!(
-            "fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: close timing timing\n",
-            actual.as_str()
-        );
+        let actual = sanitize_timings(&make_writer.get_string())?;
+        let expected =
+            "fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: close timing timing\n";
+        ensure_eq(&actual.as_str(), &expected, "close span events include timings")
     }
 
     #[test]
-    fn synthesize_span_close_no_timing() {
+    fn synthesize_span_close_no_timing() -> Result<(), TestFailure> {
         let make_writer = MockMakeWriter::default();
         let subscriber = fmt::Subscriber::builder()
             .with_writer(make_writer.clone())
@@ -1514,17 +1682,19 @@ mod test {
 
         with_default(subscriber, || {
             let span1 = tracing::info_span!("span1", x = 42);
-            let _e = span1.enter();
+            let _entered = span1.enter();
         });
-        let actual = sanitize_timings(make_writer.get_string());
-        assert_eq!(
-            "span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: close\n",
-            actual.as_str()
-        );
+        let actual = sanitize_timings(&make_writer.get_string())?;
+        let expected = "span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: close\n";
+        ensure_eq(
+            &actual.as_str(),
+            &expected,
+            "close span events omit timings when time is disabled",
+        )
     }
 
     #[test]
-    fn synthesize_span_full() {
+    fn synthesize_span_full() -> Result<(), TestFailure> {
         let make_writer = MockMakeWriter::default();
         let subscriber = fmt::Subscriber::builder()
             .with_writer(make_writer.clone())
@@ -1536,20 +1706,18 @@ mod test {
 
         with_default(subscriber, || {
             let span1 = tracing::info_span!("span1", x = 42);
-            let _e = span1.enter();
+            let _entered = span1.enter();
         });
-        let actual = sanitize_timings(make_writer.get_string());
-        assert_eq!(
-            "fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: new\n\
-             fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: enter\n\
-             fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: exit\n\
-             fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: close timing timing\n",
-            actual.as_str()
-        );
+        let actual = sanitize_timings(&make_writer.get_string())?;
+        let expected = "fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: new\n\
+                        fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: enter\n\
+                        fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: exit\n\
+                        fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: close timing timing\n";
+        ensure_eq(&actual.as_str(), &expected, "full span events are synthesized")
     }
 
     #[test]
-    fn make_writer_based_on_meta() {
+    fn make_writer_based_on_meta() -> Result<(), TestFailure> {
         struct MakeByTarget {
             make_writer1: MockMakeWriter,
             make_writer2: MockMakeWriter,
@@ -1589,33 +1757,38 @@ mod test {
 
         with_default(subscriber, || {
             let span1 = tracing::info_span!("writer1_span", x = 42);
-            let _e = span1.enter();
+            let _entered_writer1 = span1.enter();
             tracing::info!(target: "writer2", "hello writer2!");
             let span2 = tracing::info_span!(target: "writer2", "writer2_span");
-            let _e = span2.enter();
+            let _entered_writer2 = span2.enter();
             tracing::warn!(target: "writer1", "hello writer1!");
         });
 
-        let actual = sanitize_timings(make_writer1.get_string());
-        assert_eq!(
-            "fake time writer1_span{x=42}:writer2_span: hello writer1!\n\
-             fake time writer1_span{x=42}: close timing timing\n",
-            actual.as_str()
-        );
-        let actual = sanitize_timings(make_writer2.get_string());
-        assert_eq!(
-            "fake time writer1_span{x=42}: hello writer2!\n\
-             fake time writer1_span{x=42}:writer2_span: close timing timing\n",
-            actual.as_str()
-        );
+        let writer1_output = sanitize_timings(&make_writer1.get_string())?;
+        let expected_writer1 = "fake time writer1_span{x=42}:writer2_span: hello writer1!\n\
+                                fake time writer1_span{x=42}: close timing timing\n";
+        ensure_eq(
+            &writer1_output.as_str(),
+            &expected_writer1,
+            "default writer receives non-targeted output",
+        )?;
+
+        let writer2_output = sanitize_timings(&make_writer2.get_string())?;
+        let expected_writer2 = "fake time writer1_span{x=42}: hello writer2!\n\
+                                fake time writer1_span{x=42}:writer2_span: close timing timing\n";
+        ensure_eq(
+            &writer2_output.as_str(),
+            &expected_writer2,
+            "metadata writer receives targeted output",
+        )
     }
 
     // Because we need to modify an environment variable for these test cases,
     // we do them all in a single test.
     #[cfg(feature = "ansi")]
     #[test]
-    fn layer_no_color() {
-        let cases: Vec<(Option<&str>, bool)> = vec![
+    fn layer_no_color() -> Result<(), TestFailure> {
+        let cases = [
             (Some("0"), false),   // any non-empty value disables ansi
             (Some("off"), false), // any non-empty value disables ansi
             (Some("1"), false),
@@ -1623,39 +1796,35 @@ mod test {
             (None, true),
         ];
 
-        for (var, ansi) in cases {
-            assert_eq!(default_ansi_enabled(var), ansi);
+        for (var, expected_ansi) in cases {
+            ensure_eq(
+                &default_ansi_enabled(var),
+                &expected_ansi,
+                "default ansi state follows NO_COLOR",
+            )?;
 
-            let layer: Layer<()> = Layer::default_with_no_color(var);
-            assert_eq!(
-                layer.is_ansi, ansi,
-                "NO_COLOR={:?}; Layer::default().is_ansi should be {}",
-                var, ansi
-            );
+            let no_color_layer: Layer<()> = Layer::default_with_no_color(var);
+            ensure_eq(
+                &no_color_layer.is_ansi,
+                &expected_ansi,
+                "layer ansi state follows NO_COLOR",
+            )?;
 
             // with_ansi should override any `NO_COLOR` value
-            let layer: Layer<()> = Layer::default_with_no_color(var).with_ansi(true);
-            assert!(
-                layer.is_ansi,
-                "NO_COLOR={:?}; Layer::default().with_ansi(true).is_ansi should be true",
-                var
-            );
+            let overridden_layer: Layer<()> = Layer::default_with_no_color(var).with_ansi(true);
+            ensure(overridden_layer.is_ansi, "with_ansi overrides NO_COLOR")?;
 
             // set_ansi should override any `NO_COLOR` value
-            let mut layer: Layer<()> = Layer::default_with_no_color(var);
-            layer.set_ansi(true);
-            assert!(
-                layer.is_ansi,
-                "NO_COLOR={:?}; layer.set_ansi(true); layer.is_ansi should be true",
-                var
-            );
+            let mut mutable_layer: Layer<()> = Layer::default_with_no_color(var);
+            mutable_layer.set_ansi(true);
+            ensure(mutable_layer.is_ansi, "set_ansi overrides NO_COLOR")?;
         }
-
+        Ok(())
     }
 
     // Validates that span event configuration can be modified with a reload handle
     #[test]
-    fn modify_span_events() {
+    fn modify_span_events() -> Result<(), TestFailure> {
         let make_writer = MockMakeWriter::default();
 
         let inner_layer = Layer::default()
@@ -1665,38 +1834,47 @@ mod test {
             .with_timer(MockTime)
             .with_span_events(FmtSpan::ACTIVE);
 
-        let (reloadable_layer, reload_handle) = crate::reload::Layer::new(inner_layer);
+        let (reloadable_layer, reload_handle) = reload::Layer::new(inner_layer);
         let reload = reloadable_layer.with_subscriber(Registry::default());
 
-        with_default(reload, || {
+        with_default(reload, || -> Result<(), TestFailure> {
             {
                 let span1 = tracing::info_span!("span1", x = 42);
-                let _e = span1.enter();
+                let _entered = span1.enter();
             }
 
-            let _ = reload_handle.modify(|s| s.set_span_events(FmtSpan::NONE));
+            ensure_ok(
+                reload_handle.modify(|layer| layer.set_span_events(FmtSpan::NONE)),
+                "span event reload disables events",
+            )?;
 
             // this span should not be logged at all!
             {
                 let span2 = tracing::info_span!("span2", x = 100);
-                let _e = span2.enter();
+                let _entered = span2.enter();
             }
 
             {
                 let span3 = tracing::info_span!("span3", x = 42);
-                let _e = span3.enter();
+                let _entered = span3.enter();
 
                 // The span config was modified after span3 was already entered.
                 // We should only see an exit
-                let _ = reload_handle.modify(|s| s.set_span_events(FmtSpan::ACTIVE));
-            }
-        });
-        let actual = sanitize_timings(make_writer.get_string());
-        assert_eq!(
-            "fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: enter\n\
-             fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: exit\n\
-             fake time span3{x=42}: tracing_subscriber::fmt::fmt_layer::test: exit\n",
-            actual.as_str()
-        );
+                ensure_ok(
+                    reload_handle.modify(|layer| layer.set_span_events(FmtSpan::ACTIVE)),
+                    "span event reload enables events",
+                )?;
+            };
+            Ok(())
+        })?;
+        let actual = sanitize_timings(&make_writer.get_string())?;
+        let expected = "fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: enter\n\
+                        fake time span1{x=42}: tracing_subscriber::fmt::fmt_layer::test: exit\n\
+                        fake time span3{x=42}: tracing_subscriber::fmt::fmt_layer::test: exit\n";
+        ensure_eq(
+            &actual.as_str(),
+            &expected,
+            "reloadable span events affect later spans",
+        )
     }
 }

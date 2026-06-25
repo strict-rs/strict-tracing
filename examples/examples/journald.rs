@@ -1,23 +1,24 @@
 //! Example binary for tracing workspace checks.
 #![deny(rust_2018_idioms)]
+use std::error::Error;
 use tracing::{error, info};
-use tracing_subscriber::prelude::*;
+use tracing_subscriber::{fmt, prelude::*};
 
+/// Shared yak-shaving helper used by this example.
 #[path = "fmt/yak_shave.rs"]
-mod yak_shave;
+pub mod yak_shave;
 
-fn main() {
-    let registry =
-        tracing_subscriber::registry().with(tracing_subscriber::fmt::layer().with_target(false));
+fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+    let registry = tracing_subscriber::registry().with(fmt::layer().with_target(false));
     match tracing_journald::layer() {
         Ok(layer) => {
-            registry.with(layer).init();
+            registry.with(layer).try_init()?;
         }
         // journald is typically available on Linux systems, but nowhere else. Portable software
         // should handle its absence gracefully.
-        Err(e) => {
-            registry.init();
-            error!("couldn't connect to journald: {}", e);
+        Err(error) => {
+            registry.try_init()?;
+            error!("couldn't connect to journald: {}", error);
         }
     }
 
@@ -30,4 +31,6 @@ fn main() {
         all_yaks_shaved = number_shaved == number_of_yaks,
         "yak shaving completed."
     );
+
+    Ok(())
 }

@@ -20,15 +20,32 @@
 #![deny(rust_2018_idioms)]
 
 #[path = "fmt/yak_shave.rs"]
-mod yak_shave;
+pub mod yak_shave;
 
-fn main() {
+use std::{
+    error::Error,
+    fmt::{self, Debug, Display, Write as _},
+};
+
+/// Displays an erased field value with the representation used by `debug_fn`.
+struct DebugValue<'value> {
+    /// The erased field value to format.
+    value: &'value dyn Debug,
+}
+
+impl Display for DebugValue<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Debug::fmt(self.value, formatter)
+    }
+}
+
+fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     use tracing_subscriber::{fmt::format, prelude::*};
 
     // Format fields using the provided closure.
     let format = format::debug_fn(|writer, field, value| {
         // We'll format the field name and value separated with a colon.
-        write!(writer, "{}: {:?}", field, value)
+        write!(writer, "{field}: {}", DebugValue { value })
     })
     // Separate each field with a comma.
     // This method is provided by an extension trait in the
@@ -37,7 +54,7 @@ fn main() {
 
     // Create a `fmt` subscriber that uses our custom event format, and set it
     // as the default.
-    tracing_subscriber::fmt().fmt_fields(format).init();
+    tracing_subscriber::fmt().fmt_fields(format).try_init()?;
 
     // Shave some yaks!
     let number_of_yaks = 3;
@@ -49,4 +66,5 @@ fn main() {
         all_yaks_shaved = number_shaved == number_of_yaks,
         "yak shaving completed."
     );
+    Ok(())
 }

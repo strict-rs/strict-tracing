@@ -228,7 +228,7 @@ pub struct Iter {
 ///
 /// impl<'a> Visit for StringVisitor<'a> {
 ///     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-///         write!(self.string, "{} = {:?}; ", field.name(), value).unwrap();
+///         let _ignored = write!(self.string, "{} = {:?}; ", field.name(), value);
 ///     }
 /// }
 /// ```
@@ -383,6 +383,10 @@ pub struct DebugValue<T: fmt::Debug>(T);
 
 /// Wraps a type implementing `fmt::Display` as a `Value` that can be
 /// recorded using its `Display` implementation.
+#[allow(
+    clippy::single_call_fn,
+    reason = "public field wrapper is used directly by tracing macros and downstream instrumentation"
+)]
 pub const fn display<T>(value: T) -> DisplayValue<T>
 where
     T: fmt::Display,
@@ -1230,11 +1234,6 @@ mod test {
         metadata::{Kind, Level, Metadata},
         subscriber::Interest,
     };
-    use alloc::{
-        boxed::Box,
-        format,
-        string::{String, ToString as _},
-    };
     use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_some};
 
     // Make sure TEST_CALLSITE_* have non-zero size, so they can't be located at the same address.
@@ -1440,6 +1439,12 @@ mod test {
     #[test]
     #[cfg(feature = "std")]
     fn record_error() -> Result<(), TestFailure> {
+        use alloc::{
+            boxed::Box,
+            format,
+            string::{String, ToString as _},
+        };
+
         #[derive(Debug)]
         struct TestError;
         impl fmt::Display for TestError {

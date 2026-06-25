@@ -1,13 +1,20 @@
+//! Shared yak-shaving workload for the formatting examples.
+
 use snafu::{ResultExt as _, Snafu};
 use std::error::Error;
 use thiserror::Error;
-use tracing::{debug, error, info, span, trace, warn, Level};
+use tracing::{Level, debug, error, info, span, trace, warn};
 
 // the `#[tracing::instrument]` attribute creates and enters a span
 // every time the instrumented function is called. The span is named after the
 // the function or method. Paramaters passed to the function are recorded as fields.
+/// Shaves one yak and records the span and events emitted along the way.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps the per-yak instrumented operation distinct from the aggregate workflow"
+)]
 #[tracing::instrument]
-pub(crate) fn shave(yak: usize) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
+fn shave(yak: usize) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
     // this creates an event at the TRACE log level with two fields:
     // - `excitement`, with the key "excitement" and the value "yay!"
     // - `message`, with the key "message" and the value "hello! I'm gonna shave a yak."
@@ -20,12 +27,17 @@ pub(crate) fn shave(yak: usize) -> Result<(), Box<dyn Error + Send + Sync + 'sta
             .fail()
             .map_err(|source| MissingYakError::OutOfSpace { source })
             .context(MissingYakSnafu)
-            .map_err(|err| err.into());
+            .map_err(Into::into);
     }
     trace!("yak shaved successfully");
     Ok(())
 }
 
+/// Shaves `yaks` yaks and returns the number that completed successfully.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps the shared yak-shaving workload named across formatting examples"
+)]
 pub(crate) fn shave_all(yaks: usize) -> usize {
     // Constructs a new span named "shaving_yaks" at the INFO level,
     // and a field whose key is "yaks". This is equivalent to writing:
@@ -39,7 +51,7 @@ pub(crate) fn shave_all(yaks: usize) -> usize {
 
     info!("shaving yaks");
 
-    let mut yaks_shaved = 0;
+    let mut yaks_shaved = 0_usize;
     for yak in 1..=yaks {
         let res = shave(yak);
         debug!(target: "yak_events", yak, shaved = res.is_ok());
@@ -49,7 +61,7 @@ pub(crate) fn shave_all(yaks: usize) -> usize {
             // In this instance, `yak` is the field being initalized.
             error!(yak, error = error.as_ref(), "failed to shave yak");
         } else {
-            yaks_shaved += 1;
+            yaks_shaved = yaks_shaved.saturating_add(1);
         }
         trace!(yaks_shaved);
     }
@@ -57,22 +69,33 @@ pub(crate) fn shave_all(yaks: usize) -> usize {
     yaks_shaved
 }
 
-// Error types
-// Usually you would pick one error handling library to use, but they can be mixed freely
+// Usually you would pick one error handling library to use, but they can be mixed freely.
+/// Error type used to show a `snafu` source in formatted events.
 #[derive(Debug, Snafu)]
 enum OutOfSpaceError {
+    /// Indicates that the yak-shaving budget ran out.
     #[snafu(display("out of cash"))]
     OutOfCash,
 }
 
+/// Error type used to show a `thiserror` source in formatted events.
 #[derive(Debug, Error)]
 enum MissingYakError {
+    /// Indicates that the selected yak could not be prepared.
     #[error("out of space")]
-    OutOfSpace { source: OutOfSpaceError },
+    OutOfSpace {
+        /// The lower-level yak preparation error.
+        source: OutOfSpaceError,
+    },
 }
 
+/// Top-level yak-shaving error emitted by this example.
 #[derive(Debug, Snafu)]
 enum YakError {
+    /// Indicates that a yak was unavailable.
     #[snafu(display("missing yak"))]
-    MissingYak { source: MissingYakError },
+    MissingYak {
+        /// The reason the yak was unavailable.
+        source: MissingYakError,
+    },
 }

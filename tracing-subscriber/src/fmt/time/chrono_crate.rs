@@ -1,7 +1,12 @@
 use crate::fmt::format::Writer;
 use crate::fmt::time::FormatTime;
 
-use alloc::{format, string::String, sync::Arc};
+use alloc::{fmt::Result as FmtResult, format, string::String, sync::Arc};
+use chrono::{
+    format::{Fixed, Item},
+    Local, Utc,
+};
+use core::{fmt::Write as _, iter};
 
 /// Formats [local time]s and [UTC time]s with `FormatTime` implementations
 /// that use the [`chrono` crate].
@@ -17,6 +22,7 @@ use alloc::{format, string::String, sync::Arc};
 #[cfg_attr(docsrs, doc(cfg(feature = "chrono")))]
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct ChronoLocal {
+    /// The chrono formatter used for each local timestamp.
     format: Arc<ChronoFmtType>,
 }
 
@@ -26,6 +32,7 @@ impl ChronoLocal {
     ///
     /// [`RFC 3339`]: https://tools.ietf.org/html/rfc3339
     /// [`ISO 8601`]: https://en.wikipedia.org/wiki/ISO_8601
+    #[must_use]
     pub fn rfc_3339() -> Self {
         Self {
             format: Arc::new(ChronoFmtType::Rfc3339),
@@ -35,6 +42,7 @@ impl ChronoLocal {
     /// Format the time using the given format string.
     ///
     /// See [`chrono::format::strftime`] for details on the supported syntax.
+    #[must_use]
     pub fn new(format_string: String) -> Self {
         Self {
             format: Arc::new(ChronoFmtType::Custom(format_string)),
@@ -43,19 +51,15 @@ impl ChronoLocal {
 }
 
 impl FormatTime for ChronoLocal {
-    fn format_time(&self, w: &mut Writer<'_>) -> alloc::fmt::Result {
-        let t = chrono::Local::now();
-        match self.format.as_ref() {
+    fn format_time(&self, writer: &mut Writer<'_>) -> FmtResult {
+        let timestamp = Local::now();
+        match *self.format.as_ref() {
             ChronoFmtType::Rfc3339 => {
-                use chrono::format::{Fixed, Item};
-                write!(
-                    w,
-                    "{}",
-                    t.format_with_items(core::iter::once(Item::Fixed(Fixed::RFC3339)))
-                )
+                let rfc3339 = iter::once(Item::Fixed(Fixed::RFC3339));
+                write!(writer, "{}", timestamp.format_with_items(rfc3339))
             }
-            ChronoFmtType::Custom(fmt) => {
-                write!(w, "{}", t.format(fmt))
+            ChronoFmtType::Custom(ref format_string) => {
+                write!(writer, "{}", timestamp.format(format_string))
             }
         }
     }
@@ -68,6 +72,7 @@ impl FormatTime for ChronoLocal {
 #[cfg_attr(docsrs, doc(cfg(feature = "chrono")))]
 #[derive(Debug, Clone, Eq, PartialEq, Default)]
 pub struct ChronoUtc {
+    /// The chrono formatter used for each UTC timestamp.
     format: Arc<ChronoFmtType>,
 }
 
@@ -77,6 +82,7 @@ impl ChronoUtc {
     ///
     /// [`RFC 3339`]: https://tools.ietf.org/html/rfc3339
     /// [`ISO 8601`]: https://en.wikipedia.org/wiki/ISO_8601
+    #[must_use]
     pub fn rfc_3339() -> Self {
         Self {
             format: Arc::new(ChronoFmtType::Rfc3339),
@@ -86,6 +92,7 @@ impl ChronoUtc {
     /// Format the time using the given format string.
     ///
     /// See [`chrono::format::strftime`] for details on the supported syntax.
+    #[must_use]
     pub fn new(format_string: String) -> Self {
         Self {
             format: Arc::new(ChronoFmtType::Custom(format_string)),
@@ -94,11 +101,13 @@ impl ChronoUtc {
 }
 
 impl FormatTime for ChronoUtc {
-    fn format_time(&self, w: &mut Writer<'_>) -> alloc::fmt::Result {
-        let t = chrono::Utc::now();
-        match self.format.as_ref() {
-            ChronoFmtType::Rfc3339 => w.write_str(&t.to_rfc3339()),
-            ChronoFmtType::Custom(fmt) => w.write_str(&format!("{}", t.format(fmt))),
+    fn format_time(&self, writer: &mut Writer<'_>) -> FmtResult {
+        let timestamp = Utc::now();
+        match *self.format.as_ref() {
+            ChronoFmtType::Rfc3339 => writer.write_str(&timestamp.to_rfc3339()),
+            ChronoFmtType::Custom(ref format_string) => {
+                writer.write_str(&format!("{}", timestamp.format(format_string)))
+            }
         }
     }
 }
@@ -122,51 +131,76 @@ mod tests {
     use crate::fmt::format::Writer;
     use crate::fmt::time::FormatTime;
 
-    use alloc::{borrow::ToOwned, string::String, sync::Arc};
+    use alloc::{borrow::ToOwned as _, string::String, sync::Arc};
+    use strict_test_support::{TestFailure, ensure, ensure_ok};
 
     use super::ChronoFmtType;
     use super::ChronoLocal;
     use super::ChronoUtc;
 
     #[test]
-    fn test_chrono_format_time_utc_default() {
+    fn test_chrono_format_time_utc_default() -> Result<(), TestFailure> {
         let mut buf = String::new();
         let mut dst: Writer<'_> = Writer::new(&mut buf);
-        assert!(FormatTime::format_time(&ChronoUtc::default(), &mut dst).is_ok());
+        ensure_ok(
+            FormatTime::format_time(&ChronoUtc::default(), &mut dst),
+            "default UTC chrono formatter writes time",
+        )?;
         // e.g. `buf` contains "2023-08-18T19:05:08.662499+00:00"
-        assert!(chrono::DateTime::parse_from_rfc3339(&buf).is_ok());
+        ensure(
+            chrono::DateTime::parse_from_rfc3339(&buf).is_ok(),
+            "default UTC chrono formatter emits RFC3339",
+        )
     }
 
     #[test]
-    fn test_chrono_format_time_utc_custom() {
+    fn test_chrono_format_time_utc_custom() -> Result<(), TestFailure> {
         let fmt = ChronoUtc {
             format: Arc::new(ChronoFmtType::Custom("%a %b %e %T %Y".to_owned())),
         };
         let mut buf = String::new();
         let mut dst: Writer<'_> = Writer::new(&mut buf);
-        assert!(FormatTime::format_time(&fmt, &mut dst).is_ok());
+        ensure_ok(
+            FormatTime::format_time(&fmt, &mut dst),
+            "custom UTC chrono formatter writes time",
+        )?;
         // e.g. `buf` contains "Wed Aug 23 15:53:23 2023"
-        assert!(chrono::NaiveDateTime::parse_from_str(&buf, "%a %b %e %T %Y").is_ok());
+        ensure(
+            chrono::NaiveDateTime::parse_from_str(&buf, "%a %b %e %T %Y").is_ok(),
+            "custom UTC chrono formatter emits configured format",
+        )
     }
 
     #[test]
-    fn test_chrono_format_time_local_default() {
+    fn test_chrono_format_time_local_default() -> Result<(), TestFailure> {
         let mut buf = String::new();
         let mut dst: Writer<'_> = Writer::new(&mut buf);
-        assert!(FormatTime::format_time(&ChronoLocal::default(), &mut dst).is_ok());
+        ensure_ok(
+            FormatTime::format_time(&ChronoLocal::default(), &mut dst),
+            "default local chrono formatter writes time",
+        )?;
         // e.g. `buf` contains "2023-08-18T14:59:08.662499-04:00".
-        assert!(chrono::DateTime::parse_from_rfc3339(&buf).is_ok());
+        ensure(
+            chrono::DateTime::parse_from_rfc3339(&buf).is_ok(),
+            "default local chrono formatter emits RFC3339",
+        )
     }
 
     #[test]
-    fn test_chrono_format_time_local_custom() {
+    fn test_chrono_format_time_local_custom() -> Result<(), TestFailure> {
         let fmt = ChronoLocal {
             format: Arc::new(ChronoFmtType::Custom("%a %b %e %T %Y".to_owned())),
         };
         let mut buf = String::new();
         let mut dst: Writer<'_> = Writer::new(&mut buf);
-        assert!(FormatTime::format_time(&fmt, &mut dst).is_ok());
+        ensure_ok(
+            FormatTime::format_time(&fmt, &mut dst),
+            "custom local chrono formatter writes time",
+        )?;
         // e.g. `buf` contains "Wed Aug 23 15:55:46 2023".
-        assert!(chrono::NaiveDateTime::parse_from_str(&buf, "%a %b %e %T %Y").is_ok());
+        ensure(
+            chrono::NaiveDateTime::parse_from_str(&buf, "%a %b %e %T %Y").is_ok(),
+            "custom local chrono formatter emits configured format",
+        )
     }
 }

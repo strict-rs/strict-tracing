@@ -1,18 +1,21 @@
 //! Example binary for tracing workspace checks.
 
+use std::error::Error;
+
 use tracing::Level;
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     tracing_subscriber::fmt()
         // all spans/events with a level higher than TRACE (e.g, info, warn, etc.)
         // will be written to stdout.
         .with_max_level(Level::TRACE)
         // sets this to be the default, global subscriber for this application.
-        .init();
+        .try_init()?;
 
     tracing::error!("SOMETHING IS SERIOUSLY WRONG!!!");
     tracing::warn!("important informational messages; might indicate an error");
     tracing::info!("general informational messages relevant to users");
     tracing::debug!("diagnostics used for internal debugging of a library or application");
     tracing::trace!("very verbose diagnostic events");
+    Ok(())
 }

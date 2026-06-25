@@ -12,14 +12,13 @@
 //! [`slog` README]: https://github.com/slog-rs/slog#terminal-output-example
 #![deny(rust_2018_idioms)]
 
-use tracing::{debug, info, span, warn, Level};
+use tracing::{Level, debug, info, span, subscriber::SetGlobalDefaultError, warn};
 
-mod sloggish_subscriber;
-use self::sloggish_subscriber::SloggishSubscriber;
+pub mod sloggish_subscriber;
+use self::sloggish_subscriber::set_as_global_default;
 
-fn main() {
-    let subscriber = SloggishSubscriber::new(2);
-    tracing::subscriber::set_global_default(subscriber).unwrap();
+fn main() -> Result<(), SetGlobalDefaultError> {
+    set_as_global_default(2)?;
 
     let app_span = span!(Level::TRACE, "", version = %5.0);
     let _e = app_span.enter();
@@ -49,4 +48,5 @@ fn main() {
     });
     warn!("internal error");
     info!("exit");
+    Ok(())
 }

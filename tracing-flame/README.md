@@ -51,16 +51,17 @@ of the `FlameLayer`, see the docs for [`FlushGuard`].
 use tracing_flame::FlameLayer;
 use tracing_subscriber::{prelude::*, fmt};
 
-fn setup_global_subscriber() -> impl Drop {
+fn setup_global_subscriber() -> Result<impl Drop, Box<dyn std::error::Error + Send + Sync + 'static>> {
     let fmt_layer = fmt::Layer::default();
 
-    let (flame_layer, _guard) = FlameLayer::with_file("./tracing.folded").unwrap();
+    let (flame_layer, guard) = FlameLayer::with_file("./tracing.folded")?;
 
     tracing_subscriber::registry()
         .with(fmt_layer)
         .with(flame_layer)
-        .init().
-    _guard
+        .try_init()?;
+
+    Ok(guard)
 }
 
 // your code here ..

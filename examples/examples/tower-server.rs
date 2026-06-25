@@ -2,37 +2,46 @@
 
 use bytes::Bytes;
 use futures::future;
-use http::{Request, Response};
+use http::{Request, Response, StatusCode};
 use http_body_util::Full;
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo};
 use hyper_util::server::conn::auto;
 use hyper_util::service::TowerToHyperService;
+use std::io;
+use std::net::SocketAddr;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{convert::Infallible, error::Error};
 use tokio::net::TcpListener;
 use tower::{Service, ServiceBuilder};
-use tracing::dispatcher;
-use tracing::info;
+use tracing::{Span, dispatcher, error, info, info_span};
 use tracing_tower::request_span::make;
 
+/// Error type returned by the Tower server example.
 type Err = Box<dyn Error + Send + Sync + 'static>;
 
-fn req_span<A>(req: &Request<A>) -> tracing::Span {
-    let span = tracing::info_span!(
+/// Create the tracing span attached to an inbound request.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps the `tracing_tower` request span callback explicit"
+)]
+fn req_span<A>(req: &Request<A>) -> Span {
+    let span = info_span!(
         "request",
         req.method = ?req.method(),
         req.uri = ?req.uri(),
         req.version = ?req.version(),
         req.headers = ?req.headers()
     );
-    tracing::info!(parent: &span, "received request");
+    info!(parent: &span, "received request");
     span
 }
 
+/// Root path handled by the example service.
 const ROOT: &str = "/";
 
+/// Example Tower service.
 #[derive(Copy, Clone, Debug)]
 struct Svc;
 
@@ -46,41 +55,46 @@ impl Service<Request<Incoming>> for Svc {
     }
 
     fn call(&mut self, req: Request<Incoming>) -> Self::Future {
-        let rsp = Response::builder();
-
         let uri = req.uri();
-        let rsp = if uri.path() == ROOT {
-            let body = Full::new(Bytes::from_static(b"heyo!"));
-            rsp.status(200).body(body).unwrap()
+        let response = if uri.path() == ROOT {
+            Response::new(Full::new(Bytes::from_static(b"heyo!")))
         } else {
-            let body = Full::new(Bytes::new());
-            rsp.status(404).body(body).unwrap()
+            let mut not_found = Response::new(Full::new(Bytes::new()));
+            *not_found.status_mut() = StatusCode::NOT_FOUND;
+            not_found
         };
-        let span = tracing::info_span!(
+
+        let span = info_span!(
             "response",
-            rsp.status = ?rsp.status(),
-            rsp.version = ?rsp.version(),
-            rsp.headers = ?rsp.headers()
+            rsp.status = ?response.status(),
+            rsp.version = ?response.version(),
+            rsp.headers = ?response.headers()
         );
 
         dispatcher::get_default(|dispatch| {
-            let id = span.id().expect("Missing ID; this is a bug");
-            if let Some(current) = dispatch.current_span().id() {
-                dispatch.record_follows_from(&id, current)
+            if let (Some(span_id), Some(current)) = (
+                span.id(),
+                dispatch
+                    .current_span()
+                    .ok()
+                    .and_then(|current| current.id().copied()),
+            ) {
+                let _result = dispatch.record_follows_from(span_id, current);
             }
         });
         let _guard = span.enter();
         info!("sending response");
-        future::ok(rsp)
+        future::ok(response)
     }
 }
 
+/// Factory for [`Svc`] instances.
 #[derive(Copy, Clone, Debug)]
 struct MakeSvc;
 
 impl<T> Service<T> for MakeSvc {
     type Response = Svc;
-    type Error = std::io::Error;
+    type Error = io::Error;
     type Future = future::Ready<Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -103,7 +117,7 @@ async fn main() -> Result<(), Err> {
         .layer(make::layer::<_, Svc, _>(req_span))
         .service(MakeSvc);
 
-    let addr: std::net::SocketAddr = "127.0.0.1:3000".parse()?;
+    let addr: SocketAddr = "127.0.0.1:3000".parse()?;
     let listener = TcpListener::bind(addr).await?;
     info!(message = "listening", addr = ?addr);
 
@@ -115,11 +129,11 @@ async fn main() -> Result<(), Err> {
         let hyper_svc = TowerToHyperService::new(svc);
 
         let _task = tokio::spawn(async move {
-            if let Err(e) = auto::Builder::new(TokioExecutor::new())
+            if let Err(error) = auto::Builder::new(TokioExecutor::new())
                 .serve_connection(io, hyper_svc)
                 .await
             {
-                tracing::error!(error = %e, "connection error");
+                error!(%error, "connection error");
             }
         });
     }

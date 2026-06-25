@@ -9,34 +9,42 @@
 /// cargo run --example tokio-spawny-thing
 /// ```
 use futures::future::try_join_all;
-use tracing::{debug, info, instrument, span, Instrument as _, Level};
+use std::error::Error;
+use tracing::{Instrument as _, Level, debug, info, instrument, span};
 
-type Error = Box<dyn std::error::Error + Send + Sync + 'static>;
+/// Result type used by the fallible async example.
+type ExampleResult = Result<(), Box<dyn Error + Send + Sync + 'static>>;
 
+/// Spawn instrumented Tokio tasks and log the sum of their outputs.
+#[allow(
+    clippy::single_call_fn,
+    reason = "keeps the parent task span visible in the Tokio task-scoping example"
+)]
 #[instrument]
-async fn parent_task(subtasks: usize) -> Result<(), Error> {
+async fn parent_task(subtasks: usize) -> ExampleResult {
     info!("spawning subtasks...");
-    let subtasks = (1..=subtasks)
+    let subtask_handles = (1..=subtasks)
         .map(|number| {
             let span = span!(Level::INFO, "subtask", %number);
             debug!(message = "creating subtask;", number);
-            tokio::spawn(subtask(number).instrument(span))
+            tokio::spawn(
+                async move {
+                    info!(%number, "polling subtask");
+                    number
+                }
+                .instrument(span),
+            )
         })
         .collect::<Vec<_>>();
 
     // the returnable error would be if one of the subtasks panicked.
-    let sum: usize = try_join_all(subtasks).await?.iter().sum();
+    let sum: usize = try_join_all(subtask_handles).await?.iter().sum();
     info!(%sum, "all subtasks completed; calculated sum");
     Ok(())
 }
 
-async fn subtask(number: usize) -> usize {
-    info!(%number, "polling subtask");
-    number
-}
-
 #[tokio::main]
-async fn main() -> Result<(), Error> {
+async fn main() -> ExampleResult {
     tracing_subscriber::fmt()
         .with_max_level(Level::DEBUG)
         .try_init()?;

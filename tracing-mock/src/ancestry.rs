@@ -2,12 +2,17 @@
 //!
 //! See the documentation on the [`ExpectedAncestry`] enum for further details.
 
+use std::fmt;
+
 use tracing_core::{
     Event,
     span::{self, Attributes},
 };
 
-use crate::span::{ActualSpan, ExpectedSpan};
+use crate::{
+    failure::{ExpectationError, ExpectationResult},
+    span::{ActualSpan, ExpectedSpan},
+};
 
 /// The ancestry of an event or span.
 ///
@@ -31,83 +36,114 @@ pub enum ExpectedAncestry {
     IsContextualRoot,
 }
 
+/// The observed ancestry for an event or span.
 pub(crate) enum ActualAncestry {
+    /// The observed item has an explicit parent span.
     HasExplicitParent(ActualSpan),
+    /// The observed item is an explicit root.
     IsExplicitRoot,
+    /// The observed item has a contextual parent span.
     HasContextualParent(ActualSpan),
+    /// The observed item is a contextual root.
     IsContextualRoot,
 }
 
 impl ExpectedAncestry {
+    /// Validates observed ancestry against this expectation.
     #[track_caller]
     pub(crate) fn check(
         &self,
         actual_ancestry: &ActualAncestry,
-        ctx: impl std::fmt::Display,
+        ctx: impl fmt::Display,
         collector_name: &str,
-    ) {
-        match (self, actual_ancestry) {
-            (Self::IsExplicitRoot, ActualAncestry::IsExplicitRoot) => {}
-            (Self::IsContextualRoot, ActualAncestry::IsContextualRoot) => {}
-            (
-                Self::HasExplicitParent(expected_parent),
-                ActualAncestry::HasExplicitParent(actual_parent),
-            ) => {
-                expected_parent.check(
-                    actual_parent,
-                    format_args!("{ctx} to have an explicit parent span"),
-                    collector_name,
-                );
+    ) -> ExpectationResult {
+        match *self {
+            Self::IsExplicitRoot if matches!(actual_ancestry, ActualAncestry::IsExplicitRoot) => {
+                Ok(())
             }
-            (
-                Self::HasContextualParent(expected_parent),
-                ActualAncestry::HasContextualParent(actual_parent),
-            ) => {
-                println!(
-                    "----> [{collector_name}] check {expected_parent:?} against actual parent with Id={id:?}",
-                    id = actual_parent.id()
-                );
-                expected_parent.check(
-                    actual_parent,
-                    format_args!("{ctx} to have a contextual parent span"),
-                    collector_name,
-                );
+            Self::IsContextualRoot
+                if matches!(actual_ancestry, ActualAncestry::IsContextualRoot) =>
+            {
+                Ok(())
             }
-            _ => {
-                // Ancestry types don't match at all.
-                let expected_description = match self {
-                    Self::IsExplicitRoot => "be an explicit root",
-                    Self::HasExplicitParent(_) => "have an explicit parent span",
-                    Self::IsContextualRoot => "be a contextual root",
-                    Self::HasContextualParent(_) => "have a contextual parent span",
-                };
+            Self::HasExplicitParent(ref expected_parent) => {
+                if let ActualAncestry::HasExplicitParent(ref actual_parent) = *actual_ancestry {
+                    return expected_parent.check(
+                        actual_parent,
+                        format_args!("{ctx} to have an explicit parent span"),
+                        collector_name,
+                    );
+                }
+                self.fail_mismatch(actual_ancestry, ctx, collector_name)
+            }
+            Self::HasContextualParent(ref expected_parent) => {
+                if let ActualAncestry::HasContextualParent(ref actual_parent) = *actual_ancestry {
+                    return expected_parent.check(
+                        actual_parent,
+                        format_args!("{ctx} to have a contextual parent span"),
+                        collector_name,
+                    );
+                }
+                self.fail_mismatch(actual_ancestry, ctx, collector_name)
+            }
+            Self::IsExplicitRoot | Self::IsContextualRoot => {
+                self.fail_mismatch(actual_ancestry, ctx, collector_name)
+            }
+        }
+    }
 
-                let actual_description = match actual_ancestry {
-                    ActualAncestry::IsExplicitRoot => "is actually an explicit root",
-                    ActualAncestry::HasExplicitParent(_) => "actually has an explicit parent span",
-                    ActualAncestry::IsContextualRoot => "is actually a contextual root",
-                    ActualAncestry::HasContextualParent(_) => {
-                        "actually has a contextual parent span"
-                    }
-                };
+    /// Reports an ancestry kind mismatch.
+    fn fail_mismatch(
+        &self,
+        actual_ancestry: &ActualAncestry,
+        ctx: impl fmt::Display,
+        collector_name: &str,
+    ) -> ExpectationResult {
+        let expected_description = match *self {
+            Self::IsExplicitRoot => "be an explicit root",
+            Self::HasExplicitParent(_) => "have an explicit parent span",
+            Self::IsContextualRoot => "be a contextual root",
+            Self::HasContextualParent(_) => "have a contextual parent span",
+        };
 
-                panic!(
-                    "{}",
-                    format!(
-                        "[{collector_name}] expected {ctx} to {expected_description}, \
-                        but it {actual_description}"
-                    )
-                );
+        let actual_description = match *actual_ancestry {
+            ActualAncestry::IsExplicitRoot => "is actually an explicit root",
+            ActualAncestry::HasExplicitParent(ref _actual_parent) => {
+                "actually has an explicit parent span"
             }
+            ActualAncestry::IsContextualRoot => "is actually a contextual root",
+            ActualAncestry::HasContextualParent(ref _actual_parent) => {
+                "actually has a contextual parent span"
+            }
+        };
+
+        Err(ExpectationError::from_args(format_args!(
+            "[{collector_name}] expected {ctx} to {expected_description}, \
+            but it {actual_description}"
+        )))
+    }
+}
+
+impl fmt::Display for ExpectedAncestry {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            Self::HasExplicitParent(ref parent) => write!(f, "explicit parent {parent}"),
+            Self::IsExplicitRoot => f.write_str("explicit root"),
+            Self::HasContextualParent(ref parent) => write!(f, "contextual parent {parent}"),
+            Self::IsContextualRoot => f.write_str("contextual root"),
         }
     }
 }
 
+/// Common parent/root accessors for traced items with ancestry metadata.
 pub(crate) trait HasAncestry {
+    /// Returns whether the item should use the current contextual parent.
     fn is_contextual(&self) -> bool;
 
+    /// Returns whether the item was explicitly declared as a root.
     fn is_root(&self) -> bool;
 
+    /// Returns the explicit parent ID when one was supplied.
     fn parent(&self) -> Option<&span::Id>;
 }
 
@@ -146,37 +182,49 @@ impl HasAncestry for &Attributes<'_> {
 /// +------------+--------------+-----------------+---------------------+
 /// | Contextual | Current Span | Explicit Parent | Ancestry            |
 /// +------------+--------------+-----------------+---------------------+
-/// | Yes        | Yes          | -               | HasContextualParent |
-/// | Yes        | No           | -               | IsContextualRoot    |
-/// | No         | -            | Yes             | HasExplicitParent   |
-/// | No         | -            | No              | IsExplicitRoot      |
+/// | Yes        | Yes          | -               | `HasContextualParent` |
+/// | Yes        | No           | -               | `IsContextualRoot`    |
+/// | No         | -            | Yes             | `HasExplicitParent`   |
+/// | No         | -            | No              | `IsExplicitRoot`      |
 /// +------------+--------------+-----------------+---------------------+
 pub(crate) fn get_ancestry(
-    item: impl HasAncestry,
+    item: &impl HasAncestry,
     lookup_current: impl FnOnce() -> Option<span::Id>,
     actual_span: impl FnOnce(&span::Id) -> Option<ActualSpan>,
-) -> ActualAncestry {
+) -> ExpectationResult<ActualAncestry> {
     if item.is_contextual() {
-        if let Some(parent_id) = lookup_current() {
-            let contextual_parent_span = actual_span(&parent_id).expect(
-                "tracing-mock: contextual parent cannot \
-                            be looked up by ID. Was it recorded correctly?",
-            );
-            ActualAncestry::HasContextualParent(contextual_parent_span)
-        } else {
-            ActualAncestry::IsContextualRoot
-        }
+        lookup_current().map_or(Ok(ActualAncestry::IsContextualRoot), |parent_id| {
+            let parent_id_value = parent_id.into_u64();
+            actual_span(&parent_id).map_or_else(
+                || {
+                    Err(ExpectationError::from_args(format_args!(
+                        "tracing-mock: contextual parent with ID `{parent_id_value}` \
+                    cannot be looked up. Was it recorded correctly?"
+                    )))
+                },
+                |contextual_parent_span| {
+                    Ok(ActualAncestry::HasContextualParent(contextual_parent_span))
+                },
+            )
+        })
     } else if item.is_root() {
-        ActualAncestry::IsExplicitRoot
+        Ok(ActualAncestry::IsExplicitRoot)
     } else {
-        let parent_id = item.parent().expect(
-            "tracing-mock: is_contextual=false is_root=false \
-                        but no explicit parent found. This is a bug!",
-        );
-        let explicit_parent_span = actual_span(parent_id).expect(
-            "tracing-mock: explicit parent cannot be looked \
-                        up by ID. Is the provided Span ID valid: {parent_id}",
-        );
-        ActualAncestry::HasExplicitParent(explicit_parent_span)
+        let Some(parent_id) = item.parent() else {
+            return Err(ExpectationError::from_args(format_args!(
+                "tracing-mock: is_contextual=false is_root=false \
+                but no explicit parent found. This is a bug!"
+            )));
+        };
+        let parent_id_value = parent_id.into_u64();
+        actual_span(parent_id).map_or_else(
+            || {
+                Err(ExpectationError::from_args(format_args!(
+                "tracing-mock: explicit parent with ID `{parent_id_value}` cannot be looked up. \
+                Is the provided span ID valid?"
+                )))
+            },
+            |explicit_parent_span| Ok(ActualAncestry::HasExplicitParent(explicit_parent_span)),
+        )
     }
 }

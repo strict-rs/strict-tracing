@@ -8,7 +8,7 @@ use core::fmt;
 use std::error::Error;
 use tracing_core::dispatcher::{self, Dispatch};
 #[cfg(feature = "tracing-log")]
-use tracing_log::AsLog;
+use tracing_log::AsLog as _;
 
 /// Extension trait adding utility methods for subscriber initialization.
 ///
@@ -40,7 +40,9 @@ where
     #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
     fn set_default(self) -> dispatcher::DefaultGuard {
         #[cfg(feature = "tracing-log")]
-        let _ = tracing_log::LogTracer::init();
+        match tracing_log::LogTracer::init() {
+            Ok(()) | Err(_) => {}
+        }
 
         dispatcher::set_default(&self.into())
     }
@@ -56,10 +58,29 @@ where
     /// been set, or if a `log` logger has already been set (when the
     /// "tracing-log" feature is enabled).
     ///
+    /// # Errors
+    ///
+    /// Returns [`TryInitError`] if installing the global default subscriber
+    /// fails, or if initializing the `log` compatibility layer fails when the
+    /// `tracing-log` feature is enabled.
+    ///
     /// [global default subscriber]: https://docs.rs/tracing/0.1.21/tracing/dispatcher/index.html#setting-the-default-subscriber
     /// [`log`]: https://crates.io/log
     fn try_init(self) -> Result<(), TryInitError> {
-        dispatcher::set_global_default(self.into()).map_err(TryInitError::new)?;
+        dispatcher::set_global_default(self.into()).map_err(|error| {
+            #[cfg(feature = "std")]
+            {
+                TryInitError {
+                    inner: error.into(),
+                }
+            }
+
+            #[cfg(not(feature = "std"))]
+            {
+                let _ = error;
+                TryInitError { _p: () }
+            }
+        })?;
 
         // Since we are setting the global default subscriber, we can
         // opportunistically go ahead and set its global max level hint as
@@ -71,53 +92,38 @@ where
             // subscriber, so that we get its max level hint.
             .with_max_level(tracing_core::LevelFilter::current().as_log())
             .init()
-            .map_err(TryInitError::new)?;
+            .map_err(|error| {
+                #[cfg(feature = "std")]
+                {
+                    TryInitError {
+                        inner: error.into(),
+                    }
+                }
+
+                #[cfg(not(feature = "std"))]
+                {
+                    let _ = error;
+                    TryInitError { _p: () }
+                }
+            })?;
 
         Ok(())
-    }
-
-    /// Attempts to set `self` as the [global default subscriber] in the current
-    /// scope, panicking if this fails.
-    ///
-    /// If the "tracing-log" feature flag is enabled, this will also attempt to
-    /// initialize a [`log`] compatibility layer. This allows the subscriber to
-    /// consume `log::Record`s as though they were `tracing` `Event`s.
-    ///
-    /// This method panics if a global default subscriber has already been set,
-    /// or if a `log` logger has already been set (when the "tracing-log"
-    /// feature is enabled).
-    ///
-    /// [global default subscriber]: https://docs.rs/tracing/0.1.21/tracing/dispatcher/index.html#setting-the-default-subscriber
-    /// [`log`]: https://crates.io/log
-    fn init(self) {
-        self.try_init()
-            .expect("failed to set global default subscriber")
     }
 }
 
 impl<T> SubscriberInitExt for T where T: Into<Dispatch> {}
 
 /// Error returned by [`try_init`](SubscriberInitExt::try_init) if a global default subscriber could not be initialized.
+#[cfg_attr(not(feature = "std"), derive(Clone, Copy))]
 pub struct TryInitError {
+    /// The backend initialization error.
     #[cfg(feature = "std")]
     inner: Box<dyn Error + Send + Sync + 'static>,
 
+    /// Marker field for `no_std` builds, where the dispatcher does not expose a
+    /// concrete initialization error.
     #[cfg(not(feature = "std"))]
     _p: (),
-}
-
-// ==== impl TryInitError ====
-
-impl TryInitError {
-    #[cfg(feature = "std")]
-    fn new(e: impl Into<Box<dyn Error + Send + Sync + 'static>>) -> Self {
-        Self { inner: e.into() }
-    }
-
-    #[cfg(not(feature = "std"))]
-    fn new<T>(_: T) -> Self {
-        Self { _p: () }
-    }
 }
 
 impl fmt::Debug for TryInitError {

@@ -75,16 +75,20 @@ pub struct JsonSubscriber {
 
 impl Subscriber for JsonSubscriber {
 
-    fn new_span(&self, attrs: &Attributes) -> Id {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        let id = Id::from_u64(id as u64);
+    fn new_span(&self, attrs: &Attributes) -> SubscriberResult<Id> {
+        let id = loop {
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed) as u64;
+            if let Some(id) = Id::try_from_u64(id) {
+                break id;
+            }
+        };
         let json = json!({
         "new_span": {
             "attributes": attrs.as_serde(),
             "id": id.as_serde(),
         }});
         println!("{}", json);
-        id
+        Ok(id)
     }
     // ...
 }

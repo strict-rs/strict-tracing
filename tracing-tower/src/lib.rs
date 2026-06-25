@@ -39,8 +39,8 @@ where
     {
         let req_span: fn(&Request) -> tracing::Span =
             |request| tracing::span!(Level::TRACE, "request", ?request);
-        let svc_span = svc_span.span_for(&self);
-        self.trace_requests(req_span).trace_service(svc_span)
+        let service_span = svc_span.span_for(&self);
+        self.trace_requests(req_span).trace_service(service_span)
     }
 
     /// Instruments each request handled by this service with a new span.
@@ -90,6 +90,8 @@ impl<T> GetSpan<T> for tracing::Span {
     }
 }
 
+/// Sealing trait for span-producing implementations.
 mod sealed {
+    /// Prevent external implementations of [`super::GetSpan`].
     pub trait Sealed<T = ()> {}
 }

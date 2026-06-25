@@ -1,131 +1,182 @@
 //! Subscriber interaction integration coverage.
 
-// These tests require the thread-local scoped dispatcher, which only works when
-// we have a standard library. The behaviour being tested should be the same
-// with the standard lib disabled.
-//
-// The alternative would be for each of these tests to be defined in a separate
-// file, which is :(
 #![cfg(feature = "std")]
-use tracing::{
-    Event, Level, Metadata,
-    field::display,
-    span::{Attributes, Id, Record},
-    subscriber::{Interest, Subscriber, with_default},
-};
-use tracing_mock::{expect, subscriber};
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
-fn event_macros_dont_infinite_loop() {
-    // This test ensures that an event macro within a subscriber
-    // won't cause an infinite loop of events.
-    struct TestSubscriber;
-    impl Subscriber for TestSubscriber {
-        fn register_callsite(&self, _: &Metadata<'_>) -> Interest {
-            // Always return sometimes so that `enabled` will be called
-            // (which can loop).
-            Interest::sometimes()
+#[cfg(test)]
+mod tests {
+    // These tests require the thread-local scoped dispatcher, which only works when
+    // we have a standard library. The behaviour being tested should be the same
+    // with the standard lib disabled.
+    //
+    // The alternative would be for each of these tests to be defined in a separate
+    // file, which is :(
+    use core::num::NonZeroU64;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    use strict_test_support::{TestFailure, ensure, ensure_ok};
+    use tracing::{
+        Event, Level, Metadata,
+        field::display,
+        span::{Attributes, Id, Record},
+        subscriber::{Interest, Subscriber, SubscriberResult, with_default},
+    };
+    use tracing_mock::{expect, subscriber};
+
+    const TEST_SUBSCRIBER_SPAN_ID: Id = match Id::try_from_u64(0xAAAA) {
+        Some(id) => id,
+        None => Id::from_non_zero_u64(NonZeroU64::MIN),
+    };
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn event_macros_dont_infinite_loop() -> Result<(), TestFailure> {
+        // This test ensures that an event macro within a subscriber
+        // won't cause an infinite loop of events.
+        struct TestSubscriber {
+            missing_enabled_field: Arc<AtomicBool>,
+            missing_event_field: Arc<AtomicBool>,
         }
 
-        fn enabled(&self, meta: &Metadata<'_>) -> bool {
-            assert!(meta.fields().iter().any(|f| f.name() == "foo"));
-            tracing::event!(Level::TRACE, bar = false);
-            true
+        impl Subscriber for TestSubscriber {
+            fn register_callsite(
+                &self,
+                _: &'static Metadata<'static>,
+            ) -> SubscriberResult<Interest> {
+                // Always return sometimes so that `enabled` will be called
+                // (which can loop).
+                Ok(Interest::sometimes())
+            }
+
+            fn enabled(&self, meta: &Metadata<'_>) -> SubscriberResult<bool> {
+                self.missing_enabled_field.store(
+                    !meta.fields().iter().any(|field| field.name() == "foo"),
+                    Ordering::Relaxed,
+                );
+                tracing::event!(Level::TRACE, bar = false);
+                Ok(true)
+            }
+
+            fn new_span(&self, _: &Attributes<'_>) -> SubscriberResult<Id> {
+                Ok(TEST_SUBSCRIBER_SPAN_ID)
+            }
+
+            fn record(&self, _: Id, _: &Record<'_>) -> SubscriberResult {
+                Ok(())
+            }
+
+            fn record_follows_from(&self, _: Id, _: Id) -> SubscriberResult {
+                Ok(())
+            }
+
+            fn event(&self, event: &Event<'_>) -> SubscriberResult {
+                self.missing_event_field.store(
+                    !event
+                        .metadata()
+                        .fields()
+                        .iter()
+                        .any(|field| field.name() == "foo"),
+                    Ordering::Relaxed,
+                );
+                tracing::event!(Level::TRACE, baz = false);
+                Ok(())
+            }
+
+            fn enter(&self, _: Id) -> SubscriberResult {
+                Ok(())
+            }
+
+            fn exit(&self, _: Id) -> SubscriberResult {
+                Ok(())
+            }
         }
 
-        fn new_span(&self, _: &Attributes<'_>) -> Id {
-            Id::from_u64(0xAAAA)
-        }
+        let missing_enabled_field = Arc::new(AtomicBool::new(false));
+        let missing_event_field = Arc::new(AtomicBool::new(false));
 
-        fn record(&self, _: &Id, _: &Record<'_>) {}
+        with_default(
+            TestSubscriber {
+                missing_enabled_field: Arc::clone(&missing_enabled_field),
+                missing_event_field: Arc::clone(&missing_event_field),
+            },
+            || {
+                tracing::event!(Level::TRACE, foo = false);
+            },
+        );
 
-        fn record_follows_from(&self, _: &Id, _: &Id) {}
-
-        fn event(&self, event: &Event<'_>) {
-            assert!(event.metadata().fields().iter().any(|f| f.name() == "foo"));
-            tracing::event!(Level::TRACE, baz = false);
-        }
-
-        fn enter(&self, _: &Id) {}
-
-        fn exit(&self, _: &Id) {}
+        ensure(
+            !missing_enabled_field.load(Ordering::Relaxed),
+            "enabled callback should see the original event field",
+        )?;
+        ensure(
+            !missing_event_field.load(Ordering::Relaxed),
+            "event callback should see the original event field",
+        )
     }
 
-    with_default(TestSubscriber, || {
-        tracing::event!(Level::TRACE, foo = false);
-    })
-}
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn boxed_subscriber() -> Result<(), TestFailure> {
+        let (mock_subscriber, handle) = subscriber::mock()
+            .new_span(
+                expect::span().named("foo").with_fields(
+                    expect::field("bar")
+                        .with_value(&display("hello from my span"))
+                        .only(),
+                ),
+            )
+            .enter(expect::span().named("foo"))
+            .exit(expect::span().named("foo"))
+            .close_span(expect::span().named("foo"))
+            .only()
+            .run_with_handle();
+        let subscriber: Box<dyn Subscriber + Send + Sync + 'static> = Box::new(mock_subscriber);
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
-fn boxed_subscriber() {
-    let (subscriber, handle) = subscriber::mock()
-        .new_span(
-            expect::span().named("foo").with_fields(
-                expect::field("bar")
-                    .with_value(&display("hello from my span"))
-                    .only(),
-            ),
-        )
-        .enter(expect::span().named("foo"))
-        .exit(expect::span().named("foo"))
-        .drop_span(expect::span().named("foo"))
-        .only()
-        .run_with_handle();
-    let subscriber: Box<dyn Subscriber + Send + Sync + 'static> = Box::new(subscriber);
+        with_default(subscriber, || {
+            let from = "my span";
+            let span = tracing::span!(Level::TRACE, "foo", bar = format_args!("hello from {from}"));
+            span.in_scope(|| {});
+        });
 
-    with_default(subscriber, || {
-        let from = "my span";
-        let span = tracing::span!(
-            Level::TRACE,
-            "foo",
-            bar = format_args!("hello from {}", from)
-        );
-        span.in_scope(|| {});
-    });
+        ensure_ok(handle.finished(), "mock expectations should finish")?;
+        Ok(())
+    }
 
-    handle.assert_finished();
-}
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn arced_subscriber() -> Result<(), TestFailure> {
+        let (mock_subscriber, handle) =
+            subscriber::mock()
+                .new_span(
+                    expect::span().named("foo").with_fields(
+                        expect::field("bar")
+                            .with_value(&display("hello from my span"))
+                            .only(),
+                    ),
+                )
+                .enter(expect::span().named("foo"))
+                .exit(expect::span().named("foo"))
+                .close_span(expect::span().named("foo"))
+                .event(expect::event().with_fields(
+                    expect::field("message").with_value(&display("hello from my event")),
+                ))
+                .only()
+                .run_with_handle();
+        let subscriber: Arc<dyn Subscriber + Send + Sync + 'static> = Arc::new(mock_subscriber);
 
-#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-#[test]
-fn arced_subscriber() {
-    use std::sync::Arc;
+        // Test using a clone of the `Arc`ed subscriber
+        with_default(Arc::clone(&subscriber), || {
+            let from = "my span";
+            let span = tracing::span!(Level::TRACE, "foo", bar = format_args!("hello from {from}"));
+            span.in_scope(|| {});
+        });
 
-    let (subscriber, handle) = subscriber::mock()
-        .new_span(
-            expect::span().named("foo").with_fields(
-                expect::field("bar")
-                    .with_value(&display("hello from my span"))
-                    .only(),
-            ),
-        )
-        .enter(expect::span().named("foo"))
-        .exit(expect::span().named("foo"))
-        .drop_span(expect::span().named("foo"))
-        .event(
-            expect::event()
-                .with_fields(expect::field("message").with_value(&display("hello from my event"))),
-        )
-        .only()
-        .run_with_handle();
-    let subscriber: Arc<dyn Subscriber + Send + Sync + 'static> = Arc::new(subscriber);
+        with_default(subscriber, || {
+            tracing::info!("hello from my event");
+        });
 
-    // Test using a clone of the `Arc`ed subscriber
-    with_default(subscriber.clone(), || {
-        let from = "my span";
-        let span = tracing::span!(
-            Level::TRACE,
-            "foo",
-            bar = format_args!("hello from {}", from)
-        );
-        span.in_scope(|| {});
-    });
-
-    with_default(subscriber, || {
-        tracing::info!("hello from my event");
-    });
-
-    handle.assert_finished();
+        ensure_ok(handle.finished(), "mock expectations should finish")?;
+        Ok(())
+    }
 }

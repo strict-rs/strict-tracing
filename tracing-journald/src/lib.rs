@@ -38,23 +38,28 @@
 )]
 #![cfg_attr(docsrs, deny(rustdoc::broken_intra_doc_links))]
 #[cfg(unix)]
+use rustix::process::geteuid;
+#[cfg(unix)]
+use std::env::{args_os, var_os};
+#[cfg(unix)]
 use std::os::unix::net::UnixDatagram;
 #[cfg(unix)]
-use std::path::PathBuf;
-use std::{fmt, io, io::Write};
+use std::path::{Path, PathBuf};
+use std::{fmt, io, io::Write as _};
 
 use tracing_core::{
     Field, Level, Metadata, Subscriber,
     event::Event,
     field::Visit,
     span::{Attributes, Id, Record},
+    subscriber::SubscriberResult,
 };
 use tracing_subscriber::{layer::Context, registry::LookupSpan};
 
 #[cfg(target_os = "linux")]
-mod memfd;
+pub mod memfd;
 #[cfg(target_os = "linux")]
-mod socket;
+pub mod socket;
 
 /// Sends events and their fields to journald
 ///
@@ -84,13 +89,19 @@ mod socket;
 ///
 /// [journald conventions]: https://www.freedesktop.org/software/systemd/man/systemd.journal-fields.html
 pub struct Layer {
+    /// Datagram socket used to send native protocol payloads to journald.
     #[cfg(unix)]
     socket: UnixDatagram,
+    /// Filesystem path for the selected journald socket.
     #[cfg(unix)]
     socket_path: PathBuf,
+    /// Prefix applied to user fields, except `message`.
     field_prefix: Option<String>,
+    /// Value emitted as `SYSLOG_IDENTIFIER`.
     syslog_identifier: String,
+    /// Pre-encoded fields emitted with every payload.
     additional_fields: Vec<u8>,
+    /// Mapping from tracing levels to journald priorities.
     priority_mappings: PriorityMappings,
 }
 
@@ -99,7 +110,9 @@ impl fmt::Debug for Layer {
         let mut debug = f.debug_struct("Layer");
 
         #[cfg(unix)]
-        let _debug = debug.field("socket_path", &self.socket_path);
+        let _debug = debug
+            .field("socket", &self.socket)
+            .field("socket_path", &self.socket_path);
 
         debug
             .field("field_prefix", &self.field_prefix)
@@ -110,6 +123,7 @@ impl fmt::Debug for Layer {
     }
 }
 
+/// System journald socket path.
 #[cfg(unix)]
 const SYSTEM_JOURNALD_PATH: &str = "/run/systemd/journal/socket";
 
@@ -125,6 +139,7 @@ pub enum JournalNamespace {
 
 #[cfg(unix)]
 impl JournalNamespace {
+    /// Return the socket path for this namespace.
     fn socket_path(self) -> PathBuf {
         match self {
             Self::System => PathBuf::from(SYSTEM_JOURNALD_PATH),
@@ -138,6 +153,15 @@ impl Layer {
     ///
     /// Fails if the journald socket couldn't be opened. Returns a `NotFound` error unconditionally
     /// in non-Unix environments.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the platform has no journald socket, or when the socket probe cannot
+    /// be sent to journald.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public constructor preserves the system-journal API entry point"
+    )]
     pub fn new() -> io::Result<Self> {
         #[cfg(unix)]
         {
@@ -153,6 +177,14 @@ impl Layer {
     /// Construct a journald layer targeting the current user's journal.
     ///
     /// Fails if the user journald socket couldn't be opened.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the current user's journald socket cannot be opened or probed.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "public constructor preserves the user-journal API entry point"
+    )]
     pub fn new_user() -> io::Result<Self> {
         Self::new_in_namespace(JournalNamespace::User)
     }
@@ -160,6 +192,10 @@ impl Layer {
     /// Construct a journald layer targeting a specific journald namespace.
     ///
     /// Fails if the selected journald socket couldn't be opened.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the selected journald namespace has no reachable socket.
     pub fn new_in_namespace(namespace: JournalNamespace) -> io::Result<Self> {
         #[cfg(unix)]
         {
@@ -172,20 +208,23 @@ impl Layer {
         ))
     }
 
+    /// Construct a layer using an explicit journald socket path.
     #[cfg(unix)]
+    #[allow(
+        clippy::single_call_fn,
+        reason = "socket-path construction keeps Unix socket probing separate from namespace selection"
+    )]
     fn new_with_socket_path(socket_path: PathBuf) -> io::Result<Self> {
-        use std::path::Path;
-
         let socket = UnixDatagram::unbound()?;
         let layer = Self {
             socket,
             socket_path,
             field_prefix: Some("F".into()),
-            syslog_identifier: std::env::args_os()
+            syslog_identifier: args_os()
                 .next()
                 .as_ref()
-                .and_then(|p| Path::new(p).file_name())
-                .map(|n| n.to_string_lossy().into_owned())
+                .and_then(|path| Path::new(path).file_name())
+                .map(|name| name.to_string_lossy().into_owned())
                 // If we fail to get the name of the current executable fall back to an empty string.
                 .unwrap_or_default(),
             additional_fields: Vec::new(),
@@ -199,8 +238,9 @@ impl Layer {
 
     /// Sets the prefix to apply to names of user-defined fields other than the event `message`
     /// field. Defaults to `Some("F")`.
-    pub fn with_field_prefix(mut self, x: Option<String>) -> Self {
-        self.field_prefix = x;
+    #[must_use]
+    pub fn with_field_prefix(mut self, prefix: Option<String>) -> Self {
+        self.field_prefix = prefix;
         self
     }
 
@@ -213,6 +253,7 @@ impl Layer {
     /// use tracing_subscriber::prelude::*;
     /// use tracing::error;
     ///
+    /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
     /// let registry = tracing_subscriber::registry();
     /// match tracing_journald::layer() {
     ///     Ok(layer) => {
@@ -229,12 +270,14 @@ impl Layer {
     ///     // journald is typically available on Linux systems, but nowhere else. Portable software
     ///     // should handle its absence gracefully.
     ///     Err(e) => {
-    ///         registry.init();
+    ///         registry.try_init()?;
     ///         error!("couldn't connect to journald: {}", e);
     ///     }
     /// }
+    /// # Ok(()) }
     /// ```
-    pub fn with_priority_mappings(mut self, mappings: PriorityMappings) -> Self {
+    #[must_use]
+    pub const fn with_priority_mappings(mut self, mappings: PriorityMappings) -> Self {
         self.priority_mappings = mappings;
         self
     }
@@ -255,6 +298,7 @@ impl Layer {
     /// for more information.
     ///
     /// Defaults to the file name of the executable of the current process, if any.
+    #[must_use]
     pub fn with_syslog_identifier(mut self, identifier: String) -> Self {
         self.syslog_identifier = identifier;
         self
@@ -277,24 +321,29 @@ impl Layer {
     ///
     /// ```no_run
     /// # use tracing_journald::Layer;
-    /// let layer = Layer::new()
-    ///     .unwrap()
+    /// # fn main() -> std::io::Result<()> {
+    /// let layer = Layer::new()?
     ///     .with_custom_fields([("SYSLOG_FACILITY", "17")]);
+    /// # let _layer = layer;
+    /// # Ok(())
+    /// # }
     /// ```
     ///
+    #[must_use]
     pub fn with_custom_fields<T: AsRef<str>, U: AsRef<[u8]>>(
         mut self,
         fields: impl IntoIterator<Item = (T, U)>,
     ) -> Self {
         for (name, value) in fields {
-            put_field_length_encoded(&mut self.additional_fields, name.as_ref(), |buf| {
-                buf.extend_from_slice(value.as_ref())
-            })
+            put_field_length_encoded(&mut self.additional_fields, name.as_ref(), |value_buf| {
+                value_buf.extend_from_slice(value.as_ref());
+            });
         }
         self
     }
 
     /// Returns the syslog identifier in use.
+    #[must_use]
     pub fn syslog_identifier(&self) -> &str {
         &self.syslog_identifier
     }
@@ -308,6 +357,7 @@ impl Layer {
     }
 
     #[cfg(unix)]
+    /// Send a native protocol payload to journald.
     fn send_payload(&self, payload: &[u8]) -> io::Result<usize> {
         use rustix::io::Errno;
 
@@ -335,7 +385,7 @@ impl Layer {
     fn send_large_payload(&self, payload: &[u8]) -> io::Result<usize> {
         // If the payload's too large for a single datagram, send it through a memfd, see
         // https://systemd.io/JOURNAL_NATIVE_PROTOCOL/
-        use rustix::fd::AsFd;
+        use rustix::fd::AsFd as _;
 
         // Write the whole payload to a memfd
         let mut mem = memfd::create_sealable()?;
@@ -346,16 +396,17 @@ impl Layer {
         socket::send_one_fd_to(&self.socket, mem.as_fd(), &self.socket_path)
     }
 
+    /// Put the journald priority field for `meta` into `buf`.
     fn put_priority(&self, buf: &mut Vec<u8>, meta: &Metadata<'_>) {
         put_field_wellformed(
             buf,
             "PRIORITY",
             &[match *meta.level() {
-                Level::ERROR => self.priority_mappings.error as u8,
-                Level::WARN => self.priority_mappings.warn as u8,
-                Level::INFO => self.priority_mappings.info as u8,
-                Level::DEBUG => self.priority_mappings.debug as u8,
-                Level::TRACE => self.priority_mappings.trace as u8,
+                Level::ERROR => self.priority_mappings.error.as_byte(),
+                Level::WARN => self.priority_mappings.warn.as_byte(),
+                Level::INFO => self.priority_mappings.info.as_byte(),
+                Level::DEBUG => self.priority_mappings.debug.as_byte(),
+                Level::TRACE => self.priority_mappings.trace.as_byte(),
             }],
         );
     }
@@ -364,6 +415,10 @@ impl Layer {
 /// Construct a journald layer
 ///
 /// Fails if the journald socket couldn't be opened.
+///
+/// # Errors
+///
+/// Returns an error when the system journald socket cannot be opened or probed.
 pub fn layer() -> io::Result<Layer> {
     Layer::new()
 }
@@ -371,18 +426,27 @@ pub fn layer() -> io::Result<Layer> {
 /// Construct a journald layer targeting the current user's journal.
 ///
 /// Fails if the user journald socket couldn't be opened.
+///
+/// # Errors
+///
+/// Returns an error when the current user's journald socket cannot be opened or probed.
 pub fn user_layer() -> io::Result<Layer> {
     Layer::new_user()
 }
 
 #[cfg(unix)]
+/// Return the current user's journald socket path.
+#[allow(
+    clippy::single_call_fn,
+    reason = "user namespace resolution keeps XDG and uid fallback policy in one named helper"
+)]
 fn user_journald_path() -> PathBuf {
-    if let Some(runtime_dir) = std::env::var_os("XDG_RUNTIME_DIR") {
+    if let Some(runtime_dir) = var_os("XDG_RUNTIME_DIR") {
         return PathBuf::from(runtime_dir).join("systemd/journal/socket");
     }
 
-    let uid = rustix::process::geteuid();
-    PathBuf::from("/run/user")
+    let uid = geteuid();
+    Path::new("/run/user")
         .join(uid.to_string())
         .join("systemd/journal/socket")
 }
@@ -391,12 +455,13 @@ impl<S> tracing_subscriber::Layer<S> for Layer
 where
     S: Subscriber + for<'span> LookupSpan<'span>,
 {
-    fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
-        let span = ctx.span(id).expect("unknown span");
+    fn on_new_span(&self, attrs: &Attributes<'_>, id: Id, ctx: Context<'_, S>) -> SubscriberResult {
+        let Some(span) = ctx.span(id) else {
+            return Ok(());
+        };
         let mut buf = Vec::with_capacity(256);
 
-        writeln!(buf, "SPAN_NAME").unwrap();
-        put_value(&mut buf, span.name().as_bytes());
+        put_field_wellformed(&mut buf, "SPAN_NAME", span.name().as_bytes());
         put_metadata(&mut buf, span.metadata(), Some("SPAN_"));
 
         attrs.record(&mut SpanVisitor {
@@ -404,59 +469,87 @@ where
             field_prefix: self.field_prefix.as_deref(),
         });
 
-        span.extensions_mut().insert(SpanFields(buf));
+        {
+            let mut extensions = span.extensions_mut();
+            if extensions.get_mut::<SpanFields>().is_some() {
+                return Ok(());
+            }
+            let _previous_fields = extensions.insert(SpanFields(buf));
+        }
+        Ok(())
     }
 
-    fn on_record(&self, id: &Id, values: &Record<'_>, ctx: Context<'_, S>) {
-        let span = ctx.span(id).expect("unknown span");
-        let mut exts = span.extensions_mut();
-        let buf = &mut exts.get_mut::<SpanFields>().expect("missing fields").0;
+    fn on_record(&self, id: Id, values: &Record<'_>, ctx: Context<'_, S>) -> SubscriberResult {
+        let Some(span) = ctx.span(id) else {
+            return Ok(());
+        };
+        let mut recorded_fields = Vec::new();
         values.record(&mut SpanVisitor {
-            buf,
+            buf: &mut recorded_fields,
             field_prefix: self.field_prefix.as_deref(),
         });
+        {
+            let mut exts = span.extensions_mut();
+            let Some(fields) = exts.get_mut::<SpanFields>() else {
+                return Ok(());
+            };
+            fields.0.extend_from_slice(&recorded_fields);
+            drop(exts);
+        };
+        Ok(())
     }
 
-    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
+    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) -> SubscriberResult {
         let mut buf = Vec::with_capacity(256);
 
         // Record span fields
         for span in ctx
             .lookup_current()
             .into_iter()
-            .flat_map(|span| span.scope().from_root())
+            .flat_map(|span| span.scope().root_to_leaf())
         {
             let exts = span.extensions();
-            let fields = exts.get::<SpanFields>().expect("missing fields");
-            buf.extend_from_slice(&fields.0);
+            if let Some(fields) = exts.get::<SpanFields>() {
+                buf.extend_from_slice(&fields.0);
+            }
         }
 
         // Record event fields
         self.put_priority(&mut buf, event.metadata());
         put_metadata(&mut buf, event.metadata(), None);
-        put_field_length_encoded(&mut buf, "SYSLOG_IDENTIFIER", |buf| {
-            write!(buf, "{}", self.syslog_identifier).unwrap()
+        put_field_length_encoded(&mut buf, "SYSLOG_IDENTIFIER", |value_buf| {
+            value_buf.extend_from_slice(self.syslog_identifier.as_bytes());
         });
         buf.extend_from_slice(&self.additional_fields);
 
-        event.record(&mut EventVisitor::new(
-            &mut buf,
-            self.field_prefix.as_deref(),
-        ));
+        let mut visitor = EventVisitor {
+            buf: &mut buf,
+            prefix: self.field_prefix.as_deref(),
+        };
+        event.record(&mut visitor);
 
         // At this point we can't handle the error anymore so just ignore it.
         let _send_result = self.send_payload(&buf);
+        Ok(())
     }
 }
 
-struct SpanFields(Vec<u8>);
+/// Pre-encoded journald fields attached to a span.
+struct SpanFields(
+    /// Native protocol bytes that should be replayed for events inside the span.
+    Vec<u8>,
+);
 
+/// Visitor that serializes span fields into journald native protocol bytes.
 struct SpanVisitor<'a> {
+    /// Output buffer receiving serialized fields.
     buf: &'a mut Vec<u8>,
+    /// Prefix applied to user fields.
     field_prefix: Option<&'a str>,
 }
 
 impl SpanVisitor<'_> {
+    /// Append the configured span field prefix when present.
     fn put_span_prefix(&mut self) {
         if let Some(prefix) = self.field_prefix {
             self.buf.extend_from_slice(prefix.as_bytes());
@@ -468,31 +561,30 @@ impl SpanVisitor<'_> {
 impl Visit for SpanVisitor<'_> {
     fn record_str(&mut self, field: &Field, value: &str) {
         self.put_span_prefix();
-        put_field_length_encoded(self.buf, field.name(), |buf| {
-            buf.extend_from_slice(value.as_bytes())
+        put_field_length_encoded(self.buf, field.name(), |value_buf| {
+            value_buf.extend_from_slice(value.as_bytes());
         });
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         self.put_span_prefix();
-        put_field_length_encoded(self.buf, field.name(), |buf| {
-            write!(buf, "{:?}", value).unwrap()
+        put_field_length_encoded(self.buf, field.name(), |value_buf| {
+            push_display(value_buf, DebugValue { value });
         });
     }
 }
 
 /// Helper for generating the journal export format, which is consumed by journald:
-/// https://www.freedesktop.org/wiki/Software/systemd/export/
+/// <https://www.freedesktop.org/wiki/Software/systemd/export/>.
 struct EventVisitor<'a> {
+    /// Output buffer receiving serialized fields.
     buf: &'a mut Vec<u8>,
+    /// Prefix applied to user fields other than `message`.
     prefix: Option<&'a str>,
 }
 
-impl<'a> EventVisitor<'a> {
-    fn new(buf: &'a mut Vec<u8>, prefix: Option<&'a str>) -> Self {
-        Self { buf, prefix }
-    }
-
+impl EventVisitor<'_> {
+    /// Append the configured event field prefix when `field` is not `message`.
     fn put_prefix(&mut self, field: &Field) {
         if let Some(prefix) = self.prefix
             && field.name() != "message"
@@ -507,17 +599,35 @@ impl<'a> EventVisitor<'a> {
 impl Visit for EventVisitor<'_> {
     fn record_str(&mut self, field: &Field, value: &str) {
         self.put_prefix(field);
-        put_field_length_encoded(self.buf, field.name(), |buf| {
-            buf.extend_from_slice(value.as_bytes())
+        put_field_length_encoded(self.buf, field.name(), |value_buf| {
+            value_buf.extend_from_slice(value.as_bytes());
         });
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
         self.put_prefix(field);
-        put_field_length_encoded(self.buf, field.name(), |buf| {
-            write!(buf, "{:?}", value).unwrap()
+        put_field_length_encoded(self.buf, field.name(), |value_buf| {
+            push_display(value_buf, DebugValue { value });
         });
     }
+}
+
+/// Display adapter that intentionally renders tracing's debug-only field values.
+struct DebugValue<'a> {
+    /// Debug value supplied by the `tracing_core::field::Visit` API.
+    value: &'a dyn fmt::Debug,
+}
+
+impl fmt::Display for DebugValue<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self.value, formatter)
+    }
+}
+
+/// Append a display value to `buf`.
+fn push_display(buf: &mut Vec<u8>, value: impl fmt::Display) {
+    let rendered = value.to_string();
+    buf.extend_from_slice(rendered.as_bytes());
 }
 
 /// A priority (called "severity code" by syslog) is used to mark the
@@ -588,6 +698,23 @@ pub enum Priority {
     Debug = b'7',
 }
 
+impl Priority {
+    /// Return the ASCII byte journald expects for this priority.
+    #[must_use]
+    const fn as_byte(self) -> u8 {
+        match self {
+            Self::Emergency => b'0',
+            Self::Alert => b'1',
+            Self::Critical => b'2',
+            Self::Error => b'3',
+            Self::Warning => b'4',
+            Self::Notice => b'5',
+            Self::Informational => b'6',
+            Self::Debug => b'7',
+        }
+    }
+}
+
 /// Mappings from tracing [`Level`]s to journald [priorities].
 ///
 /// [priorities]: Priority
@@ -619,7 +746,8 @@ impl PriorityMappings {
     /// [`tracing::Level::INFO`]: tracing_core::Level::INFO
     /// [`tracing::Level::DEBUG`]: tracing_core::Level::DEBUG
     /// [`tracing::Level::TRACE`]: tracing_core::Level::TRACE
-    pub fn new() -> PriorityMappings {
+    #[must_use]
+    pub const fn new() -> Self {
         Self {
             error: Priority::Error,
             warn: Priority::Warning,
@@ -636,23 +764,25 @@ impl Default for PriorityMappings {
     }
 }
 
-fn put_metadata(buf: &mut Vec<u8>, meta: &Metadata<'_>, prefix: Option<&str>) {
-    if let Some(prefix) = prefix {
-        write!(buf, "{}", prefix).unwrap();
+/// Append metadata fields for an event or span.
+fn put_metadata(buf: &mut Vec<u8>, meta: &Metadata<'_>, field_prefix: Option<&str>) {
+    if let Some(prefix) = field_prefix {
+        buf.extend_from_slice(prefix.as_bytes());
     }
     put_field_wellformed(buf, "TARGET", meta.target().as_bytes());
     if let Some(file) = meta.file() {
-        if let Some(prefix) = prefix {
-            write!(buf, "{}", prefix).unwrap();
+        if let Some(prefix) = field_prefix {
+            buf.extend_from_slice(prefix.as_bytes());
         }
         put_field_wellformed(buf, "CODE_FILE", file.as_bytes());
     }
-    if let Some(line) = meta.line() {
-        if let Some(prefix) = prefix {
-            write!(buf, "{}", prefix).unwrap();
+    if let Some(line_number) = meta.line() {
+        if let Some(prefix) = field_prefix {
+            buf.extend_from_slice(prefix.as_bytes());
         }
         // Text format is safe as a line number can't possibly contain anything funny
-        writeln!(buf, "CODE_LINE={}", line).unwrap();
+        let line = line_number.to_string();
+        put_field_wellformed(buf, "CODE_LINE", line.as_bytes());
     }
 }
 
@@ -666,24 +796,41 @@ fn put_metadata(buf: &mut Vec<u8>, meta: &Metadata<'_>, prefix: Option<&str>) {
 /// not delete from `buf`, but may append arbitrary data.  This function then determines the length
 /// of the data written and adds it in the appropriate place in `buf`.
 fn put_field_length_encoded(buf: &mut Vec<u8>, name: &str, write_value: impl FnOnce(&mut Vec<u8>)) {
+    const LENGTH_TAG_BYTES: usize = 8;
+
+    let field_start = buf.len();
     sanitize_name(name, buf);
     buf.push(b'\n');
-    buf.extend_from_slice(&[0; 8]); // Length tag, to be populated
-    let start = buf.len();
+    let length_slot_start = buf.len();
+    buf.extend_from_slice(&[0; LENGTH_TAG_BYTES]); // Length tag, to be populated
+    let value_start = buf.len();
     write_value(buf);
-    let end = buf.len();
-    buf[start - 8..start].copy_from_slice(&((end - start) as u64).to_le_bytes());
+    let value_end = buf.len();
+    let written_len = value_end.saturating_sub(value_start);
+    let Ok(encoded_len) = u64::try_from(written_len) else {
+        buf.truncate(field_start);
+        return;
+    };
+    if let Some(length_slot) = buf.get_mut(length_slot_start..value_start) {
+        for (slot, byte) in length_slot.iter_mut().zip(encoded_len.to_le_bytes()) {
+            *slot = byte;
+        }
+    }
     buf.push(b'\n');
 }
 
 /// Mangle a name into journald-compliant form
+#[allow(
+    clippy::single_call_fn,
+    reason = "journald field-name sanitization remains isolated from length encoding"
+)]
 fn sanitize_name(name: &str, buf: &mut Vec<u8>) {
     buf.extend(
         name.bytes()
-            .map(|c| if c == b'.' { b'_' } else { c })
-            .skip_while(|&c| c == b'_')
-            .filter(|&c| c == b'_' || char::from(c).is_ascii_alphanumeric())
-            .map(|c| char::from(c).to_ascii_uppercase() as u8),
+            .map(|byte| if byte == b'.' { b'_' } else { byte })
+            .skip_while(|byte| *byte == b'_')
+            .filter(|byte| *byte == b'_' || byte.is_ascii_alphanumeric())
+            .map(|byte| byte.to_ascii_uppercase()),
     );
 }
 
@@ -696,16 +843,10 @@ fn sanitize_name(name: &str, buf: &mut Vec<u8>) {
 fn put_field_wellformed(buf: &mut Vec<u8>, name: &str, value: &[u8]) {
     buf.extend_from_slice(name.as_bytes());
     buf.push(b'\n');
-    put_value(buf, value);
-}
-
-/// Write the value portion of a key-value pair, in newline separated format.
-///
-/// `value` must not contain an internal newline.
-///
-/// For a "newline-safe" variant, see `put_field_length_encoded`.
-fn put_value(buf: &mut Vec<u8>, value: &[u8]) {
-    buf.extend_from_slice(&(value.len() as u64).to_le_bytes());
+    let Ok(value_len) = u64::try_from(value.len()) else {
+        return;
+    };
+    buf.extend_from_slice(&value_len.to_le_bytes());
     buf.extend_from_slice(value);
     buf.push(b'\n');
 }

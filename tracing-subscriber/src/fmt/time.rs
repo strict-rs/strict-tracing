@@ -1,11 +1,13 @@
 //! Formatters for event timestamps.
 use crate::fmt::format::Writer;
-use std::fmt;
+use std::fmt::{self, Write as _};
 use std::time::Instant;
 
+/// UTC timestamp conversion for the default `SystemTime` timer.
 mod datetime;
 
 #[cfg(feature = "time")]
+/// [`time`] crate backed timestamp formatters.
 mod time_crate;
 
 #[cfg(feature = "time")]
@@ -50,7 +52,11 @@ pub trait FormatTime {
     /// When `format_time` is called, implementors should get the current time using their desired
     /// mechanism, and write it out to the given `fmt::Write`. Implementors must insert a trailing
     /// space themselves if they wish to separate the time from subsequent log message text.
-    fn format_time(&self, w: &mut Writer<'_>) -> fmt::Result;
+    ///
+    /// # Errors
+    ///
+    /// Returns [`fmt::Error`] if the timestamp cannot be written to the formatter.
+    fn format_time(&self, writer: &mut Writer<'_>) -> fmt::Result;
 }
 
 /// Returns a new `SystemTime` timestamp provider.
@@ -64,7 +70,8 @@ pub trait FormatTime {
 /// tracing_subscriber::fmt::time::SystemTime::default()
 /// # }
 /// ```
-pub fn time() -> SystemTime {
+#[must_use]
+pub const fn time() -> SystemTime {
     SystemTime
 }
 
@@ -82,6 +89,7 @@ pub fn time() -> SystemTime {
 /// tracing_subscriber::fmt::time::Uptime::default()
 /// # }
 /// ```
+#[must_use]
 pub fn uptime() -> Uptime {
     Uptime::default()
 }
@@ -90,20 +98,20 @@ impl<F> FormatTime for &F
 where
     F: FormatTime,
 {
-    fn format_time(&self, w: &mut Writer<'_>) -> fmt::Result {
-        (*self).format_time(w)
+    fn format_time(&self, writer: &mut Writer<'_>) -> fmt::Result {
+        (*self).format_time(writer)
     }
 }
 
 impl FormatTime for () {
-    fn format_time(&self, _: &mut Writer<'_>) -> fmt::Result {
+    fn format_time(&self, _writer: &mut Writer<'_>) -> fmt::Result {
         Ok(())
     }
 }
 
 impl FormatTime for fn(&mut Writer<'_>) -> fmt::Result {
-    fn format_time(&self, w: &mut Writer<'_>) -> fmt::Result {
-        (*self)(w)
+    fn format_time(&self, writer: &mut Writer<'_>) -> fmt::Result {
+        (*self)(writer)
     }
 }
 
@@ -116,12 +124,13 @@ pub struct SystemTime;
 /// The `Default` implementation for `Uptime` makes the epoch the current time.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct Uptime {
+    /// The instant from which elapsed uptime is measured.
     epoch: Instant,
 }
 
 impl Default for Uptime {
     fn default() -> Self {
-        Uptime {
+        Self {
             epoch: Instant::now(),
         }
     }
@@ -129,23 +138,24 @@ impl Default for Uptime {
 
 impl From<Instant> for Uptime {
     fn from(epoch: Instant) -> Self {
-        Uptime { epoch }
+        Self { epoch }
     }
 }
 
 impl FormatTime for SystemTime {
-    fn format_time(&self, w: &mut Writer<'_>) -> fmt::Result {
-        write!(
-            w,
-            "{}",
-            datetime::DateTime::from(std::time::SystemTime::now())
-        )
+    fn format_time(&self, writer: &mut Writer<'_>) -> fmt::Result {
+        write!(writer, "{}", datetime::DateTime::from(chrono::Utc::now()))
     }
 }
 
 impl FormatTime for Uptime {
-    fn format_time(&self, w: &mut Writer<'_>) -> fmt::Result {
-        let e = self.epoch.elapsed();
-        write!(w, "{:4}.{:09}s", e.as_secs(), e.subsec_nanos())
+    fn format_time(&self, writer: &mut Writer<'_>) -> fmt::Result {
+        let elapsed = self.epoch.elapsed();
+        write!(
+            writer,
+            "{:4}.{:09}s",
+            elapsed.as_secs(),
+            elapsed.subsec_nanos()
+        )
     }
 }

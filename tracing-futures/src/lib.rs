@@ -80,12 +80,10 @@
 #[cfg(feature = "std-future")]
 use pin_project_lite::pin_project;
 
-pub(crate) mod stdlib;
-
+#[cfg(feature = "std-future")]
+use core::{future::Future, task::Poll};
 #[cfg(feature = "std-future")]
 use core::{pin::Pin, task::Context};
-#[cfg(feature = "std-future")]
-use stdlib::{future::Future, task::Poll};
 
 #[cfg(feature = "std")]
 use tracing::{Dispatch, dispatcher};
@@ -217,7 +215,7 @@ pub trait WithSubscriber: Sized {
     fn with_current_subscriber(self) -> WithDispatch<Self> {
         WithDispatch {
             inner: self,
-            dispatch: dispatcher::get_default(|default| default.clone()),
+            dispatch: dispatcher::get_default(Clone::clone),
         }
     }
 }
@@ -375,7 +373,7 @@ impl<T: futures::Stream> futures::Stream for Instrumented<T> {
 
 #[cfg(all(feature = "futures-03", feature = "std-future"))]
 #[cfg_attr(docsrs, doc(cfg(all(feature = "futures-03", feature = "std-future"))))]
-impl<I, T: futures::Sink<I>> futures::Sink<I> for Instrumented<T>
+impl<I, T> futures::Sink<I> for Instrumented<T>
 where
     T: futures::Sink<I>,
 {
@@ -420,6 +418,7 @@ impl<T> Instrumented<T> {
     /// instrumented by and a pinned mutable reference to the inner value.
     ///
     /// This is useful for implementing poll-type functions on foreign traits.
+    #[must_use]
     #[cfg(feature = "std-future")]
     #[cfg_attr(docsrs, doc(cfg(feature = "std-future")))]
     pub fn span_and_inner_pin_mut(self: Pin<&mut Self>) -> (&mut Span, Option<Pin<&mut T>>) {
@@ -428,26 +427,27 @@ impl<T> Instrumented<T> {
     }
 
     /// Borrows the `Span` that this type is instrumented by.
-    pub fn span(&self) -> &Span {
+    pub const fn span(&self) -> &Span {
         &self.span
     }
 
     /// Mutably borrows the `Span` that this type is instrumented by.
-    pub fn span_mut(&mut self) -> &mut Span {
+    pub const fn span_mut(&mut self) -> &mut Span {
         &mut self.span
     }
 
     /// Borrows the wrapped type.
-    pub fn inner(&self) -> Option<&T> {
+    pub const fn inner(&self) -> Option<&T> {
         self.inner.as_ref()
     }
 
     /// Mutably borrows the wrapped type.
-    pub fn inner_mut(&mut self) -> Option<&mut T> {
+    pub const fn inner_mut(&mut self) -> Option<&mut T> {
         self.inner.as_mut()
     }
 
     /// Get a pinned reference to the wrapped type.
+    #[must_use]
     #[cfg(feature = "std-future")]
     #[cfg_attr(docsrs, doc(cfg(feature = "std-future")))]
     pub fn inner_pin_ref(self: Pin<&Self>) -> Option<Pin<&T>> {
@@ -455,6 +455,7 @@ impl<T> Instrumented<T> {
     }
 
     /// Get a pinned mutable reference to the wrapped type.
+    #[must_use]
     #[cfg(feature = "std-future")]
     #[cfg_attr(docsrs, doc(cfg(feature = "std-future")))]
     pub fn inner_pin_mut(self: Pin<&mut Self>) -> Option<Pin<&mut T>> {
@@ -499,7 +500,8 @@ impl<T: Future> Future for WithDispatch<T> {
 
 #[cfg(feature = "std")]
 impl<T> WithDispatch<T> {
-    /// Wrap a future, stream, sink or executor with the same subscriber as this WithDispatch.
+    /// Wrap a future, stream, sink or executor with the same subscriber as this
+    /// `WithDispatch`.
     pub fn with_dispatch<U>(&self, inner: U) -> WithDispatch<U> {
         WithDispatch {
             dispatch: self.dispatch.clone(),
@@ -508,11 +510,12 @@ impl<T> WithDispatch<T> {
     }
 
     /// Borrows the `Dispatch` that this type is instrumented by.
-    pub fn dispatch(&self) -> &Dispatch {
+    pub const fn dispatch(&self) -> &Dispatch {
         &self.dispatch
     }
 
     /// Get a pinned reference to the wrapped type.
+    #[must_use]
     #[cfg(feature = "std-future")]
     #[cfg_attr(docsrs, doc(cfg(feature = "std-future")))]
     pub fn inner_pin_ref(self: Pin<&Self>) -> Pin<&T> {
@@ -520,6 +523,7 @@ impl<T> WithDispatch<T> {
     }
 
     /// Get a pinned mutable reference to the wrapped type.
+    #[must_use]
     #[cfg(feature = "std-future")]
     #[cfg_attr(docsrs, doc(cfg(feature = "std-future")))]
     pub fn inner_pin_mut(self: Pin<&mut Self>) -> Pin<&mut T> {
@@ -527,12 +531,12 @@ impl<T> WithDispatch<T> {
     }
 
     /// Borrows the wrapped type.
-    pub fn inner(&self) -> &T {
+    pub const fn inner(&self) -> &T {
         &self.inner
     }
 
     /// Mutably borrows the wrapped type.
-    pub fn inner_mut(&mut self) -> &mut T {
+    pub const fn inner_mut(&mut self) -> &mut T {
         &mut self.inner
     }
 
@@ -546,11 +550,12 @@ impl<T> WithDispatch<T> {
 mod tests {
 
     use super::*;
+    use strict_test_support::{TestFailure, ensure, ensure_ok};
     use tracing_mock::*;
 
     #[cfg(feature = "futures-01")]
     mod futures_01_tests {
-        use futures_01::{Async, Future, Stream, future, stream, task};
+        use futures_01::{Async, Future, Stream as _, future, stream, task};
         use tracing::subscriber::with_default;
 
         use super::*;
@@ -561,18 +566,10 @@ mod tests {
             polls: usize,
         }
 
-        impl PollN<(), ()> {
-            fn new_ok(finish_at: usize) -> Self {
+        impl<T, E> PollN<T, E> {
+            fn new(finish_at: usize, and_return: Result<T, E>) -> Self {
                 Self {
-                    and_return: Some(Ok(())),
-                    finish_at,
-                    polls: 0,
-                }
-            }
-
-            fn new_err(finish_at: usize) -> Self {
-                Self {
-                    and_return: Some(Err(())),
+                    and_return: Some(and_return),
                     finish_at,
                     polls: 0,
                 }
@@ -583,12 +580,12 @@ mod tests {
             type Item = T;
             type Error = E;
             fn poll(&mut self) -> futures_01::Poll<Self::Item, Self::Error> {
-                self.polls += 1;
+                self.polls = self.polls.saturating_add(1);
                 if self.polls == self.finish_at {
-                    self.and_return
-                        .take()
-                        .expect("polled after ready")
-                        .map(Async::Ready)
+                    let Some(result) = self.and_return.take() else {
+                        return Ok(Async::NotReady);
+                    };
+                    result.map(Async::Ready)
                 } else {
                     task::current().notify();
                     Ok(Async::NotReady)
@@ -597,7 +594,7 @@ mod tests {
         }
 
         #[test]
-        fn future_enter_exit_is_reasonable() {
+        fn future_enter_exit_is_reasonable() -> Result<(), TestFailure> {
             let (subscriber, handle) = subscriber::mock()
                 .enter(expect::span().named("foo"))
                 .exit(expect::span().named("foo"))
@@ -605,20 +602,24 @@ mod tests {
                 .exit(expect::span().named("foo"))
                 .enter(expect::span().named("foo"))
                 .exit(expect::span().named("foo"))
-                .drop_span(expect::span().named("foo"))
+                .close_span(expect::span().named("foo"))
                 .only()
                 .run_with_handle();
             with_default(subscriber, || {
-                PollN::new_ok(2)
-                    .instrument(tracing::trace_span!("foo"))
-                    .wait()
-                    .unwrap();
-            });
-            handle.assert_finished();
+                ensure(
+                    PollN::<(), ()>::new(2, Ok(()))
+                        .instrument(tracing::trace_span!("foo"))
+                        .wait()
+                        .is_ok(),
+                    "instrumented futures 0.1 future resolves successfully",
+                )
+            })?;
+            ensure_ok(handle.finished(), "mock expectations should finish")?;
+            Ok(())
         }
 
         #[test]
-        fn future_error_ends_span() {
+        fn future_error_ends_span() -> Result<(), TestFailure> {
             let (subscriber, handle) = subscriber::mock()
                 .enter(expect::span().named("foo"))
                 .exit(expect::span().named("foo"))
@@ -626,21 +627,25 @@ mod tests {
                 .exit(expect::span().named("foo"))
                 .enter(expect::span().named("foo"))
                 .exit(expect::span().named("foo"))
-                .drop_span(expect::span().named("foo"))
+                .close_span(expect::span().named("foo"))
                 .only()
                 .run_with_handle();
             with_default(subscriber, || {
-                PollN::new_err(2)
-                    .instrument(tracing::trace_span!("foo"))
-                    .wait()
-                    .unwrap_err();
-            });
+                ensure(
+                    PollN::<(), ()>::new(2, Err(()))
+                        .instrument(tracing::trace_span!("foo"))
+                        .wait()
+                        .is_err(),
+                    "instrumented futures 0.1 future returns its error",
+                )
+            })?;
 
-            handle.assert_finished();
+            ensure_ok(handle.finished(), "mock expectations should finish")?;
+            Ok(())
         }
 
         #[test]
-        fn stream_enter_exit_is_reasonable() {
+        fn stream_enter_exit_is_reasonable() -> Result<(), TestFailure> {
             let (subscriber, handle) = subscriber::mock()
                 .enter(expect::span().named("foo"))
                 .exit(expect::span().named("foo"))
@@ -652,16 +657,20 @@ mod tests {
                 .exit(expect::span().named("foo"))
                 .enter(expect::span().named("foo"))
                 .exit(expect::span().named("foo"))
-                .drop_span(expect::span().named("foo"))
+                .close_span(expect::span().named("foo"))
                 .run_with_handle();
             with_default(subscriber, || {
-                stream::iter_ok::<_, ()>(&[1, 2, 3])
-                    .instrument(tracing::trace_span!("foo"))
-                    .for_each(|_| future::ok(()))
-                    .wait()
-                    .unwrap();
-            });
-            handle.assert_finished();
+                ensure(
+                    stream::iter_ok::<_, ()>(&[1, 2, 3])
+                        .instrument(tracing::trace_span!("foo"))
+                        .for_each(|_| future::ok(()))
+                        .wait()
+                        .is_ok(),
+                    "instrumented futures 0.1 stream resolves successfully",
+                )
+            })?;
+            ensure_ok(handle.finished(), "mock expectations should finish")?;
+            Ok(())
         }
 
         // #[test]
@@ -672,12 +681,12 @@ mod tests {
         //         .exit(expect::span().named("b"))
         //         .enter(expect::span().named("b"))
         //         .exit(expect::span().named("b"))
-        //         .drop_span(expect::span().named("b"))
+        //         .close_span(expect::span().named("b"))
         //         .exit(expect::span().named("a"))
-        //         .drop_span(expect::span().named("a"))
+        //         .close_span(expect::span().named("a"))
         //         .only()
         //         .run_with_handle();
-        //     let mut runtime = tokio::runtime::Runtime::new().unwrap();
+        //     let mut runtime = tokio::runtime::Runtime::new()?;
         //     with_default(subscriber, || {
         //         tracing::trace_span!("a").in_scope(|| {
         //             let future = PollN::new_ok(2)
@@ -688,22 +697,23 @@ mod tests {
         //                         // span, so we don't expect it.
         //                     })
         //                 });
-        //             runtime.block_on(Box::new(future)).unwrap();
+        //             runtime.block_on(Box::new(future))?;
         //         })
         //     });
-        //     handle.assert_finished();
+        //     ensure_ok(handle.finished(), "mock expectations should finish")?;
         // }
     }
 
     #[cfg(all(feature = "futures-03", feature = "std-future"))]
     mod futures_03_tests {
-        use futures::{FutureExt, SinkExt, StreamExt, future, sink, stream};
+        use futures::{FutureExt as _, SinkExt as _, StreamExt as _, future, sink, stream};
+        use strict_test_support::ensure_some;
         use tracing::subscriber::with_default;
 
         use super::*;
 
         #[test]
-        fn stream_enter_exit_is_reasonable() {
+        fn stream_enter_exit_is_reasonable() -> Result<(), TestFailure> {
             let (subscriber, handle) = subscriber::mock()
                 .enter(expect::span().named("foo"))
                 .exit(expect::span().named("foo"))
@@ -715,19 +725,23 @@ mod tests {
                 .exit(expect::span().named("foo"))
                 .enter(expect::span().named("foo"))
                 .exit(expect::span().named("foo"))
-                .drop_span(expect::span().named("foo"))
+                .close_span(expect::span().named("foo"))
                 .run_with_handle();
             with_default(subscriber, || {
-                Instrument::instrument(stream::iter(&[1, 2, 3]), tracing::trace_span!("foo"))
-                    .for_each(|_| future::ready(()))
-                    .now_or_never()
-                    .unwrap();
-            });
-            handle.assert_finished();
+                ensure_some(
+                    Instrument::instrument(stream::iter(&[1, 2, 3]), tracing::trace_span!("foo"))
+                        .for_each(|_| future::ready(()))
+                        .now_or_never(),
+                    "instrumented futures 0.3 stream resolves synchronously",
+                )?;
+                Ok::<(), TestFailure>(())
+            })?;
+            ensure_ok(handle.finished(), "mock expectations should finish")?;
+            Ok(())
         }
 
         #[test]
-        fn sink_enter_exit_is_reasonable() {
+        fn sink_enter_exit_is_reasonable() -> Result<(), TestFailure> {
             let (subscriber, handle) = subscriber::mock()
                 .enter(expect::span().named("foo"))
                 .exit(expect::span().named("foo"))
@@ -737,16 +751,22 @@ mod tests {
                 .exit(expect::span().named("foo"))
                 .enter(expect::span().named("foo"))
                 .exit(expect::span().named("foo"))
-                .drop_span(expect::span().named("foo"))
+                .close_span(expect::span().named("foo"))
                 .run_with_handle();
             with_default(subscriber, || {
-                Instrument::instrument(sink::drain(), tracing::trace_span!("foo"))
-                    .send(1_u8)
-                    .now_or_never()
-                    .unwrap()
-                    .unwrap()
-            });
-            handle.assert_finished();
+                let output = ensure_some(
+                    Instrument::instrument(sink::drain(), tracing::trace_span!("foo"))
+                        .send(1_u8)
+                        .now_or_never(),
+                    "instrumented futures 0.3 sink resolves synchronously",
+                )?;
+                ensure(
+                    output.is_ok(),
+                    "instrumented futures 0.3 sink send succeeds",
+                )
+            })?;
+            ensure_ok(handle.finished(), "mock expectations should finish")?;
+            Ok(())
         }
     }
 }

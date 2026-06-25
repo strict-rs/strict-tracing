@@ -1,57 +1,113 @@
+use std::error::Error as StdError;
 use std::fmt;
+use std::io;
+use std::io::Write as _;
 use std::path::PathBuf;
 
 /// The error type for `tracing-flame`
 #[derive(Debug)]
-pub struct Error(pub(crate) Kind);
+pub struct FlameError(Kind);
 
-impl Error {
-    pub(crate) fn report(&self) {
-        let current_error: &dyn std::error::Error = self;
-        let mut current_error = Some(current_error);
-        let mut ind = 0;
+impl FlameError {
+    /// Creates an error for a failed output-file creation.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "opaque error constructor keeps Kind private while with_file maps file creation failures"
+    )]
+    pub(super) const fn create_file(path: PathBuf, source: io::Error) -> Self {
+        Self(Kind::CreateFile { source, path })
+    }
 
-        eprintln!("Error:");
+    /// Creates an error for a failed writer flush.
+    #[allow(
+        clippy::single_call_fn,
+        reason = "opaque error constructor keeps Kind private while FlushGuard maps flush failures"
+    )]
+    pub(super) const fn flush_file(source: io::Error) -> Self {
+        Self(Kind::FlushFile(source))
+    }
 
-        while let Some(error) = current_error {
-            eprintln!("    {}: {}", ind, error);
-            ind += 1;
-            current_error = error.source();
+    /// Reports this error and its source chain to stderr.
+    pub(super) fn report(&self) {
+        let mut stderr = io::stderr();
+        let _header_write_result: io::Result<()> = writeln!(&mut stderr, "Error:");
+
+        for (index, error) in (ErrorSources { next: Some(self) }).enumerate() {
+            let _chain_write_result: io::Result<()> = writeln!(&mut stderr, "    {index}: {error}");
         }
     }
 }
 
-impl fmt::Display for Error {
+impl fmt::Display for FlameError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt::Display::fmt(&self.0, f)
     }
 }
 
-impl std::error::Error for Error {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match &self.0 {
-            Kind::CreateFile { source, .. } => Some(source),
-            Kind::FlushFile(source) => Some(source),
+impl StdError for FlameError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
+        Some(self.0.source())
+    }
+}
+
+/// Iterator over an error and each source error in its chain.
+struct ErrorSources<'a> {
+    /// The next error to return from the chain.
+    next: Option<&'a (dyn StdError + 'static)>,
+}
+
+impl<'a> Iterator for ErrorSources<'a> {
+    type Item = &'a (dyn StdError + 'static);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let current_error = self.next?;
+        self.next = current_error.source();
+        Some(current_error)
+    }
+}
+
+/// Internal categories for fallible `tracing-flame` operations.
+#[derive(Debug)]
+enum Kind {
+    /// Creating the output file failed.
+    CreateFile {
+        /// The underlying file-system error.
+        source: io::Error,
+        /// The requested output path.
+        path: PathBuf,
+    },
+
+    /// Flushing the output writer failed.
+    FlushFile(
+        /// The underlying writer error.
+        io::Error,
+    ),
+}
+
+impl Kind {
+    /// Returns the underlying source error.
+    fn source(&self) -> &(dyn StdError + 'static) {
+        match *self {
+            Self::CreateFile {
+                ref source,
+                path: _,
+            }
+            | Self::FlushFile(ref source) => source,
         }
     }
 }
 
-#[derive(Debug)]
-pub(crate) enum Kind {
-    CreateFile {
-        source: std::io::Error,
-        path: PathBuf,
-    },
-    FlushFile(std::io::Error),
-}
-
 impl fmt::Display for Kind {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::CreateFile { path, .. } => {
-                write!(f, "cannot create output file. path={}", path.display())
+        match *self {
+            Self::CreateFile {
+                ref path,
+                source: _,
+            } => {
+                let display_path = path.display();
+                write!(f, "cannot create output file. path={display_path}")
             }
-            Self::FlushFile { .. } => write!(f, "cannot flush output buffer"),
+            Self::FlushFile(_) => write!(f, "cannot flush output buffer"),
         }
     }
 }

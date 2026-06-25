@@ -2,13 +2,10 @@ use super::{
     directive::{self, Directive},
     EnvFilter, FromEnvError,
 };
-use crate::sync::RwLock;
-use alloc::{
-    format,
-    string::{String, ToString},
-    vec::Vec,
-};
-use std::{env, eprintln};
+use crate::{filter::ParseError, RwLock};
+use alloc::{format, string::String, vec::Vec};
+use core::fmt;
+use std::{collections::HashMap, env, io, iter};
 use thread_local::ThreadLocal;
 use tracing::level_filters::STATIC_MAX_LEVEL;
 
@@ -18,8 +15,11 @@ use tracing::level_filters::STATIC_MAX_LEVEL;
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct Builder {
+    /// Whether value matchers parse non-literal values as regular expressions.
     regex: bool,
+    /// The environment variable read by environment parsing methods.
     env: Option<String>,
+    /// The directive used when parsing yields no directives.
     default_directive: Option<Directive>,
 }
 
@@ -46,7 +46,7 @@ impl Builder {
     ///
     /// # Examples
     ///
-    /// If [`parse`], [`parse_lossy`], [`from_env`], or [`from_env_lossy`] are
+    /// If [`parse`], [`parse_lossy`], [`parse_env`], or [`parse_env_lossy`] are
     /// called with an empty string or environment variable, the default
     /// directive is used instead:
     ///
@@ -58,11 +58,13 @@ impl Builder {
     ///     .with_default_directive(LevelFilter::INFO.into())
     ///     .parse("")?;
     ///
-    /// assert_eq!(format!("{}", filter), "info");
+    /// if format!("{}", filter) != "info" {
+    ///     return Err("default directive should be used for an empty filter".into());
+    /// }
     /// # Ok(()) }
     /// ```
     ///
-    /// Note that the `lossy` variants ([`parse_lossy`] and [`from_env_lossy`])
+    /// Note that the `lossy` variants ([`parse_lossy`] and [`parse_env_lossy`])
     /// will ignore any invalid directives. If all directives in a filter
     /// string or environment variable are invalid, those methods will also use
     /// the default directive:
@@ -74,7 +76,10 @@ impl Builder {
     ///     .with_default_directive(LevelFilter::INFO.into())
     ///     .parse_lossy("some_target=fake level,foo::bar=lolwut");
     ///
-    /// assert_eq!(format!("{}", filter), "info");
+    /// if format!("{}", filter) != "info" {
+    ///     return Err("lossy parsing should fall back to the default directive".into());
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
     ///
@@ -89,7 +94,10 @@ impl Builder {
     ///     .parse_lossy("foo=trace");
     ///
     /// // The default directive is *not* used:
-    /// assert_eq!(format!("{}", filter), "foo=trace");
+    /// if format!("{}", filter) != "foo=trace" {
+    ///     return Err("valid directives should replace the default directive".into());
+    /// }
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     ///
     /// Parsing a more complex default directive from a string:
@@ -98,21 +106,22 @@ impl Builder {
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// use tracing_subscriber::filter::{EnvFilter, LevelFilter};
     ///
-    /// let default = "myapp=debug".parse()
-    ///     .expect("hard-coded default directive should be valid");
+    /// let default = "myapp=debug".parse()?;
     ///
     /// let filter = EnvFilter::builder()
     ///     .with_default_directive(default)
     ///     .parse("")?;
     ///
-    /// assert_eq!(format!("{}", filter), "myapp=debug");
+    /// if format!("{}", filter) != "myapp=debug" {
+    ///     return Err("parsed default directive should be preserved".into());
+    /// }
     /// # Ok(()) }
     /// ```
     ///
     /// [`parse_lossy`]: Self::parse_lossy
-    /// [`from_env_lossy`]: Self::from_env_lossy
+    /// [`parse_env_lossy`]: Self::parse_env_lossy
     /// [`parse`]: Self::parse
-    /// [`from_env`]: Self::from_env
+    /// [`parse_env`]: Self::parse_env
     pub fn with_default_directive(self, default_directive: Directive) -> Self {
         Self {
             default_directive: Some(default_directive),
@@ -120,18 +129,18 @@ impl Builder {
         }
     }
 
-    /// Sets the name of the environment variable used by the [`from_env`],
-    /// [`from_env_lossy`], and [`try_from_env`] methods.
+    /// Sets the name of the environment variable used by the [`parse_env`],
+    /// [`parse_env_lossy`], and [`try_parse_env`] methods.
     ///
     /// By default, this is the value of [`EnvFilter::DEFAULT_ENV`]
     /// (`RUST_LOG`).
     ///
-    /// [`from_env`]: Self::from_env
-    /// [`from_env_lossy`]: Self::from_env_lossy
-    /// [`try_from_env`]: Self::try_from_env
-    pub fn with_env_var(self, var: impl ToString) -> Self {
+    /// [`parse_env`]: Self::parse_env
+    /// [`parse_env_lossy`]: Self::parse_env_lossy
+    /// [`try_parse_env`]: Self::try_parse_env
+    pub fn with_env_var(self, var: impl Into<String>) -> Self {
         Self {
-            env: Some(var.to_string()),
+            env: Some(var.into()),
             ..self
         }
     }
@@ -143,19 +152,17 @@ impl Builder {
     /// [default directive] is used instead.
     ///
     /// [default directive]: Self::with_default_directive
-    pub fn parse_lossy<S: AsRef<str>>(&self, dirs: S) -> EnvFilter {
-        let directives = dirs
-            .as_ref()
-            .split(',')
-            .filter(|s| !s.is_empty())
-            .filter_map(|s| match Directive::parse(s, self.regex) {
-                Ok(d) => Some(d),
+    pub fn parse_lossy<Directives: AsRef<str>>(&self, directives: Directives) -> EnvFilter {
+        let parsed_directives = directive::split_directives(directives.as_ref())
+            .filter(|directive| !directive.is_empty())
+            .filter_map(|directive| match Directive::parse(directive, self.regex) {
+                Ok(parsed) => Some(parsed),
                 Err(err) => {
-                    eprintln!("ignoring `{}`: {}", s, err);
+                    write_stderr_line(format_args!("ignoring `{directive}`: {err}"));
                     None
                 }
             });
-        self.from_directives(directives)
+        self.build_from_directives(parsed_directives)
     }
 
     /// Returns a new [`EnvFilter`] from the directives in the given string,
@@ -164,18 +171,24 @@ impl Builder {
     /// If `parse` is called with an empty string, then the [default directive]
     /// is used instead.
     ///
+    /// # Errors
+    ///
+    /// Returns an error if any non-empty directive cannot be parsed.
+    ///
     /// [default directive]: Self::with_default_directive
-    pub fn parse<S: AsRef<str>>(&self, dirs: S) -> Result<EnvFilter, directive::ParseError> {
-        let dirs = dirs.as_ref();
-        if dirs.is_empty() {
-            return Ok(self.from_directives(std::iter::empty()));
+    pub fn parse<Directives: AsRef<str>>(
+        &self,
+        directives: Directives,
+    ) -> Result<EnvFilter, ParseError> {
+        let directive_spec = directives.as_ref();
+        if directive_spec.is_empty() {
+            return Ok(self.build_from_directives(iter::empty()));
         }
-        let directives = dirs
-            .split(',')
-            .filter(|s| !s.is_empty())
-            .map(|s| Directive::parse(s, self.regex))
+        let parsed_directives = directive::split_directives(directive_spec)
+            .filter(|directive| !directive.is_empty())
+            .map(|directive| Directive::parse(directive, self.regex))
             .collect::<Result<Vec<_>, _>>()?;
-        Ok(self.from_directives(directives))
+        Ok(self.build_from_directives(parsed_directives))
     }
 
     /// Returns a new [`EnvFilter`] from the directives in the configured
@@ -185,7 +198,8 @@ impl Builder {
     /// is used instead.
     ///
     /// [default directive]: Self::with_default_directive
-    pub fn from_env_lossy(&self) -> EnvFilter {
+    #[must_use]
+    pub fn parse_env_lossy(&self) -> EnvFilter {
         let var = env::var(self.env_var_name()).unwrap_or_default();
         self.parse_lossy(var)
     }
@@ -198,8 +212,13 @@ impl Builder {
     /// If the environment variable is empty, then the [default directive]
     /// is used instead.
     ///
+    /// # Errors
+    ///
+    /// Returns an error if the configured environment variable contains any
+    /// invalid directives.
+    ///
     /// [default directive]: Self::with_default_directive
-    pub fn from_env(&self) -> Result<EnvFilter, FromEnvError> {
+    pub fn parse_env(&self) -> Result<EnvFilter, FromEnvError> {
         let var = env::var(self.env_var_name()).unwrap_or_default();
         self.parse(var).map_err(Into::into)
     }
@@ -211,25 +230,25 @@ impl Builder {
     /// If the environment variable is empty, then the [default directive]
     /// is used instead.
     ///
+    /// # Errors
+    ///
+    /// Returns an error if the configured environment variable is unset or
+    /// contains any invalid directives.
+    ///
     /// [default directive]: Self::with_default_directive
-    pub fn try_from_env(&self) -> Result<EnvFilter, FromEnvError> {
+    pub fn try_parse_env(&self) -> Result<EnvFilter, FromEnvError> {
         let var = env::var(self.env_var_name())?;
         self.parse(var).map_err(Into::into)
     }
 
-    // TODO(eliza): consider making this a public API?
-    // Clippy doesn't love this naming, because it suggests that `from_` methods
-    // should not take a `Self`...but in this case, it's the `EnvFilter` that is
-    // being constructed "from" the directives, rather than the builder itself.
-    pub(super) fn from_directives(
+    /// Builds an `EnvFilter` from parsed directives.
+    pub(super) fn build_from_directives(
         &self,
         directives: impl IntoIterator<Item = Directive>,
     ) -> EnvFilter {
-        use tracing::Level;
-
-        let mut directives: Vec<_> = directives.into_iter().collect();
+        let mut parsed_directives: Vec<_> = directives.into_iter().collect();
         let mut disabled = Vec::new();
-        for directive in &mut directives {
+        for directive in &mut parsed_directives {
             if directive.level > STATIC_MAX_LEVEL {
                 disabled.push(directive.clone());
             }
@@ -239,93 +258,18 @@ impl Builder {
         }
 
         if !disabled.is_empty() {
-            #[cfg(feature = "nu-ansi-term")]
-            use nu_ansi_term::{Color, Style};
-            // NOTE: We can't use a configured `MakeWriter` because the EnvFilter
-            // has no knowledge of any underlying subscriber or subscriber, which
-            // may or may not use a `MakeWriter`.
-            let warn = |msg: &str| {
-                #[cfg(not(feature = "nu-ansi-term"))]
-                let msg = format!("warning: {}", msg);
-                #[cfg(feature = "nu-ansi-term")]
-                let msg = {
-                    let bold = Style::new().bold();
-                    let mut warning = Color::Yellow.paint("warning");
-                    warning.style_ref_mut().is_bold = true;
-                    format!("{}{} {}", warning, bold.paint(":"), bold.paint(msg))
-                };
-                eprintln!("{}", msg);
-            };
-            let ctx_prefixed = |prefix: &str, msg: &str| {
-                #[cfg(not(feature = "nu-ansi-term"))]
-                let msg = format!("{} {}", prefix, msg);
-                #[cfg(feature = "nu-ansi-term")]
-                let msg = {
-                    let mut equal = Color::Fixed(21).paint("="); // dark blue
-                    equal.style_ref_mut().is_bold = true;
-                    format!(" {} {} {}", equal, Style::new().bold().paint(prefix), msg)
-                };
-                eprintln!("{}", msg);
-            };
-            let ctx_help = |msg| ctx_prefixed("help:", msg);
-            let ctx_note = |msg| ctx_prefixed("note:", msg);
-            let ctx = |msg: &str| {
-                #[cfg(not(feature = "nu-ansi-term"))]
-                let msg = format!("note: {}", msg);
-                #[cfg(feature = "nu-ansi-term")]
-                let msg = {
-                    let mut pipe = Color::Fixed(21).paint("|");
-                    pipe.style_ref_mut().is_bold = true;
-                    format!(" {} {}", pipe, msg)
-                };
-                eprintln!("{}", msg);
-            };
-            warn("some trace filter directives would enable traces that are disabled statically");
-            for directive in disabled {
-                let target = if let Some(target) = &directive.target {
-                    format!("the `{}` target", target)
-                } else {
-                    "all targets".into()
-                };
-                let level = directive
-                    .level
-                    .into_level()
-                    .expect("=off would not have enabled any filters");
-                ctx(&format!(
-                    "`{}` would enable the {} level for {}",
-                    directive, level, target
-                ));
-            }
-            ctx_note(&format!("the static max level is `{}`", STATIC_MAX_LEVEL));
-            let help_msg = || {
-                let (feature, filter) = match STATIC_MAX_LEVEL.into_level() {
-                    Some(Level::TRACE) => unreachable!(
-                        "if the max level is trace, no static filtering features are enabled"
-                    ),
-                    Some(Level::DEBUG) => ("max_level_debug", Level::TRACE),
-                    Some(Level::INFO) => ("max_level_info", Level::DEBUG),
-                    Some(Level::WARN) => ("max_level_warn", Level::INFO),
-                    Some(Level::ERROR) => ("max_level_error", Level::WARN),
-                    None => return ("max_level_off", String::new()),
-                };
-                (feature, format!("{} ", filter))
-            };
-            let (feature, earlier_level) = help_msg();
-            ctx_help(&format!(
-                "to enable {}logging, remove the `{}` feature from the `tracing` crate",
-                earlier_level, feature
-            ));
+            emit_static_max_level_warnings(disabled);
         }
 
-        let (dynamics, statics) = Directive::make_tables(directives);
+        let (dynamics, statics) = Directive::make_tables(parsed_directives);
         let has_dynamics = !dynamics.is_empty();
 
         let mut filter = EnvFilter {
             statics,
             dynamics,
             has_dynamics,
-            by_id: RwLock::new(Default::default()),
-            by_cs: RwLock::new(Default::default()),
+            by_id: RwLock::new(HashMap::default()),
+            by_cs: RwLock::new(HashMap::default()),
             scope: ThreadLocal::new(),
             regex: self.regex,
         };
@@ -340,6 +284,7 @@ impl Builder {
         filter
     }
 
+    /// Returns the configured environment variable name.
     fn env_var_name(&self) -> &str {
         self.env.as_deref().unwrap_or(EnvFilter::DEFAULT_ENV)
     }
@@ -352,5 +297,117 @@ impl Default for Builder {
             env: None,
             default_directive: None,
         }
+    }
+}
+
+/// Emits warnings for directives disabled by the statically configured max level.
+#[allow(
+    clippy::single_call_fn,
+    reason = "static max-level warning assembly is kept separate from parsing control flow"
+)]
+fn emit_static_max_level_warnings(disabled: Vec<Directive>) {
+    use tracing::Level;
+
+    warn_static_max_level(
+        "some trace filter directives would enable traces that are disabled statically",
+    );
+    for directive in disabled {
+        let target = directive
+            .target
+            .as_ref()
+            .map_or_else(|| "all targets".into(), |target| {
+                format!("the `{target}` target")
+            });
+        let Some(level) = directive.level.into_level() else {
+            continue;
+        };
+        write_static_max_context(&format!(
+            "`{directive}` would enable the {level} level for {target}"
+        ));
+    }
+    write_static_max_prefixed(
+        "note:",
+        &format!("the static max level is `{STATIC_MAX_LEVEL}`"),
+    );
+
+    let (feature, earlier_level) = match STATIC_MAX_LEVEL.into_level() {
+        Some(Level::TRACE) => return,
+        Some(Level::DEBUG) => ("max_level_debug", format!("{} ", Level::TRACE)),
+        Some(Level::INFO) => ("max_level_info", format!("{} ", Level::DEBUG)),
+        Some(Level::WARN) => ("max_level_warn", format!("{} ", Level::INFO)),
+        Some(Level::ERROR) => ("max_level_error", format!("{} ", Level::WARN)),
+        None => ("max_level_off", String::new()),
+    };
+    write_static_max_prefixed("help:", &format!(
+        "to enable {earlier_level}logging, remove the `{feature}` feature from the `tracing` crate"
+    ));
+}
+
+/// Emits a warning line for the static max-level diagnostic.
+#[allow(
+    clippy::single_call_fn,
+    reason = "warning formatting owns the feature-specific ANSI styling for static max-level diagnostics"
+)]
+fn warn_static_max_level(message: &str) {
+    #[cfg(not(feature = "nu-ansi-term"))]
+    let formatted_message = format!("warning: {}", message);
+    #[cfg(feature = "nu-ansi-term")]
+    let formatted_message = {
+        use nu_ansi_term::{Color, Style};
+
+        let bold = Style::new().bold();
+        let mut warning = Color::Yellow.paint("warning");
+        warning.style_ref_mut().is_bold = true;
+        format!("{}{} {}", warning, bold.paint(":"), bold.paint(message))
+    };
+    write_stderr_line(format_args!("{formatted_message}"));
+}
+
+/// Emits a note line for the static max-level diagnostic.
+#[allow(
+    clippy::single_call_fn,
+    reason = "context formatting owns the feature-specific ANSI styling for static max-level diagnostics"
+)]
+fn write_static_max_context(message: &str) {
+    #[cfg(not(feature = "nu-ansi-term"))]
+    let formatted_message = format!("note: {}", message);
+    #[cfg(feature = "nu-ansi-term")]
+    let formatted_message = {
+        use nu_ansi_term::Color;
+
+        let mut pipe = Color::Fixed(21).paint("|");
+        pipe.style_ref_mut().is_bold = true;
+        format!(" {pipe} {message}")
+    };
+    write_stderr_line(format_args!("{formatted_message}"));
+}
+
+/// Emits a prefixed diagnostic line for the static max-level diagnostic.
+fn write_static_max_prefixed(prefix: &str, message: &str) {
+    #[cfg(not(feature = "nu-ansi-term"))]
+    let formatted_message = format!("{} {}", prefix, message);
+    #[cfg(feature = "nu-ansi-term")]
+    let formatted_message = {
+        use nu_ansi_term::{Color, Style};
+
+        let mut equal = Color::Fixed(21).paint("=");
+        equal.style_ref_mut().is_bold = true;
+        format!(
+            " {} {} {}",
+            equal,
+            Style::new().bold().paint(prefix),
+            message
+        )
+    };
+    write_stderr_line(format_args!("{formatted_message}"));
+}
+
+/// Writes one diagnostic line to standard error.
+fn write_stderr_line(args: fmt::Arguments<'_>) {
+    use io::Write as _;
+
+    let mut stderr = io::stderr();
+    if stderr.write_fmt(args).is_ok() {
+        let _result = stderr.write_all(b"\n");
     }
 }

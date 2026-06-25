@@ -3,14 +3,20 @@
 use criterion::{Criterion, criterion_group, criterion_main};
 use tracing::{Level, span};
 
-mod shared;
+pub mod shared;
+use shared::BenchmarkMatrix as _;
 
-fn bench(c: &mut Criterion) {
-    shared::for_all_dispatches(&mut c.benchmark_group("enter_span"), |b| {
+/// Benchmarks entering an existing span.
+#[allow(
+    clippy::single_call_fn,
+    reason = "Criterion invokes this benchmark entrypoint through criterion_group"
+)]
+fn bench(criterion: &mut Criterion) {
+    shared::Dispatches.bench(&mut criterion.benchmark_group("enter_span"), |bencher| {
         let span = span!(Level::TRACE, "span");
-        b.iter(|| {
+        bencher.iter(|| {
             let _span = span.enter();
-        })
+        });
     });
 }
 
