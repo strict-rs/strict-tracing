@@ -1,64 +1,65 @@
-use super::*;
-use strict_test_support::{TestFailure, ensure_ok};
+use strict_test_support::TestFailure;
+use strict_test_support::ensure_ok;
 use tracing::subscriber::set_default;
-use tracing_subscriber::{
-    filter::{Targets, filter_fn},
-    layer::Identity,
-    prelude::*,
-};
+use tracing_subscriber::filter::Targets;
+use tracing_subscriber::filter::filter_fn;
+use tracing_subscriber::layer::Identity;
+use tracing_subscriber::prelude::*;
+
+use super::*;
 
 #[test]
 #[cfg_attr(not(feature = "tracing-log"), ignore)]
 fn log_events() {
-    // Reproduces https://github.com/tokio-rs/tracing/issues/1563
-    mod inner {
-        pub(super) const MODULE_PATH: &str = module_path!();
+  // Reproduces https://github.com/tokio-rs/tracing/issues/1563
+  mod inner {
+    pub(super) const MODULE_PATH: &str = module_path!();
 
-        #[tracing::instrument]
-        #[allow(
-            clippy::single_call_fn,
-            reason = "target-filter test keeps the instrumented function in a nested module to exercise module paths"
-        )]
-        pub(super) fn logs() {
-            log::debug!("inner");
-        }
+    #[tracing::instrument]
+    #[allow(
+      clippy::single_call_fn,
+      reason = "target-filter test keeps the instrumented function in a nested module to exercise module paths"
+    )]
+    pub(super) fn logs() {
+      log::debug!("inner");
     }
+  }
 
-    let filter = Targets::new()
-        .with_default(LevelFilter::DEBUG)
-        .with_target(inner::MODULE_PATH, LevelFilter::WARN);
+  let filter = Targets::new()
+    .with_default(LevelFilter::DEBUG)
+    .with_target(inner::MODULE_PATH, LevelFilter::WARN);
 
-    let layer = Identity::new().with_filter(filter_fn(move |_meta| true));
+  let layer = Identity::new().with_filter(filter_fn(move |_meta| true));
 
-    let subscriber = tracing_subscriber::registry().with(filter).with(layer);
-    let _guard = set_default(subscriber);
+  let subscriber = tracing_subscriber::registry().with(filter).with(layer);
+  let _guard = set_default(subscriber);
 
-    inner::logs();
+  inner::logs();
 }
 
 #[test]
 fn inner_layer_short_circuits() -> Result<(), TestFailure> {
-    // This test ensures that when a global filter short-circuits `Interest`
-    // evaluation, we aren't left with a "dirty" per-layer filter state.
+  // This test ensures that when a global filter short-circuits `Interest`
+  // evaluation, we aren't left with a "dirty" per-layer filter state.
 
-    let (layer, handle) = layer::mock()
-        .event(expect::event().with_fields(expect::msg("hello world")))
-        .only()
-        .run_with_handle();
+  let (layer, handle) = layer::mock()
+    .event(expect::event().with_fields(expect::msg("hello world")))
+    .only()
+    .run_with_handle();
 
-    let filter = Targets::new().with_target("magic_target", LevelFilter::DEBUG);
+  let filter = Targets::new().with_target("magic_target", LevelFilter::DEBUG);
 
-    let subscriber = tracing_subscriber::registry()
+  let subscriber = tracing_subscriber::registry()
         // Note: we don't just use a `LevelFilter` for the global filter here,
         // because it will just return a max level filter, and the chain of
         // `register_callsite` calls that would trigger the bug never happens...
         .with(filter_fn(|meta| meta.level() <= &Level::INFO))
         .with(layer.with_filter(filter));
-    let _guard = set_default(subscriber);
+  let _guard = set_default(subscriber);
 
-    tracing::debug!("skip me please!");
-    tracing::info!(target: "magic_target", "hello world");
+  tracing::debug!("skip me please!");
+  tracing::info!(target: "magic_target", "hello world");
 
-    ensure_ok(handle.finished(), "mock expectations should finish")?;
-    Ok(())
+  ensure_ok(handle.finished(), "mock expectations should finish")?;
+  Ok(())
 }

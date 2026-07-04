@@ -113,7 +113,8 @@
 //! [`event`]: crate::Subscriber::event
 pub use tracing_core::field::*;
 
-use crate::{Metadata, sealed::Sealed};
+use crate::Metadata;
+use crate::sealed::Sealed;
 
 /// Trait implemented to allow a type to be used as a field key.
 ///
@@ -127,34 +128,34 @@ use crate::{Metadata, sealed::Sealed};
 /// should be used whenever possible.
 /// </pre>
 pub trait AsField: Sealed {
-    /// Attempts to convert `&self` into a `Field` with the specified `metadata`.
-    ///
-    /// If `metadata` defines this field, then the field is returned. Otherwise,
-    /// this returns `None`.
-    fn as_field(&self, metadata: &Metadata<'_>) -> Option<Field>;
+  /// Attempts to convert `&self` into a `Field` with the specified `metadata`.
+  ///
+  /// If `metadata` defines this field, then the field is returned. Otherwise,
+  /// this returns `None`.
+  fn as_field(&self, metadata: &Metadata<'_>) -> Option<Field>;
 }
 
 // ===== impl AsField =====
 
 impl AsField for Field {
-    #[inline]
-    fn as_field(&self, metadata: &Metadata<'_>) -> Option<Field> {
-        (self.callsite() == metadata.callsite()).then_some(*self)
-    }
+  #[inline]
+  fn as_field(&self, metadata: &Metadata<'_>) -> Option<Field> {
+    (self.callsite() == metadata.callsite()).then_some(*self)
+  }
 }
 
 impl AsField for &Field {
-    #[inline]
-    fn as_field(&self, metadata: &Metadata<'_>) -> Option<Field> {
-        (self.callsite() == metadata.callsite()).then_some(**self)
-    }
+  #[inline]
+  fn as_field(&self, metadata: &Metadata<'_>) -> Option<Field> {
+    (self.callsite() == metadata.callsite()).then_some(**self)
+  }
 }
 
 impl AsField for str {
-    #[inline]
-    fn as_field(&self, metadata: &Metadata<'_>) -> Option<Field> {
-        metadata.fields().field(&self)
-    }
+  #[inline]
+  fn as_field(&self, metadata: &Metadata<'_>) -> Option<Field> {
+    metadata.fields().field(&self)
+  }
 }
 
 impl Sealed for Field {}

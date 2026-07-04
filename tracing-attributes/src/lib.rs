@@ -28,7 +28,7 @@
 //!
 //! #[instrument]
 //! pub fn my_function(my_arg: usize) {
-//!     // ...
+//!   // ...
 //! }
 //!
 //! # fn main() {}
@@ -51,29 +51,59 @@
 //! increased past 1.66, three minor versions prior. Increasing the minimum
 //! supported compiler version is not considered a semver breaking change as
 //! long as doing so complies with this policy.
-//!
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
-    html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
-    issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
+  html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
+  html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
+  issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
 #![cfg_attr(docsrs, deny(rustdoc::broken_intra_doc_links))]
 use core::marker::PhantomData;
 use std::iter;
 
 use proc_macro2::TokenStream;
-use quote::{ToTokens, TokenStreamExt as _, quote, quote_spanned};
+use quote::ToTokens;
+use quote::TokenStreamExt as _;
+use quote::quote;
+use quote::quote_spanned;
+use syn::Attribute;
+use syn::Expr;
+use syn::ExprAsync;
+use syn::ExprCall;
+use syn::FieldPat;
+use syn::FnArg;
+use syn::Ident;
+use syn::Item;
+use syn::ItemFn;
+use syn::LitInt;
+use syn::LitStr;
+use syn::Pat;
+use syn::PatIdent;
+use syn::PatReference;
+use syn::PatStruct;
+use syn::PatTuple;
+use syn::PatTupleStruct;
+use syn::PatType;
+use syn::Path;
+use syn::ReturnType;
+use syn::Signature;
+use syn::Stmt;
+use syn::Token;
+use syn::Type;
+use syn::TypeInfer;
+use syn::TypePath;
+use syn::TypeReference;
+use syn::Visibility;
 use syn::ext::IdentExt as _;
-use syn::parse::{Parse, ParseBuffer, ParseStream};
+use syn::parse::Parse;
+use syn::parse::ParseBuffer;
+use syn::parse::ParseStream;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned as _;
-use syn::token::{Brace, Paren};
-use syn::visit_mut::{VisitMut, visit_expr_mut, visit_type_mut};
-use syn::{
-    Attribute, Expr, ExprAsync, ExprCall, FieldPat, FnArg, Ident, Item, ItemFn, LitInt, LitStr,
-    Pat, PatIdent, PatReference, PatStruct, PatTuple, PatTupleStruct, PatType, Path, ReturnType,
-    Signature, Stmt, Token, Type, TypeInfer, TypePath, TypeReference, Visibility,
-};
+use syn::token::Brace;
+use syn::token::Paren;
+use syn::visit_mut::VisitMut;
+use syn::visit_mut::visit_expr_mut;
+use syn::visit_mut::visit_type_mut;
 
 // Parser for `#[instrument]` attribute arguments.
 include!("attr.rs");
@@ -104,7 +134,7 @@ include!("expand.rs");
 /// // The generated span's name will be "my_span" rather than "my_function".
 /// #[instrument(name = "my_span")]
 /// pub fn my_function() {
-///     // ... do something incredibly interesting and important ...
+///   // ... do something incredibly interesting and important ...
 /// }
 /// ```
 ///
@@ -116,12 +146,12 @@ include!("expand.rs");
 /// ```
 /// pub mod my_module {
 ///     # use tracing_attributes::instrument;
-///     // The generated span's target will be "my_crate::some_special_target",
-///     // rather than "my_crate::my_module".
-///     #[instrument(target = "my_crate::some_special_target")]
-///     pub fn my_function() {
-///         // ... all kinds of neat code in here ...
-///     }
+///   // The generated span's target will be "my_crate::some_special_target",
+///   // rather than "my_crate::my_module".
+///   #[instrument(target = "my_crate::some_special_target")]
+///   pub fn my_function() {
+///     // ... all kinds of neat code in here ...
+///   }
 /// }
 /// ```
 ///
@@ -134,8 +164,8 @@ include!("expand.rs");
 /// // The span's level will be TRACE rather than INFO.
 /// #[instrument(level = "trace")]
 /// pub fn my_function() {
-///     // ... I have written a truly marvelous implementation of this function,
-///     // which this example is too narrow to contain ...
+///   // ... I have written a truly marvelous implementation of this function,
+///   // which this example is too narrow to contain ...
 /// }
 /// ```
 ///
@@ -163,13 +193,13 @@ include!("expand.rs");
 /// // `arg` will be recorded, while `non_debug` will not.
 /// #[instrument(skip(non_debug))]
 /// fn my_function(arg: usize, non_debug: NonDebug) {
-///     // ...
+///   // ...
 /// }
 ///
 /// // These arguments are huge
 /// #[instrument(skip_all)]
 /// fn my_big_data_function(large: Vec<u8>, also_large: HashMap<String, String>) {
-///     // ...
+///   // ...
 /// }
 /// ```
 ///
@@ -179,16 +209,16 @@ include!("expand.rs");
 /// # use tracing_attributes::instrument;
 /// #[derive(Debug)]
 /// struct MyType {
-///    data: Vec<u8>, // Suppose this buffer is often quite long...
+///   data: Vec<u8>, // Suppose this buffer is often quite long...
 /// }
 ///
 /// impl MyType {
-///     // Suppose we don't want to print an entire kilobyte of `data`
-///     // every time this is called...
-///     #[instrument(skip(self))]
-///     pub fn my_method(&mut self, an_interesting_argument: usize) {
-///          // ... do something (hopefully, using all that `data`!)
-///     }
+///   // Suppose we don't want to print an entire kilobyte of `data`
+///   // every time this is called...
+///   #[instrument(skip(self))]
+///   pub fn my_method(&mut self, an_interesting_argument: usize) {
+///     // ... do something (hopefully, using all that `data`!)
+///   }
 /// }
 /// ```
 ///
@@ -223,7 +253,7 @@ include!("expand.rs");
 /// // named "next" with the value of `i` + 1.
 /// #[instrument(fields(next = i + 1))]
 /// pub fn my_function(i: usize) {
-///     // ...
+///   // ...
 /// }
 /// ```
 ///
@@ -250,7 +280,7 @@ include!("expand.rs");
 /// // fields.
 /// #[instrument(fields(http.uri = req.uri(), http.method = req.method()))]
 /// pub fn handle_request<B>(req: http::Request<B>) -> http::Response<B> {
-///     // ... handle the request ...
+///   // ... handle the request ...
 ///     # http::Response { _b: std::marker::PhantomData }
 /// }
 /// ```
@@ -264,17 +294,17 @@ include!("expand.rs");
 /// // our span.
 /// #[derive(Debug)]
 /// struct MyType {
-///    name: &'static str,
-///    data: Vec<u8>,
+///   name: &'static str,
+///   data: Vec<u8>,
 /// }
 ///
 /// impl MyType {
-///     // This will skip the `data` field, but will include `self.name`,
-///     // formatted using `fmt::Display`.
-///     #[instrument(skip(self), fields(self.name = %self.name))]
-///     pub fn my_method(&mut self, an_interesting_argument: usize) {
-///          // ... do something (hopefully, using all that `data`!)
-///     }
+///   // This will skip the `data` field, but will include `self.name`,
+///   // formatted using `fmt::Display`.
+///   #[instrument(skip(self), fields(self.name = %self.name))]
+///   pub fn my_method(&mut self, an_interesting_argument: usize) {
+///     // ... do something (hopefully, using all that `data`!)
+///   }
 /// }
 /// ```
 ///
@@ -287,16 +317,16 @@ include!("expand.rs");
 /// // Suppose we want to record both the inputs to the calculation *and* its result...
 /// #[instrument(fields(result))]
 /// pub fn do_calculation(input_1: usize, input_2: usize) -> usize {
-///     // Rerform the calculation.
-///     let result = input_1 + input_2;
+///   // Rerform the calculation.
+///   let result = input_1 + input_2;
 ///
-///     // Record the result as part of the current span.
-///     tracing::Span::current().record("result", &result);
+///   // Record the result as part of the current span.
+///   tracing::Span::current().record("result", &result);
 ///
-///     // Now, the result will also be included on this event!
-///     tracing::info!("calculation complete!");
+///   // Now, the result will also be included on this event!
+///   tracing::info!("calculation complete!");
 ///
-///     // ... etc ...
+///   // ... etc ...
 ///     # 0
 /// }
 /// ```
@@ -309,10 +339,10 @@ include!("expand.rs");
 /// # use tracing_attributes::instrument;
 /// #[instrument]
 /// pub fn my_function(my_arg: usize) {
-///     // This event will be recorded inside a span named `my_function` with the
-///     // field `my_arg`.
-///     tracing::info!("inside my_function!");
-///     // ...
+///   // This event will be recorded inside a span named `my_function` with the
+///   // field `my_arg`.
+///   tracing::info!("inside my_function!");
+///   // ...
 /// }
 /// ```
 /// Setting the level for the generated span:
@@ -321,18 +351,19 @@ include!("expand.rs");
 /// # use tracing::Level;
 /// #[instrument(level = Level::DEBUG)]
 /// pub fn my_function() {
-///     // ...
+///   // ...
 /// }
 /// ```
 /// Levels can be specified either with [`Level`] constants, literal strings
-/// (e.g., `"debug"`, `"info"`) or numerically (1—5, corresponding to [`Level::TRACE`]—[`Level::ERROR`]).
+/// (e.g., `"debug"`, `"info"`) or numerically (1—5, corresponding to
+/// [`Level::TRACE`]—[`Level::ERROR`]).
 ///
 /// Overriding the generated span's name:
 /// ```
 /// # use tracing_attributes::instrument;
 /// #[instrument(name = "my_name")]
 /// pub fn my_function() {
-///     // ...
+///   // ...
 /// }
 /// ```
 /// Overriding the generated span's target:
@@ -340,7 +371,7 @@ include!("expand.rs");
 /// # use tracing_attributes::instrument;
 /// #[instrument(target = "my_target")]
 /// pub fn my_function() {
-///     // ...
+///   // ...
 /// }
 /// ```
 /// Overriding the generated span's parent:
@@ -348,22 +379,20 @@ include!("expand.rs");
 /// # use tracing_attributes::instrument;
 /// #[instrument(parent = None)]
 /// pub fn my_function() {
-///     // ...
+///   // ...
 /// }
 /// ```
 /// ```
 /// # use tracing_attributes::instrument;
 /// // A struct which owns a span handle.
-/// struct MyStruct
-/// {
-///     span: tracing::Span
+/// struct MyStruct {
+///   span: tracing::Span,
 /// }
 ///
-/// impl MyStruct
-/// {
-///     // Use the struct's `span` field as the parent span
-///     #[instrument(parent = &self.span, skip(self))]
-///     fn my_method(&self) {}
+/// impl MyStruct {
+///   // Use the struct's `span` field as the parent span
+///   #[instrument(parent = &self.span, skip(self))]
+///   fn my_method(&self) {}
 /// }
 /// ```
 /// Specifying [`follows_from`] relationships:
@@ -371,7 +400,7 @@ include!("expand.rs");
 /// # use tracing_attributes::instrument;
 /// #[instrument(follows_from = causes)]
 /// pub fn my_function(causes: &[tracing::Id]) {
-///     // ...
+///   // ...
 /// }
 /// ```
 /// Any expression of type `impl IntoIterator<Item = impl Into<Option<Id>>>`
@@ -380,7 +409,7 @@ include!("expand.rs");
 /// # use tracing_attributes::instrument;
 /// #[instrument(follows_from = [cause])]
 /// pub fn my_function(cause: &tracing::span::EnteredSpan) {
-///     // ...
+///   // ...
 /// }
 /// ```
 ///
@@ -393,7 +422,7 @@ include!("expand.rs");
 ///
 /// #[instrument(skip(non_debug))]
 /// fn my_function(arg: usize, non_debug: NonDebug) {
-///     // ...
+///   // ...
 /// }
 /// ```
 ///
@@ -404,14 +433,14 @@ include!("expand.rs");
 /// #[derive(Debug)]
 /// struct Argument;
 /// impl Argument {
-///     fn bar(&self) -> &'static str {
-///         "bar"
-///     }
+///   fn bar(&self) -> &'static str {
+///     "bar"
+///   }
 /// }
 /// const FOOBAR: &'static str = "foo.bar";
 /// #[instrument(fields(foo="bar", id=1, show=true, {FOOBAR}=%arg.bar()))]
 /// fn my_function(arg: Argument) {
-///     // ...
+///   // ...
 /// }
 /// ```
 ///
@@ -422,7 +451,7 @@ include!("expand.rs");
 /// # use tracing_attributes::instrument;
 /// #[instrument(ret)]
 /// fn my_function() -> i32 {
-///     42
+///   42
 /// }
 /// ```
 /// The return value event will have the same level as the span generated by `#[instrument]`.
@@ -436,7 +465,7 @@ include!("expand.rs");
 /// # use tracing::Level;
 /// #[instrument(ret(level = Level::WARN))]
 /// fn my_function() -> i32 {
-///     42
+///   42
 /// }
 /// ```
 ///
@@ -451,7 +480,7 @@ include!("expand.rs");
 /// # use tracing_attributes::instrument;
 /// #[instrument(ret(Display))]
 /// fn my_function() -> i32 {
-///     42
+///   42
 /// }
 /// ```
 ///
@@ -462,7 +491,7 @@ include!("expand.rs");
 /// # use tracing_attributes::instrument;
 /// #[instrument(err)]
 /// fn my_function(arg: usize) -> Result<(), std::io::Error> {
-///     Ok(())
+///   Ok(())
 /// }
 /// ```
 ///
@@ -475,7 +504,7 @@ include!("expand.rs");
 /// # use tracing::Level;
 /// #[instrument(err(level = Level::INFO))]
 /// fn my_function(arg: usize) -> Result<(), std::io::Error> {
-///     Ok(())
+///   Ok(())
 /// }
 /// ```
 ///
@@ -487,7 +516,7 @@ include!("expand.rs");
 /// # use tracing_attributes::instrument;
 /// #[instrument(err(Debug))]
 /// fn my_function(arg: usize) -> Result<(), std::io::Error> {
-///     Ok(())
+///   Ok(())
 /// }
 /// ```
 ///
@@ -501,7 +530,7 @@ include!("expand.rs");
 /// # use tracing_attributes::instrument;
 /// #[instrument(err, ret)]
 /// fn my_function(arg: usize) -> Result<(), std::io::Error> {
-///     Ok(())
+///   Ok(())
 /// }
 /// ```
 ///
@@ -511,7 +540,7 @@ include!("expand.rs");
 /// # use tracing_attributes::instrument;
 /// #[instrument]
 /// pub async fn my_function() -> Result<(), ()> {
-///     // ...
+///   // ...
 ///     # Ok(())
 /// }
 /// ```
@@ -527,7 +556,7 @@ include!("expand.rs");
 ///
 /// #[async_trait]
 /// pub trait Foo {
-///     async fn foo(&self, arg: usize);
+///   async fn foo(&self, arg: usize);
 /// }
 ///
 /// #[derive(Debug)]
@@ -535,8 +564,8 @@ include!("expand.rs");
 ///
 /// #[async_trait]
 /// impl Foo for FooImpl {
-///     #[instrument(fields(value = self.0, tmp = std::any::type_name::<Self>()))]
-///     async fn foo(&self, arg: usize) {}
+///   #[instrument(fields(value = self.0, tmp = std::any::type_name::<Self>()))]
+///   async fn foo(&self, arg: usize) {}
 /// }
 /// ```
 ///
@@ -564,155 +593,133 @@ include!("expand.rs");
 /// [`Level::ERROR`]: https://docs.rs/tracing/latest/tracing/struct.Level.html#associatedconstant.ERROR
 #[proc_macro_attribute]
 #[allow(
-    clippy::single_call_fn,
-    reason = "proc-macro entry point must keep the exported attribute function signature"
+  clippy::single_call_fn,
+  reason = "proc-macro entry point must keep the exported attribute function signature"
 )]
-pub fn instrument(
-    args: proc_macro::TokenStream,
-    item: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    let parsed_args = syn::parse_macro_input!(args as InstrumentArgs);
-    // Cloning a `TokenStream` is cheap since it's reference counted internally.
-    instrument_precise(parsed_args.clone(), item.clone())
-        .unwrap_or_else(|_err| instrument_speculative(parsed_args, item))
+pub fn instrument(args: proc_macro::TokenStream, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+  let parsed_args = syn::parse_macro_input!(args as InstrumentArgs);
+  // Cloning a `TokenStream` is cheap since it's reference counted internally.
+  instrument_precise(parsed_args.clone(), item.clone()).unwrap_or_else(|_err| instrument_speculative(parsed_args, item))
 }
 
 /// Instrument the function, without parsing the function body (instead using the raw tokens).
 #[allow(
-    clippy::single_call_fn,
-    reason = "speculative parser path is isolated from precise parsing fallback to preserve proc-macro control flow"
+  clippy::single_call_fn,
+  reason = "speculative parser path is isolated from precise parsing fallback to preserve proc-macro control flow"
 )]
-fn instrument_speculative(
-    args: InstrumentArgs,
-    item: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    let parsed_input = syn::parse_macro_input!(item as MaybeItemFn);
-    let instrumented_function_name = parsed_input.sig.ident.to_string();
-    let parsed_input_ref = parsed_input.as_ref();
-    gen_function(
-        &parsed_input_ref,
-        args,
-        instrumented_function_name.as_str(),
-        None,
-    )
-    .into()
+fn instrument_speculative(args: InstrumentArgs, item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+  let parsed_input = syn::parse_macro_input!(item as MaybeItemFn);
+  let instrumented_function_name = parsed_input.sig.ident.to_string();
+  let parsed_input_ref = parsed_input.as_ref();
+  gen_function(&parsed_input_ref, args, instrumented_function_name.as_str(), None).into()
 }
 
 /// Instrument the function, by fully parsing the function body,
 /// which allows us to rewrite some statements related to async-like patterns.
 #[allow(
-    clippy::single_call_fn,
-    reason = "precise parser path isolates async-trait detection and const-fn validation before fallback"
+  clippy::single_call_fn,
+  reason = "precise parser path isolates async-trait detection and const-fn validation before fallback"
 )]
-fn instrument_precise(
-    args: InstrumentArgs,
-    item: proc_macro::TokenStream,
-) -> Result<proc_macro::TokenStream, syn::Error> {
-    let parsed_input = syn::parse::<ItemFn>(item)?;
-    let instrumented_function_name = parsed_input.sig.ident.to_string();
+fn instrument_precise(args: InstrumentArgs, item: proc_macro::TokenStream) -> Result<proc_macro::TokenStream, syn::Error> {
+  let parsed_input = syn::parse::<ItemFn>(item)?;
+  let instrumented_function_name = parsed_input.sig.ident.to_string();
 
-    if parsed_input.sig.constness.is_some() {
-        return Ok(quote! {
-            compile_error!("the `#[instrument]` attribute may not be used with `const fn`s")
-        }
-        .into());
-    }
+  if parsed_input.sig.constness.is_some() {
+    return Ok(
+      quote! {
+          compile_error!("the `#[instrument]` attribute may not be used with `const fn`s")
+      }
+      .into(),
+    );
+  }
 
-    // check for async_trait-like patterns in the block, and instrument
-    // the future instead of the wrapper
-    if let Some(async_like) = AsyncInfo::from_fn(&parsed_input) {
-        return Ok(async_like.gen_async(&args, instrumented_function_name.as_str()));
-    }
+  // check for async_trait-like patterns in the block, and instrument
+  // the future instead of the wrapper
+  if let Some(async_like) = AsyncInfo::from_fn(&parsed_input) {
+    return Ok(async_like.gen_async(&args, instrumented_function_name.as_str()));
+  }
 
-    let maybe_input = MaybeItemFn::from(parsed_input);
-    let maybe_input_ref = maybe_input.as_ref();
+  let maybe_input = MaybeItemFn::from(parsed_input);
+  let maybe_input_ref = maybe_input.as_ref();
 
-    Ok(gen_function(
-        &maybe_input_ref,
-        args,
-        instrumented_function_name.as_str(),
-        None,
-    )
-    .into())
+  Ok(gen_function(&maybe_input_ref, args, instrumented_function_name.as_str(), None).into())
 }
 
 /// This is a more flexible/imprecise `ItemFn` type,
 /// which's block is just a `TokenStream` (it may contain invalid code).
 #[derive(Debug, Clone)]
 struct MaybeItemFn {
-    /// Outer attributes attached before the function item.
-    outer_attrs: Vec<Attribute>,
-    /// Inner attributes parsed from the function body opening.
-    inner_attrs: Vec<Attribute>,
-    /// Function visibility.
-    vis: Visibility,
-    /// Function signature.
-    sig: Signature,
-    /// Brace token delimiting the raw function body.
-    brace_token: Brace,
-    /// Raw function body tokens.
-    block: TokenStream,
+  /// Outer attributes attached before the function item.
+  outer_attrs: Vec<Attribute>,
+  /// Inner attributes parsed from the function body opening.
+  inner_attrs: Vec<Attribute>,
+  /// Function visibility.
+  vis:         Visibility,
+  /// Function signature.
+  sig:         Signature,
+  /// Brace token delimiting the raw function body.
+  brace_token: Brace,
+  /// Raw function body tokens.
+  block:       TokenStream,
 }
 
 impl MaybeItemFn {
-    /// Borrows this raw-body function representation.
-    const fn as_ref(&self) -> MaybeItemFnRef<'_, TokenStream> {
-        MaybeItemFnRef {
-            outer_attrs: &self.outer_attrs,
-            inner_attrs: &self.inner_attrs,
-            vis: &self.vis,
-            sig: &self.sig,
-            brace_token: &self.brace_token,
-            block: &self.block,
-        }
+  /// Borrows this raw-body function representation.
+  const fn as_ref(&self) -> MaybeItemFnRef<'_, TokenStream> {
+    MaybeItemFnRef {
+      outer_attrs: &self.outer_attrs,
+      inner_attrs: &self.inner_attrs,
+      vis:         &self.vis,
+      sig:         &self.sig,
+      brace_token: &self.brace_token,
+      block:       &self.block,
     }
+  }
 }
 
 /// This parses a `TokenStream` into a `MaybeItemFn`
 /// (just like `ItemFn`, but skips parsing the body).
 impl Parse for MaybeItemFn {
-    fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
-        let outer_attrs = input.call(Attribute::parse_outer)?;
-        let vis: Visibility = input.parse()?;
-        let sig: Signature = input.parse()?;
-        let inner_attrs = input.call(Attribute::parse_inner)?;
-        let body;
-        let brace_token = syn::braced!(body in input);
-        let block: TokenStream = body.call(ParseBuffer::parse)?;
-        Ok(Self {
-            outer_attrs,
-            inner_attrs,
-            vis,
-            sig,
-            brace_token,
-            block,
-        })
-    }
+  fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
+    let outer_attrs = input.call(Attribute::parse_outer)?;
+    let vis: Visibility = input.parse()?;
+    let sig: Signature = input.parse()?;
+    let inner_attrs = input.call(Attribute::parse_inner)?;
+    let body;
+    let brace_token = syn::braced!(body in input);
+    let block: TokenStream = body.call(ParseBuffer::parse)?;
+    Ok(Self {
+      outer_attrs,
+      inner_attrs,
+      vis,
+      sig,
+      brace_token,
+      block,
+    })
+  }
 }
 
 impl From<ItemFn> for MaybeItemFn {
-    fn from(
-        ItemFn {
-            attrs,
-            vis,
-            sig,
-            block,
-        }: ItemFn,
-    ) -> Self {
-        let (outer_attrs, inner_attrs) = attrs
-            .into_iter()
-            .partition(|attr| attr.style == syn::AttrStyle::Outer);
-        let mut block_tokens = TokenStream::new();
-        block_tokens.append_all(block.stmts);
-        Self {
-            outer_attrs,
-            inner_attrs,
-            vis,
-            sig,
-            brace_token: block.brace_token,
-            block: block_tokens,
-        }
+  fn from(
+    ItemFn {
+      attrs,
+      vis,
+      sig,
+      block,
+    }: ItemFn,
+  ) -> Self {
+    let (outer_attrs, inner_attrs) = attrs.into_iter().partition(|attr| attr.style == syn::AttrStyle::Outer);
+    let mut block_tokens = TokenStream::new();
+    block_tokens.append_all(block.stmts);
+    Self {
+      outer_attrs,
+      inner_attrs,
+      vis,
+      sig,
+      brace_token: block.brace_token,
+      block: block_tokens,
     }
+  }
 }
 
 /// A generic reference type for `MaybeItemFn`,
@@ -720,16 +727,16 @@ impl From<ItemFn> for MaybeItemFn {
 /// `TokenStream` or `Block`).
 #[derive(Debug, Clone)]
 struct MaybeItemFnRef<'a, B: ToTokens> {
-    /// Borrowed outer attributes.
-    outer_attrs: &'a Vec<Attribute>,
-    /// Borrowed inner attributes.
-    inner_attrs: &'a Vec<Attribute>,
-    /// Borrowed function visibility.
-    vis: &'a Visibility,
-    /// Borrowed function signature.
-    sig: &'a Signature,
-    /// Borrowed brace token delimiting the function body.
-    brace_token: &'a Brace,
-    /// Borrowed function body representation.
-    block: &'a B,
+  /// Borrowed outer attributes.
+  outer_attrs: &'a Vec<Attribute>,
+  /// Borrowed inner attributes.
+  inner_attrs: &'a Vec<Attribute>,
+  /// Borrowed function visibility.
+  vis:         &'a Visibility,
+  /// Borrowed function signature.
+  sig:         &'a Signature,
+  /// Borrowed brace token delimiting the function body.
+  brace_token: &'a Brace,
+  /// Borrowed function body representation.
+  block:       &'a B,
 }

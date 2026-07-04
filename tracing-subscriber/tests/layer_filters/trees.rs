@@ -1,177 +1,142 @@
-use super::*;
-use strict_test_support::{TestFailure, ensure_ok};
+use strict_test_support::TestFailure;
+use strict_test_support::ensure_ok;
 use tracing::subscriber::set_default;
-use tracing_mock::{expect, layer::MockLayer};
+use tracing_mock::expect;
+use tracing_mock::layer::MockLayer;
+
+use super::*;
 
 #[test]
 fn basic_trees() -> Result<(), TestFailure> {
-    let (with_target, with_target_handle) = layer::named("info_with_target")
-        .event(
-            expect::event()
-                .at_level(Level::INFO)
-                .with_target("my_target"),
-        )
-        .only()
-        .run_with_handle();
+  let (with_target, with_target_handle) = layer::named("info_with_target")
+    .event(expect::event().at_level(Level::INFO).with_target("my_target"))
+    .only()
+    .run_with_handle();
 
-    let (info, info_handle) = layer::named("info")
-        .event(
-            expect::event()
-                .at_level(Level::INFO)
-                .with_target(module_path!()),
-        )
-        .event(
-            expect::event()
-                .at_level(Level::INFO)
-                .with_target("my_target"),
-        )
-        .only()
-        .run_with_handle();
+  let (info, info_handle) = layer::named("info")
+    .event(expect::event().at_level(Level::INFO).with_target(module_path!()))
+    .event(expect::event().at_level(Level::INFO).with_target("my_target"))
+    .only()
+    .run_with_handle();
 
-    let (all, all_handle) = layer::named("all")
-        .event(
-            expect::event()
-                .at_level(Level::INFO)
-                .with_target(module_path!()),
-        )
-        .event(expect::event().at_level(Level::TRACE))
-        .event(
-            expect::event()
-                .at_level(Level::INFO)
-                .with_target("my_target"),
-        )
-        .event(
-            expect::event()
-                .at_level(Level::TRACE)
-                .with_target("my_target"),
-        )
-        .only()
-        .run_with_handle();
+  let (all, all_handle) = layer::named("all")
+    .event(expect::event().at_level(Level::INFO).with_target(module_path!()))
+    .event(expect::event().at_level(Level::TRACE))
+    .event(expect::event().at_level(Level::INFO).with_target("my_target"))
+    .event(expect::event().at_level(Level::TRACE).with_target("my_target"))
+    .only()
+    .run_with_handle();
 
-    let info_tree = info
-        .and_then(with_target.with_filter(filter::filter_fn(|meta| meta.target() == "my_target")))
-        .with_filter(LevelFilter::INFO);
+  let info_tree = info
+    .and_then(with_target.with_filter(filter::filter_fn(|meta| meta.target() == "my_target")))
+    .with_filter(LevelFilter::INFO);
 
-    let subscriber = tracing_subscriber::registry().with(info_tree).with(all);
-    let _guard = set_default(subscriber);
+  let subscriber = tracing_subscriber::registry().with(info_tree).with(all);
+  let _guard = set_default(subscriber);
 
-    tracing::info!("hello world");
-    tracing::trace!("hello trace");
-    tracing::info!(target: "my_target", "hi to my target");
-    tracing::trace!(target: "my_target", "hi to my target at trace");
+  tracing::info!("hello world");
+  tracing::trace!("hello trace");
+  tracing::info!(target: "my_target", "hi to my target");
+  tracing::trace!(target: "my_target", "hi to my target at trace");
 
-    ensure_ok(all_handle.finished(), "mock expectations should finish")?;
-    ensure_ok(info_handle.finished(), "mock expectations should finish")?;
-    ensure_ok(
-        with_target_handle.finished(),
-        "mock expectations should finish",
-    )?;
-    Ok(())
+  ensure_ok(all_handle.finished(), "mock expectations should finish")?;
+  ensure_ok(info_handle.finished(), "mock expectations should finish")?;
+  ensure_ok(with_target_handle.finished(), "mock expectations should finish")?;
+  Ok(())
 }
 
 #[test]
 fn filter_span_scopes() -> Result<(), TestFailure> {
-    fn target_layer(target: &'static str) -> (MockLayer, subscriber::MockHandle) {
-        layer::named(format!("target_{target}"))
-            .enter(expect::span().with_target(target).at_level(Level::INFO))
-            .event(
-                expect::event()
-                    .with_fields(expect::msg("hello world"))
-                    .in_scope(vec![
-                        expect::span().with_target(target).at_level(Level::INFO),
-                    ]),
-            )
-            .exit(expect::span().with_target(target).at_level(Level::INFO))
-            .only()
-            .run_with_handle()
-    }
+  fn target_layer(target: &'static str) -> (MockLayer, subscriber::MockHandle) {
+    layer::named(format!("target_{target}"))
+      .enter(expect::span().with_target(target).at_level(Level::INFO))
+      .event(
+        expect::event()
+          .with_fields(expect::msg("hello world"))
+          .in_scope(vec![expect::span().with_target(target).at_level(Level::INFO)]),
+      )
+      .exit(expect::span().with_target(target).at_level(Level::INFO))
+      .only()
+      .run_with_handle()
+  }
 
-    let (a_target_layer, a_handle) = target_layer("a");
-    let (b_target_layer, b_handle) = target_layer("b");
-    let (info_layer, info_handle) = layer::named("info")
-        .enter(expect::span().with_target("b").at_level(Level::INFO))
-        .enter(expect::span().with_target("a").at_level(Level::INFO))
-        .event(
-            expect::event()
-                .with_fields(expect::msg("hello world"))
-                .in_scope(vec![
-                    expect::span().with_target("a").at_level(Level::INFO),
-                    expect::span().with_target("b").at_level(Level::INFO),
-                ]),
-        )
-        .exit(expect::span().with_target("a").at_level(Level::INFO))
-        .exit(expect::span().with_target("b").at_level(Level::INFO))
-        .only()
-        .run_with_handle();
+  let (a_target_layer, a_handle) = target_layer("a");
+  let (b_target_layer, b_handle) = target_layer("b");
+  let (info_layer, info_handle) = layer::named("info")
+    .enter(expect::span().with_target("b").at_level(Level::INFO))
+    .enter(expect::span().with_target("a").at_level(Level::INFO))
+    .event(expect::event().with_fields(expect::msg("hello world")).in_scope(vec![
+      expect::span().with_target("a").at_level(Level::INFO),
+      expect::span().with_target("b").at_level(Level::INFO),
+    ]))
+    .exit(expect::span().with_target("a").at_level(Level::INFO))
+    .exit(expect::span().with_target("b").at_level(Level::INFO))
+    .only()
+    .run_with_handle();
 
-    let full_scope = vec![
-        expect::span().with_target("b").at_level(Level::TRACE),
-        expect::span().with_target("a").at_level(Level::INFO),
-        expect::span().with_target("b").at_level(Level::INFO),
-        expect::span().with_target("a").at_level(Level::TRACE),
-    ];
-    let (all_layer, all_handle) = layer::named("all")
-        .enter(expect::span().with_target("a").at_level(Level::TRACE))
-        .enter(expect::span().with_target("b").at_level(Level::INFO))
-        .enter(expect::span().with_target("a").at_level(Level::INFO))
-        .enter(expect::span().with_target("b").at_level(Level::TRACE))
-        .event(
-            expect::event()
-                .with_fields(expect::msg("hello world"))
-                .in_scope(full_scope.clone()),
-        )
-        .event(
-            expect::event()
-                .with_fields(expect::msg("hello to my target"))
-                .with_target("a")
-                .in_scope(full_scope.clone()),
-        )
-        .event(
-            expect::event()
-                .with_fields(expect::msg("hello to my target"))
-                .with_target("b")
-                .in_scope(full_scope),
-        )
-        .exit(expect::span().with_target("b").at_level(Level::TRACE))
-        .exit(expect::span().with_target("a").at_level(Level::INFO))
-        .exit(expect::span().with_target("b").at_level(Level::INFO))
-        .exit(expect::span().with_target("a").at_level(Level::TRACE))
-        .only()
-        .run_with_handle();
+  let full_scope = vec![
+    expect::span().with_target("b").at_level(Level::TRACE),
+    expect::span().with_target("a").at_level(Level::INFO),
+    expect::span().with_target("b").at_level(Level::INFO),
+    expect::span().with_target("a").at_level(Level::TRACE),
+  ];
+  let (all_layer, all_handle) = layer::named("all")
+    .enter(expect::span().with_target("a").at_level(Level::TRACE))
+    .enter(expect::span().with_target("b").at_level(Level::INFO))
+    .enter(expect::span().with_target("a").at_level(Level::INFO))
+    .enter(expect::span().with_target("b").at_level(Level::TRACE))
+    .event(
+      expect::event()
+        .with_fields(expect::msg("hello world"))
+        .in_scope(full_scope.clone()),
+    )
+    .event(
+      expect::event()
+        .with_fields(expect::msg("hello to my target"))
+        .with_target("a")
+        .in_scope(full_scope.clone()),
+    )
+    .event(
+      expect::event()
+        .with_fields(expect::msg("hello to my target"))
+        .with_target("b")
+        .in_scope(full_scope),
+    )
+    .exit(expect::span().with_target("b").at_level(Level::TRACE))
+    .exit(expect::span().with_target("a").at_level(Level::INFO))
+    .exit(expect::span().with_target("b").at_level(Level::INFO))
+    .exit(expect::span().with_target("a").at_level(Level::TRACE))
+    .only()
+    .run_with_handle();
 
-    let a_layer = a_target_layer.with_filter(filter::filter_fn(|meta| {
-        let target = meta.target();
-        target == "a" || target == module_path!()
-    }));
+  let a_layer = a_target_layer.with_filter(filter::filter_fn(|meta| {
+    let target = meta.target();
+    target == "a" || target == module_path!()
+  }));
 
-    let b_layer = b_target_layer.with_filter(filter::filter_fn(|meta| {
-        let target = meta.target();
-        target == "b" || target == module_path!()
-    }));
+  let b_layer = b_target_layer.with_filter(filter::filter_fn(|meta| {
+    let target = meta.target();
+    target == "b" || target == module_path!()
+  }));
 
-    let info_tree = info_layer
-        .and_then(a_layer)
-        .and_then(b_layer)
-        .with_filter(LevelFilter::INFO);
+  let info_tree = info_layer.and_then(a_layer).and_then(b_layer).with_filter(LevelFilter::INFO);
 
-    let subscriber = tracing_subscriber::registry()
-        .with(info_tree)
-        .with(all_layer);
-    let _guard = set_default(subscriber);
+  let subscriber = tracing_subscriber::registry().with(info_tree).with(all_layer);
+  let _guard = set_default(subscriber);
 
-    {
-        let _a1 = tracing::trace_span!(target: "a", "a/trace").entered();
-        let _b1 = tracing::info_span!(target: "b", "b/info").entered();
-        let _a2 = tracing::info_span!(target: "a", "a/info").entered();
-        let _b2 = tracing::trace_span!(target: "b", "b/trace").entered();
-        tracing::info!("hello world");
-        tracing::debug!(target: "a", "hello to my target");
-        tracing::debug!(target: "b", "hello to my target");
-    };
+  {
+    let _a1 = tracing::trace_span!(target: "a", "a/trace").entered();
+    let _b1 = tracing::info_span!(target: "b", "b/info").entered();
+    let _a2 = tracing::info_span!(target: "a", "a/info").entered();
+    let _b2 = tracing::trace_span!(target: "b", "b/trace").entered();
+    tracing::info!("hello world");
+    tracing::debug!(target: "a", "hello to my target");
+    tracing::debug!(target: "b", "hello to my target");
+  };
 
-    ensure_ok(all_handle.finished(), "mock expectations should finish")?;
-    ensure_ok(info_handle.finished(), "mock expectations should finish")?;
-    ensure_ok(a_handle.finished(), "mock expectations should finish")?;
-    ensure_ok(b_handle.finished(), "mock expectations should finish")?;
-    Ok(())
+  ensure_ok(all_handle.finished(), "mock expectations should finish")?;
+  ensure_ok(info_handle.finished(), "mock expectations should finish")?;
+  ensure_ok(a_handle.finished(), "mock expectations should finish")?;
+  ensure_ok(b_handle.finished(), "mock expectations should finish")?;
+  Ok(())
 }

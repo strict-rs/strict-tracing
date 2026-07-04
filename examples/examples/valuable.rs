@@ -13,57 +13,57 @@
 //! Therefore, when `valuable` support is not enabled, this example falls back to using
 //! `fmt::Debug` to record fields that implement `valuable::Valuable`.
 use std::error::Error;
-use tracing::{info, info_span};
+
+use tracing::info;
+use tracing::info_span;
 use valuable::Valuable;
 
 /// Example user data recorded as a structured `valuable` field.
 #[derive(Copy, Clone, Debug, Valuable)]
 struct User {
-    /// User display name.
-    name: &'static str,
-    /// User age in years.
-    age: u32,
-    /// User mailing address.
-    address: Address,
+  /// User display name.
+  name:    &'static str,
+  /// User age in years.
+  age:     u32,
+  /// User mailing address.
+  address: Address,
 }
 
 /// Example address nested inside the recorded user data.
 #[derive(Copy, Clone, Debug, Valuable)]
 struct Address {
-    /// Address country.
-    country: &'static str,
-    /// Address city.
-    city: &'static str,
-    /// Address street.
-    street: &'static str,
+  /// Address country.
+  country: &'static str,
+  /// Address city.
+  city:    &'static str,
+  /// Address street.
+  street:  &'static str,
 }
 
 fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
-        .try_init()?;
+  tracing_subscriber::fmt().with_max_level(tracing::Level::TRACE).try_init()?;
 
-    let user = User {
-        name: "Arwen Undomiel",
-        age: 3000,
-        address: Address {
-            country: "Middle Earth",
-            city: "Rivendell",
-            street: "leafy lane",
-        },
-    };
+  let user = User {
+    name:    "Arwen Undomiel",
+    age:     3000,
+    address: Address {
+      country: "Middle Earth",
+      city:    "Rivendell",
+      street:  "leafy lane",
+    },
+  };
 
-    // If the `valuable` feature is enabled, record `user` using its'
-    // `valuable::Valuable` implementation:
-    #[cfg(tracing_unstable)]
-    let span = info_span!("Processing", user = user.as_value());
+  // If the `valuable` feature is enabled, record `user` using its'
+  // `valuable::Valuable` implementation:
+  #[cfg(tracing_unstable)]
+  let span = info_span!("Processing", user = user.as_value());
 
-    // Otherwise, record `user` using its `fmt::Debug` implementation:
-    #[cfg(not(tracing_unstable))]
-    let span = info_span!("Processing", user = ?user);
+  // Otherwise, record `user` using its `fmt::Debug` implementation:
+  #[cfg(not(tracing_unstable))]
+  let span = info_span!("Processing", user = ?user);
 
-    let _handle = span.enter();
-    info!("Nothing to do");
+  let _handle = span.enter();
+  info!("Nothing to do");
 
-    Ok(())
+  Ok(())
 }

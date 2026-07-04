@@ -2,60 +2,61 @@
 
 use std::error::Error;
 #[cfg(not(tracing_unstable))]
-use std::io::{Write as _, stdout};
+use std::io::Write as _;
+#[cfg(not(tracing_unstable))]
+use std::io::stdout;
 
 /// Application code for the `tracing_unstable` build of this example.
 #[cfg(tracing_unstable)]
 mod app {
-    use std::collections::HashMap;
-    use tracing::field::valuable;
-    use tracing::{info, instrument};
-    use valuable::Valuable;
+  use std::collections::HashMap;
 
-    /// HTTP headers recorded as a `valuable` instrumentation field.
-    #[derive(Valuable)]
-    struct Headers<'a> {
-        /// Header names and values from the example request.
-        headers: HashMap<&'a str, &'a str>,
-    }
+  use tracing::field::valuable;
+  use tracing::info;
+  use tracing::instrument;
+  use valuable::Valuable;
 
-    /// Process the request headers while recording them through `valuable`.
-    // Currently there's no way to automatically apply valuable to a type, so
-    // use the fields argument for `instrument`.
-    #[instrument(fields(headers=valuable(&headers)))]
-    fn process(headers: Headers) {
-        info!("Handle request")
-    }
+  /// HTTP headers recorded as a `valuable` instrumentation field.
+  #[derive(Valuable)]
+  struct Headers<'a> {
+    /// Header names and values from the example request.
+    headers: HashMap<&'a str, &'a str>,
+  }
 
-    /// Run the unstable `valuable` instrumentation example.
-    pub(super) fn run() {
-        let headers = HashMap::from([
-            ("content-type", "application/json"),
-            ("content-length", "568"),
-            ("server", "github.com"),
-        ]);
+  /// Process the request headers while recording them through `valuable`.
+  // Currently there's no way to automatically apply valuable to a type, so
+  // use the fields argument for `instrument`.
+  #[instrument(fields(headers=valuable(&headers)))]
+  fn process(headers: Headers) {
+    info!("Handle request")
+  }
 
-        let http_headers = Headers { headers };
+  /// Run the unstable `valuable` instrumentation example.
+  pub(super) fn run() {
+    let headers = HashMap::from([
+      ("content-type", "application/json"),
+      ("content-length", "568"),
+      ("server", "github.com"),
+    ]);
 
-        process(http_headers);
-    }
+    let http_headers = Headers {
+      headers,
+    };
+
+    process(http_headers);
+  }
 }
 
 fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::TRACE)
-        .try_init()?;
+  tracing_subscriber::fmt().with_max_level(tracing::Level::TRACE).try_init()?;
 
-    #[cfg(tracing_unstable)]
-    app::run();
-    #[cfg(not(tracing_unstable))]
-    {
-        let mut output = stdout();
-        writeln!(
-            output,
-            "Nothing to do, this example needs --cfg=tracing_unstable to run"
-        )?;
-    };
+  #[cfg(tracing_unstable)]
+  app::run();
+  #[cfg(not(tracing_unstable))]
+  {
+    let mut output = stdout();
+    writeln!(output, "Nothing to do, this example needs --cfg=tracing_unstable to run")?;
+  };
 
-    Ok(())
+  Ok(())
 }

@@ -126,16 +126,10 @@
 #[cfg(feature = "std")]
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 pub use tracing_core::dispatcher::DefaultGuard;
-#[cfg(feature = "std")]
-#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-pub use tracing_core::dispatcher::set_default;
-#[cfg(feature = "std")]
-#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-pub use tracing_core::dispatcher::with_default;
-pub use tracing_core::dispatcher::{
-    Dispatch, SetGlobalDefaultError, WeakDispatch, get_default, set_global_default,
-};
-
+pub use tracing_core::dispatcher::Dispatch;
+pub use tracing_core::dispatcher::SetGlobalDefaultError;
+pub use tracing_core::dispatcher::WeakDispatch;
+pub use tracing_core::dispatcher::get_default;
 /// Private API for internal use by tracing's macros.
 ///
 /// This function is *not* considered part of `tracing`'s public API, and has no
@@ -143,3 +137,10 @@ pub use tracing_core::dispatcher::{
 /// don't say we didn;'t warn you.
 #[doc(hidden)]
 pub use tracing_core::dispatcher::has_been_set;
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+pub use tracing_core::dispatcher::set_default;
+pub use tracing_core::dispatcher::set_global_default;
+#[cfg(feature = "std")]
+#[cfg_attr(docsrs, doc(cfg(feature = "std")))]
+pub use tracing_core::dispatcher::with_default;

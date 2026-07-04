@@ -1,9 +1,3 @@
-disallowed-names = []
-cognitive-complexity-threshold = 100
-too-many-arguments-threshold = 8
-type-complexity-threshold = 375
-
-
 # Clippy thresholds and disallowed-lists. Lint levels themselves live in
 # `[workspace.lints.clippy]` in Cargo.toml. For the full reference of every
 # configurable key, see `template-clippy.toml`.
@@ -22,11 +16,11 @@ allow-indexing-slicing-in-tests  = false
 allow-useless-vec-in-tests       = false
 
 # ── Complexity / size thresholds ────────────────────────────────────────────
-# cognitive-complexity-threshold   = 20
-# excessive-nesting-threshold      = 4       # mirrors tsconfig max-depth
-# too-many-arguments-threshold     = 7
-# too-many-lines-threshold         = 90
-# type-complexity-threshold        = 160
+cognitive-complexity-threshold   = 20
+excessive-nesting-threshold      = 4       # mirrors tsconfig max-depth
+too-many-arguments-threshold     = 7
+too-many-lines-threshold         = 90
+type-complexity-threshold        = 160
 enum-variant-size-threshold      = 200
 enum-variant-name-threshold      = 3
 large-error-threshold            = 128
@@ -72,12 +66,12 @@ await-holding-invalid-types = [
 ]
 
 # ── Blocked placeholder names (bad variable names that AI agents love) ─────
-# disallowed-names = [
-#     "foo", "bar", "baz", "tmp", "temp",
-#     "data", "val", "thing", "stuff", "date",
-#     "todo", "fixme", "xxx", "test", "qux",
-#     "info", "value", "item", "price", "amount",
-# ]
+disallowed-names = [
+    "foo", "bar", "baz", "tmp", "temp",
+    "data", "val", "thing", "stuff", "date",
+    "todo", "fixme", "xxx", "test", "qux",
+    "info", "value", "item", "price", "amount",
+]
 
 # ── Disallowed macros (debug artefacts, stubs, ad-hoc error construction) ──
 # Ad-hoc error construction macros from `anyhow` are blocked workspace-wide;

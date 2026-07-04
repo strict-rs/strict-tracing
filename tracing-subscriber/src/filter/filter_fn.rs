@@ -1,12 +1,15 @@
-use crate::{
-    filter::LevelFilter,
-    layer::{Context, Layer},
-};
-use core::{any::type_name, fmt, marker::PhantomData};
-use tracing_core::{
-    Metadata,
-    subscriber::{Interest, Subscriber, SubscriberResult},
-};
+use core::any::type_name;
+use core::fmt;
+use core::marker::PhantomData;
+
+use tracing_core::Metadata;
+use tracing_core::subscriber::Interest;
+use tracing_core::subscriber::Subscriber;
+use tracing_core::subscriber::SubscriberResult;
+
+use crate::filter::LevelFilter;
+use crate::layer::Context;
+use crate::layer::Layer;
 
 /// A filter implemented by a closure or function pointer that
 /// determines whether a given span or event is enabled, based on its
@@ -26,10 +29,10 @@ use tracing_core::{
 /// [filtering]: crate::layer#filtering-with-layers
 #[derive(Clone)]
 pub struct FilterFn<F = fn(&Metadata<'_>) -> bool> {
-    /// Returns whether metadata should be enabled.
-    enabled: F,
-    /// Highest level this filter may enable.
-    max_level_hint: Option<LevelFilter>,
+  /// Returns whether metadata should be enabled.
+  enabled:        F,
+  /// Highest level this filter may enable.
+  max_level_hint: Option<LevelFilter>,
 }
 
 /// A filter implemented by a closure or function pointer that
@@ -49,19 +52,19 @@ pub struct FilterFn<F = fn(&Metadata<'_>) -> bool> {
 /// [global]: crate::layer#global-filtering
 /// [filtering]: crate::layer#filtering-with-layers
 pub struct DynFilterFn<
-    S,
-    // TODO(eliza): should these just be boxed functions?
-    F = fn(&Metadata<'_>, &Context<'_, S>) -> bool,
-    R = fn(&'static Metadata<'static>) -> Interest,
+  S,
+  // TODO(eliza): should these just be boxed functions?
+  F = fn(&Metadata<'_>, &Context<'_, S>) -> bool,
+  R = fn(&'static Metadata<'static>) -> Interest,
 > {
-    /// Returns whether metadata should be enabled for the current context.
-    enabled: F,
-    /// Optional static callsite interest calculator.
-    register_callsite: Option<R>,
-    /// Highest level this filter may enable.
-    max_level_hint: Option<LevelFilter>,
-    /// Connects the filter to the subscriber type observed by its context.
-    _s: PhantomData<fn(S)>,
+  /// Returns whether metadata should be enabled for the current context.
+  enabled:           F,
+  /// Optional static callsite interest calculator.
+  register_callsite: Option<R>,
+  /// Highest level this filter may enable.
+  max_level_hint:    Option<LevelFilter>,
+  /// Connects the filter to the subscriber type observed by its context.
+  _s:                PhantomData<fn(S)>,
 }
 
 // === impl FilterFn ===
@@ -114,9 +117,9 @@ pub struct DynFilterFn<
 /// ```
 pub const fn filter_fn<F>(f: F) -> FilterFn<F>
 where
-    F: Fn(&Metadata<'_>) -> bool,
+  F: Fn(&Metadata<'_>) -> bool,
 {
-    FilterFn::new(f)
+  FilterFn::new(f)
 }
 
 /// Constructs a [`DynFilterFn`] from a function or closure that returns `true`
@@ -140,40 +143,39 @@ where
 /// # Examples
 ///
 /// ```
-/// use tracing_subscriber::{
-///     layer::{Layer, SubscriberExt},
-///     filter,
-///     util::SubscriberInitExt,
-/// };
+/// use tracing_subscriber::filter;
+/// use tracing_subscriber::layer::Layer;
+/// use tracing_subscriber::layer::SubscriberExt;
+/// use tracing_subscriber::util::SubscriberInitExt;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 /// // Only enable spans or events within a span named "interesting_span".
 /// let my_filter = filter::dynamic_filter_fn(|metadata, cx| {
-///     // If this *is* "interesting_span", make sure to enable it.
-///     if metadata.is_span() && metadata.name() == "interesting_span" {
-///         return true;
-///     }
+///   // If this *is* "interesting_span", make sure to enable it.
+///   if metadata.is_span() && metadata.name() == "interesting_span" {
+///     return true;
+///   }
 ///
-///     // Otherwise, are we in an interesting span?
-///     if let Some(current_span) = cx.lookup_current() {
-///         return current_span.name() == "interesting_span";
-///     }
+///   // Otherwise, are we in an interesting span?
+///   if let Some(current_span) = cx.lookup_current() {
+///     return current_span.name() == "interesting_span";
+///   }
 ///
-///     false
+///   false
 /// });
 ///
 /// let my_layer = tracing_subscriber::fmt::layer();
 ///
 /// tracing_subscriber::registry()
-///     .with(my_layer.with_filter(my_filter))
-///     .try_init()?;
+///   .with(my_layer.with_filter(my_filter))
+///   .try_init()?;
 ///
 /// // This event will not be enabled.
 /// tracing::info!("something happened");
 ///
 /// tracing::info_span!("interesting_span").in_scope(|| {
-///     // This event will be enabled.
-///     tracing::debug!("something else happened");
+///   // This event will be enabled.
+///   tracing::debug!("something else happened");
 /// });
 /// # Ok(()) }
 /// ```
@@ -187,501 +189,485 @@ where
 /// [`Metadata`]: tracing_core::Metadata
 pub fn dynamic_filter_fn<S, F>(f: F) -> DynFilterFn<S, F>
 where
-    F: Fn(&Metadata<'_>, &Context<'_, S>) -> bool,
+  F: Fn(&Metadata<'_>, &Context<'_, S>) -> bool,
 {
-    DynFilterFn::new(f)
+  DynFilterFn::new(f)
 }
 
 impl<F> FilterFn<F>
 where
-    F: Fn(&Metadata<'_>) -> bool,
+  F: Fn(&Metadata<'_>) -> bool,
 {
-    /// Constructs a [`FilterFn`] from a function or closure that returns `true`
-    /// if a span or event should be enabled, based on its [`Metadata`].
-    ///
-    /// If determining whether a span or event should be enabled also requires
-    /// information about the current span context, use [`DynFilterFn`] instead.
-    ///
-    /// See the [documentation on per-layer filtering][plf] for details on using
-    /// [`Filter`]s.
-    ///
-    /// [`Filter`]: crate::layer::Filter
-    /// [plf]: crate::layer#per-layer-filtering
-    /// [`Metadata`]: tracing_core::Metadata
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tracing_subscriber::{
-    ///     layer::{Layer, SubscriberExt},
-    ///     filter::FilterFn,
-    ///     util::SubscriberInitExt,
-    /// };
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    /// let my_filter = FilterFn::new(|metadata| {
-    ///     // Only enable spans or events with the target "interesting_things"
-    ///     metadata.target() == "interesting_things"
-    /// });
-    ///
-    /// let my_layer = tracing_subscriber::fmt::layer();
-    ///
-    /// tracing_subscriber::registry()
-    ///     .with(my_layer.with_filter(my_filter))
-    ///     .try_init()?;
-    ///
-    /// // This event will not be enabled.
-    /// tracing::warn!("something important but uninteresting happened!");
-    ///
-    /// // This event will be enabled.
-    /// tracing::debug!(target: "interesting_things", "an interesting minor detail...");
-    /// # Ok(()) }
-    /// ```
-    pub const fn new(enabled: F) -> Self {
-        Self {
-            enabled,
-            max_level_hint: None,
-        }
+  /// Constructs a [`FilterFn`] from a function or closure that returns `true`
+  /// if a span or event should be enabled, based on its [`Metadata`].
+  ///
+  /// If determining whether a span or event should be enabled also requires
+  /// information about the current span context, use [`DynFilterFn`] instead.
+  ///
+  /// See the [documentation on per-layer filtering][plf] for details on using
+  /// [`Filter`]s.
+  ///
+  /// [`Filter`]: crate::layer::Filter
+  /// [plf]: crate::layer#per-layer-filtering
+  /// [`Metadata`]: tracing_core::Metadata
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use tracing_subscriber::{
+  ///     layer::{Layer, SubscriberExt},
+  ///     filter::FilterFn,
+  ///     util::SubscriberInitExt,
+  /// };
+  ///
+  /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+  /// let my_filter = FilterFn::new(|metadata| {
+  ///     // Only enable spans or events with the target "interesting_things"
+  ///     metadata.target() == "interesting_things"
+  /// });
+  ///
+  /// let my_layer = tracing_subscriber::fmt::layer();
+  ///
+  /// tracing_subscriber::registry()
+  ///     .with(my_layer.with_filter(my_filter))
+  ///     .try_init()?;
+  ///
+  /// // This event will not be enabled.
+  /// tracing::warn!("something important but uninteresting happened!");
+  ///
+  /// // This event will be enabled.
+  /// tracing::debug!(target: "interesting_things", "an interesting minor detail...");
+  /// # Ok(()) }
+  /// ```
+  pub const fn new(enabled: F) -> Self {
+    Self {
+      enabled,
+      max_level_hint: None,
+    }
+  }
+
+  /// Sets the highest verbosity [`Level`] the filter function will enable.
+  ///
+  /// The value passed to this method will be returned by this `FilterFn`'s
+  /// [`Filter::max_level_hint`] method.
+  ///
+  /// If the provided function will not enable all levels, it is recommended
+  /// to call this method to configure it with the most verbose level it will
+  /// enable.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use tracing_core::Level;
+  /// use tracing_subscriber::filter::LevelFilter;
+  /// use tracing_subscriber::filter::filter_fn;
+  /// use tracing_subscriber::layer::Layer;
+  /// use tracing_subscriber::layer::SubscriberExt;
+  /// use tracing_subscriber::util::SubscriberInitExt;
+  ///
+  /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+  /// let my_filter = filter_fn(|metadata| {
+  ///     // Only enable spans or events with targets starting with `my_crate`
+  ///     // and levels at or below `INFO`.
+  ///     metadata.level() <= &Level::INFO && metadata.target().starts_with("my_crate")
+  /// })
+  ///     // Since the filter closure will only enable the `INFO` level and
+  ///     // below, set the max level hint
+  ///     .with_max_level_hint(LevelFilter::INFO);
+  ///
+  /// let my_layer = tracing_subscriber::fmt::layer();
+  ///
+  /// tracing_subscriber::registry()
+  ///   .with(my_layer.with_filter(my_filter))
+  ///   .try_init()?;
+  /// # Ok(()) }
+  /// ```
+  ///
+  /// [`Level`]: tracing_core::Level
+  /// [`Filter::max_level_hint`]: crate::layer::Filter::max_level_hint
+  #[must_use]
+  pub fn with_max_level_hint(self, max_level_hint: impl Into<LevelFilter>) -> Self {
+    Self {
+      max_level_hint: Some(max_level_hint.into()),
+      ..self
+    }
+  }
+
+  /// Returns whether this filter enables the metadata.
+  #[inline]
+  pub(in crate::filter) fn is_enabled(&self, metadata: &Metadata<'_>) -> bool {
+    (self.enabled)(metadata)
+  }
+
+  /// Returns the callsite interest for this filter.
+  #[inline]
+  pub(in crate::filter) fn is_callsite_enabled(&self, metadata: &'static Metadata<'static>) -> Interest {
+    // Because `self.enabled` takes a `Metadata` only (and no `Context`
+    // parameter), we can reasonably assume its results are cacheable, and
+    // just return `Interest::always`/`Interest::never`.
+    if (self.enabled)(metadata) {
+      return Interest::always();
     }
 
-    /// Sets the highest verbosity [`Level`] the filter function will enable.
-    ///
-    /// The value passed to this method will be returned by this `FilterFn`'s
-    /// [`Filter::max_level_hint`] method.
-    ///
-    /// If the provided function will not enable all levels, it is recommended
-    /// to call this method to configure it with the most verbose level it will
-    /// enable.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tracing_subscriber::{
-    ///     layer::{Layer, SubscriberExt},
-    ///     filter::{filter_fn, LevelFilter},
-    ///     util::SubscriberInitExt,
-    /// };
-    /// use tracing_core::Level;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    /// let my_filter = filter_fn(|metadata| {
-    ///     // Only enable spans or events with targets starting with `my_crate`
-    ///     // and levels at or below `INFO`.
-    ///     metadata.level() <= &Level::INFO && metadata.target().starts_with("my_crate")
-    /// })
-    ///     // Since the filter closure will only enable the `INFO` level and
-    ///     // below, set the max level hint
-    ///     .with_max_level_hint(LevelFilter::INFO);
-    ///
-    /// let my_layer = tracing_subscriber::fmt::layer();
-    ///
-    /// tracing_subscriber::registry()
-    ///     .with(my_layer.with_filter(my_filter))
-    ///     .try_init()?;
-    /// # Ok(()) }
-    /// ```
-    ///
-    /// [`Level`]: tracing_core::Level
-    /// [`Filter::max_level_hint`]: crate::layer::Filter::max_level_hint
-    #[must_use]
-    pub fn with_max_level_hint(self, max_level_hint: impl Into<LevelFilter>) -> Self {
-        Self {
-            max_level_hint: Some(max_level_hint.into()),
-            ..self
-        }
-    }
-
-    /// Returns whether this filter enables the metadata.
-    #[inline]
-    pub(in crate::filter) fn is_enabled(&self, metadata: &Metadata<'_>) -> bool {
-        (self.enabled)(metadata)
-    }
-
-    /// Returns the callsite interest for this filter.
-    #[inline]
-    pub(in crate::filter) fn is_callsite_enabled(
-        &self,
-        metadata: &'static Metadata<'static>,
-    ) -> Interest {
-        // Because `self.enabled` takes a `Metadata` only (and no `Context`
-        // parameter), we can reasonably assume its results are cacheable, and
-        // just return `Interest::always`/`Interest::never`.
-        if (self.enabled)(metadata) {
-            return Interest::always();
-        }
-
-        Interest::never()
-    }
+    Interest::never()
+  }
 }
 
 impl<S, F> Layer<S> for FilterFn<F>
 where
-    F: Fn(&Metadata<'_>) -> bool + 'static,
-    S: Subscriber,
+  F: Fn(&Metadata<'_>) -> bool + 'static,
+  S: Subscriber,
 {
-    fn enabled(&self, metadata: &Metadata<'_>, _: Context<'_, S>) -> SubscriberResult<bool> {
-        Ok(self.is_enabled(metadata))
-    }
+  fn enabled(&self, metadata: &Metadata<'_>, _: Context<'_, S>) -> SubscriberResult<bool> {
+    Ok(self.is_enabled(metadata))
+  }
 
-    fn register_callsite(
-        &self,
-        metadata: &'static Metadata<'static>,
-    ) -> SubscriberResult<Interest> {
-        Ok(self.is_callsite_enabled(metadata))
-    }
+  fn register_callsite(&self, metadata: &'static Metadata<'static>) -> SubscriberResult<Interest> {
+    Ok(self.is_callsite_enabled(metadata))
+  }
 
-    fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
-        Ok(self.max_level_hint)
-    }
+  fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
+    Ok(self.max_level_hint)
+  }
 }
 
 impl<F> From<F> for FilterFn<F>
 where
-    F: Fn(&Metadata<'_>) -> bool,
+  F: Fn(&Metadata<'_>) -> bool,
 {
-    fn from(enabled: F) -> Self {
-        Self::new(enabled)
-    }
+  fn from(enabled: F) -> Self {
+    Self::new(enabled)
+  }
 }
 
 impl<F> fmt::Debug for FilterFn<F> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("FilterFn")
-            .field("enabled", &format_args!("{}", type_name::<F>()))
-            .field("max_level_hint", &self.max_level_hint)
-            .finish()
-    }
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.debug_struct("FilterFn")
+      .field("enabled", &format_args!("{}", type_name::<F>()))
+      .field("max_level_hint", &self.max_level_hint)
+      .finish()
+  }
 }
 
 // === impl DynFilterFn ==
 
 impl<S, F> DynFilterFn<S, F>
 where
-    F: Fn(&Metadata<'_>, &Context<'_, S>) -> bool,
+  F: Fn(&Metadata<'_>, &Context<'_, S>) -> bool,
 {
-    /// Constructs a [`Filter`] from a function or closure that returns `true`
-    /// if a span or event should be enabled in the current [span
-    /// context][`Context`].
-    ///
-    /// Unlike [`FilterFn`], a `DynFilterFn` is constructed from a closure or
-    /// function pointer that takes both the [`Metadata`] for a span or event
-    /// *and* the current [`Context`]. This means that a [`DynFilterFn`] can
-    /// choose whether to enable spans or events based on information about the
-    /// _current_ span (or its parents).
-    ///
-    /// If this is *not* necessary, use [`FilterFn`] instead.
-    ///
-    /// See the [documentation on per-layer filtering][plf] for details on using
-    /// [`Filter`]s.
-    ///
-    /// [`Filter`]: crate::layer::Filter
-    /// [plf]: crate::layer#per-layer-filtering
-    /// [`Context`]: crate::layer::Context
-    /// [`Metadata`]: tracing_core::Metadata
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tracing_subscriber::{
-    ///     layer::{Layer, SubscriberExt},
-    ///     filter::DynFilterFn,
-    ///     util::SubscriberInitExt,
-    /// };
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    /// // Only enable spans or events within a span named "interesting_span".
-    /// let my_filter = DynFilterFn::new(|metadata, cx| {
-    ///     // If this *is* "interesting_span", make sure to enable it.
-    ///     if metadata.is_span() && metadata.name() == "interesting_span" {
-    ///         return true;
-    ///     }
-    ///
-    ///     // Otherwise, are we in an interesting span?
-    ///     if let Some(current_span) = cx.lookup_current() {
-    ///         return current_span.name() == "interesting_span";
-    ///     }
-    ///
-    ///     false
-    /// });
-    ///
-    /// let my_layer = tracing_subscriber::fmt::layer();
-    ///
-    /// tracing_subscriber::registry()
-    ///     .with(my_layer.with_filter(my_filter))
-    ///     .try_init()?;
-    ///
-    /// // This event will not be enabled.
-    /// tracing::info!("something happened");
-    ///
-    /// tracing::info_span!("interesting_span").in_scope(|| {
-    ///     // This event will be enabled.
-    ///     tracing::debug!("something else happened");
-    /// });
-    /// # Ok(()) }
-    /// ```
-    pub fn new(enabled: F) -> Self {
-        Self {
-            enabled,
-            register_callsite: None,
-            max_level_hint: None,
-            _s: PhantomData,
-        }
+  /// Constructs a [`Filter`] from a function or closure that returns `true`
+  /// if a span or event should be enabled in the current [span
+  /// context][`Context`].
+  ///
+  /// Unlike [`FilterFn`], a `DynFilterFn` is constructed from a closure or
+  /// function pointer that takes both the [`Metadata`] for a span or event
+  /// *and* the current [`Context`]. This means that a [`DynFilterFn`] can
+  /// choose whether to enable spans or events based on information about the
+  /// _current_ span (or its parents).
+  ///
+  /// If this is *not* necessary, use [`FilterFn`] instead.
+  ///
+  /// See the [documentation on per-layer filtering][plf] for details on using
+  /// [`Filter`]s.
+  ///
+  /// [`Filter`]: crate::layer::Filter
+  /// [plf]: crate::layer#per-layer-filtering
+  /// [`Context`]: crate::layer::Context
+  /// [`Metadata`]: tracing_core::Metadata
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use tracing_subscriber::filter::DynFilterFn;
+  /// use tracing_subscriber::layer::Layer;
+  /// use tracing_subscriber::layer::SubscriberExt;
+  /// use tracing_subscriber::util::SubscriberInitExt;
+  ///
+  /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+  /// // Only enable spans or events within a span named "interesting_span".
+  /// let my_filter = DynFilterFn::new(|metadata, cx| {
+  ///   // If this *is* "interesting_span", make sure to enable it.
+  ///   if metadata.is_span() && metadata.name() == "interesting_span" {
+  ///     return true;
+  ///   }
+  ///
+  ///   // Otherwise, are we in an interesting span?
+  ///   if let Some(current_span) = cx.lookup_current() {
+  ///     return current_span.name() == "interesting_span";
+  ///   }
+  ///
+  ///   false
+  /// });
+  ///
+  /// let my_layer = tracing_subscriber::fmt::layer();
+  ///
+  /// tracing_subscriber::registry()
+  ///   .with(my_layer.with_filter(my_filter))
+  ///   .try_init()?;
+  ///
+  /// // This event will not be enabled.
+  /// tracing::info!("something happened");
+  ///
+  /// tracing::info_span!("interesting_span").in_scope(|| {
+  ///   // This event will be enabled.
+  ///   tracing::debug!("something else happened");
+  /// });
+  /// # Ok(()) }
+  /// ```
+  pub fn new(enabled: F) -> Self {
+    Self {
+      enabled,
+      register_callsite: None,
+      max_level_hint: None,
+      _s: PhantomData,
     }
+  }
 }
 
 impl<S, F, R> DynFilterFn<S, F, R>
 where
-    F: Fn(&Metadata<'_>, &Context<'_, S>) -> bool,
+  F: Fn(&Metadata<'_>, &Context<'_, S>) -> bool,
 {
-    /// Sets the highest verbosity [`Level`] the filter function will enable.
-    ///
-    /// The value passed to this method will be returned by this `DynFilterFn`'s
-    /// [`Filter::max_level_hint`] method.
-    ///
-    /// If the provided function will not enable all levels, it is recommended
-    /// to call this method to configure it with the most verbose level it will
-    /// enable.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use tracing_subscriber::{
-    ///     layer::{Layer, SubscriberExt},
-    ///     filter::{DynFilterFn, LevelFilter},
-    ///     util::SubscriberInitExt,
-    /// };
-    /// use tracing_core::Level;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    /// // Only enable spans or events with levels at or below `INFO`, if
-    /// // we are inside a span called "interesting_span".
-    /// let my_filter = DynFilterFn::new(|metadata, cx| {
-    ///     // If the level is greater than INFO, disable it.
-    ///     if metadata.level() > &Level::INFO {
-    ///         return false;
-    ///     }
-    ///
-    ///     // If any span in the current scope is named "interesting_span",
-    ///     // enable this span or event.
-    ///     for span in cx.lookup_current().iter().flat_map(|span| span.scope()) {
-    ///         if span.name() == "interesting_span" {
-    ///             return true;
-    ///          }
-    ///     }
-    ///
-    ///     // Otherwise, disable it.
-    ///     false
-    /// })
-    ///     // Since the filter closure will only enable the `INFO` level and
-    ///     // below, set the max level hint
-    ///     .with_max_level_hint(LevelFilter::INFO);
-    ///
-    /// let my_layer = tracing_subscriber::fmt::layer();
-    ///
-    /// tracing_subscriber::registry()
-    ///     .with(my_layer.with_filter(my_filter))
-    ///     .try_init()?;
-    /// # Ok(()) }
-    /// ```
-    ///
-    /// [`Level`]: tracing_core::Level
-    /// [`Filter::max_level_hint`]: crate::layer::Filter::max_level_hint
-    #[must_use]
-    pub fn with_max_level_hint(self, max_level_hint: impl Into<LevelFilter>) -> Self {
-        Self {
-            max_level_hint: Some(max_level_hint.into()),
-            ..self
-        }
+  /// Sets the highest verbosity [`Level`] the filter function will enable.
+  ///
+  /// The value passed to this method will be returned by this `DynFilterFn`'s
+  /// [`Filter::max_level_hint`] method.
+  ///
+  /// If the provided function will not enable all levels, it is recommended
+  /// to call this method to configure it with the most verbose level it will
+  /// enable.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use tracing_core::Level;
+  /// use tracing_subscriber::filter::DynFilterFn;
+  /// use tracing_subscriber::filter::LevelFilter;
+  /// use tracing_subscriber::layer::Layer;
+  /// use tracing_subscriber::layer::SubscriberExt;
+  /// use tracing_subscriber::util::SubscriberInitExt;
+  ///
+  /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+  /// // Only enable spans or events with levels at or below `INFO`, if
+  /// // we are inside a span called "interesting_span".
+  /// let my_filter = DynFilterFn::new(|metadata, cx| {
+  ///     // If the level is greater than INFO, disable it.
+  ///     if metadata.level() > &Level::INFO {
+  ///         return false;
+  ///     }
+  ///   
+  ///     // If any span in the current scope is named "interesting_span",
+  ///     // enable this span or event.
+  ///     for span in cx.lookup_current().iter().flat_map(|span| span.scope()) {
+  ///         if span.name() == "interesting_span" {
+  ///             return true;
+  ///          }
+  ///     }
+  ///   
+  ///     // Otherwise, disable it.
+  ///     false
+  /// })
+  ///     // Since the filter closure will only enable the `INFO` level and
+  ///     // below, set the max level hint
+  ///     .with_max_level_hint(LevelFilter::INFO);
+  ///
+  /// let my_layer = tracing_subscriber::fmt::layer();
+  ///
+  /// tracing_subscriber::registry()
+  ///   .with(my_layer.with_filter(my_filter))
+  ///   .try_init()?;
+  /// # Ok(()) }
+  /// ```
+  ///
+  /// [`Level`]: tracing_core::Level
+  /// [`Filter::max_level_hint`]: crate::layer::Filter::max_level_hint
+  #[must_use]
+  pub fn with_max_level_hint(self, max_level_hint: impl Into<LevelFilter>) -> Self {
+    Self {
+      max_level_hint: Some(max_level_hint.into()),
+      ..self
+    }
+  }
+
+  /// Adds a function for filtering callsites to this filter.
+  ///
+  /// When this filter's [`Filter::callsite_enabled`][cse] method is called,
+  /// the provided function will be used rather than the default.
+  ///
+  /// By default, `DynFilterFn` assumes that, because the filter _may_ depend
+  /// dynamically on the current [span context], its result should never be
+  /// cached. However, some filtering strategies may require dynamic information
+  /// from the current span context in *some* cases, but are able to make
+  /// static filtering decisions from [`Metadata`] alone in others.
+  ///
+  /// For example, consider the filter given in the example for
+  /// [`DynFilterFn::new`]. That filter enables all spans named
+  /// `interesting_span`, and any events and spans that occur inside of an
+  /// interesting span. Since the span's name is part of its static
+  /// [`Metadata`], the `interesting_span` can be enabled in
+  /// [`callsite_enabled`][cse]:
+  ///
+  /// ```
+  /// use tracing_core::subscriber::Interest;
+  /// use tracing_subscriber::filter::DynFilterFn;
+  /// use tracing_subscriber::layer::Layer;
+  /// use tracing_subscriber::layer::SubscriberExt;
+  /// use tracing_subscriber::util::SubscriberInitExt;
+  ///
+  /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
+  /// // Only enable spans or events within a span named "interesting_span".
+  /// let my_filter = DynFilterFn::new(|metadata, cx| {
+  ///   // If this *is* "interesting_span", make sure to enable it.
+  ///   if metadata.is_span() && metadata.name() == "interesting_span" {
+  ///     return true;
+  ///   }
+  ///
+  ///   // Otherwise, are we in an interesting span?
+  ///   if let Some(current_span) = cx.lookup_current() {
+  ///     return current_span.name() == "interesting_span";
+  ///   }
+  ///
+  ///   false
+  /// })
+  /// .with_callsite_filter(|metadata| {
+  ///   // If this is an "interesting_span", we know we will always
+  ///   // enable it.
+  ///   if metadata.is_span() && metadata.name() == "interesting_span" {
+  ///     return Interest::always();
+  ///   }
+  ///
+  ///   // Otherwise, it depends on whether or not we're in an interesting
+  ///   // span. You'll have to ask us again for each span/event!
+  ///   Interest::sometimes()
+  /// });
+  ///
+  /// let my_layer = tracing_subscriber::fmt::layer();
+  ///
+  /// tracing_subscriber::registry()
+  ///   .with(my_layer.with_filter(my_filter))
+  ///   .try_init()?;
+  /// # Ok(()) }
+  /// ```
+  ///
+  /// [cse]: crate::layer::Filter::callsite_enabled
+  /// [`enabled`]: crate::layer::Filter::enabled
+  /// [`Metadata`]: tracing_core::Metadata
+  /// [span context]: crate::layer::Context
+  pub fn with_callsite_filter<R2>(self, callsite_enabled: R2) -> DynFilterFn<S, F, R2>
+  where
+    R2: Fn(&'static Metadata<'static>) -> Interest,
+  {
+    let register_callsite = Some(callsite_enabled);
+    let Self {
+      enabled,
+      max_level_hint,
+      _s: subscriber_marker,
+      ..
+    } = self;
+    DynFilterFn {
+      enabled,
+      register_callsite,
+      max_level_hint,
+      _s: subscriber_marker,
+    }
+  }
+
+  /// Returns the default callsite interest for a context-sensitive filter.
+  fn default_callsite_enabled(&self, metadata: &Metadata<'_>) -> Interest {
+    // If it's below the configured max level, assume that `enabled` will
+    // never enable it...
+    if self.max_level_hint.is_some_and(|level| metadata.level() > &level) {
+      return Interest::never();
     }
 
-    /// Adds a function for filtering callsites to this filter.
-    ///
-    /// When this filter's [`Filter::callsite_enabled`][cse] method is called,
-    /// the provided function will be used rather than the default.
-    ///
-    /// By default, `DynFilterFn` assumes that, because the filter _may_ depend
-    /// dynamically on the current [span context], its result should never be
-    /// cached. However, some filtering strategies may require dynamic information
-    /// from the current span context in *some* cases, but are able to make
-    /// static filtering decisions from [`Metadata`] alone in others.
-    ///
-    /// For example, consider the filter given in the example for
-    /// [`DynFilterFn::new`]. That filter enables all spans named
-    /// `interesting_span`, and any events and spans that occur inside of an
-    /// interesting span. Since the span's name is part of its static
-    /// [`Metadata`], the `interesting_span` can be enabled in
-    /// [`callsite_enabled`][cse]:
-    ///
-    /// ```
-    /// use tracing_subscriber::{
-    ///     layer::{Layer, SubscriberExt},
-    ///     filter::DynFilterFn,
-    ///     util::SubscriberInitExt,
-    /// };
-    /// use tracing_core::subscriber::Interest;
-    ///
-    /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
-    /// // Only enable spans or events within a span named "interesting_span".
-    /// let my_filter = DynFilterFn::new(|metadata, cx| {
-    ///     // If this *is* "interesting_span", make sure to enable it.
-    ///     if metadata.is_span() && metadata.name() == "interesting_span" {
-    ///         return true;
-    ///     }
-    ///
-    ///     // Otherwise, are we in an interesting span?
-    ///     if let Some(current_span) = cx.lookup_current() {
-    ///         return current_span.name() == "interesting_span";
-    ///     }
-    ///
-    ///     false
-    /// }).with_callsite_filter(|metadata| {
-    ///     // If this is an "interesting_span", we know we will always
-    ///     // enable it.
-    ///     if metadata.is_span() && metadata.name() == "interesting_span" {
-    ///         return Interest::always();
-    ///     }
-    ///
-    ///     // Otherwise, it depends on whether or not we're in an interesting
-    ///     // span. You'll have to ask us again for each span/event!
-    ///     Interest::sometimes()
-    /// });
-    ///
-    /// let my_layer = tracing_subscriber::fmt::layer();
-    ///
-    /// tracing_subscriber::registry()
-    ///     .with(my_layer.with_filter(my_filter))
-    ///     .try_init()?;
-    /// # Ok(()) }
-    /// ```
-    ///
-    /// [cse]: crate::layer::Filter::callsite_enabled
-    /// [`enabled`]: crate::layer::Filter::enabled
-    /// [`Metadata`]: tracing_core::Metadata
-    /// [span context]: crate::layer::Context
-    pub fn with_callsite_filter<R2>(self, callsite_enabled: R2) -> DynFilterFn<S, F, R2>
-    where
-        R2: Fn(&'static Metadata<'static>) -> Interest,
-    {
-        let register_callsite = Some(callsite_enabled);
-        let Self {
-            enabled,
-            max_level_hint,
-            _s: subscriber_marker,
-            ..
-        } = self;
-        DynFilterFn {
-            enabled,
-            register_callsite,
-            max_level_hint,
-            _s: subscriber_marker,
-        }
-    }
-
-    /// Returns the default callsite interest for a context-sensitive filter.
-    fn default_callsite_enabled(&self, metadata: &Metadata<'_>) -> Interest {
-        // If it's below the configured max level, assume that `enabled` will
-        // never enable it...
-        if self
-            .max_level_hint
-            .is_some_and(|level| metadata.level() > &level)
-        {
-            return Interest::never();
-        }
-
-        // Otherwise, since this `enabled` function is dynamic and depends on
-        // the current context, we don't know whether this span or event will be
-        // enabled or not. Ask again every time it's recorded!
-        Interest::sometimes()
-    }
+    // Otherwise, since this `enabled` function is dynamic and depends on
+    // the current context, we don't know whether this span or event will be
+    // enabled or not. Ask again every time it's recorded!
+    Interest::sometimes()
+  }
 }
 
 impl<S, F, R> DynFilterFn<S, F, R>
 where
-    F: Fn(&Metadata<'_>, &Context<'_, S>) -> bool,
-    R: Fn(&'static Metadata<'static>) -> Interest,
+  F: Fn(&Metadata<'_>, &Context<'_, S>) -> bool,
+  R: Fn(&'static Metadata<'static>) -> Interest,
 {
-    /// Returns whether this filter enables the metadata in the provided context.
-    #[inline]
-    fn is_enabled(&self, metadata: &Metadata<'_>, cx: &Context<'_, S>) -> bool {
-        (self.enabled)(metadata, cx)
-    }
+  /// Returns whether this filter enables the metadata in the provided context.
+  #[inline]
+  fn is_enabled(&self, metadata: &Metadata<'_>, cx: &Context<'_, S>) -> bool {
+    (self.enabled)(metadata, cx)
+  }
 
-    /// Returns the callsite interest for this filter.
-    #[inline]
-    fn is_callsite_enabled(&self, metadata: &'static Metadata<'static>) -> Interest {
-        self.register_callsite.as_ref().map_or_else(
-            || self.default_callsite_enabled(metadata),
-            |callsite_enabled| callsite_enabled(metadata),
-        )
-    }
+  /// Returns the callsite interest for this filter.
+  #[inline]
+  fn is_callsite_enabled(&self, metadata: &'static Metadata<'static>) -> Interest {
+    self.register_callsite.as_ref().map_or_else(
+      || self.default_callsite_enabled(metadata),
+      |callsite_enabled| callsite_enabled(metadata),
+    )
+  }
 }
 
 impl<S, F, R> Layer<S> for DynFilterFn<S, F, R>
 where
-    F: Fn(&Metadata<'_>, &Context<'_, S>) -> bool + 'static,
-    R: Fn(&'static Metadata<'static>) -> Interest + 'static,
-    S: Subscriber,
+  F: Fn(&Metadata<'_>, &Context<'_, S>) -> bool + 'static,
+  R: Fn(&'static Metadata<'static>) -> Interest + 'static,
+  S: Subscriber,
 {
-    fn enabled(&self, metadata: &Metadata<'_>, cx: Context<'_, S>) -> SubscriberResult<bool> {
-        Ok(self.is_enabled(metadata, &cx))
-    }
+  fn enabled(&self, metadata: &Metadata<'_>, cx: Context<'_, S>) -> SubscriberResult<bool> {
+    Ok(self.is_enabled(metadata, &cx))
+  }
 
-    fn register_callsite(
-        &self,
-        metadata: &'static Metadata<'static>,
-    ) -> SubscriberResult<Interest> {
-        Ok(self.is_callsite_enabled(metadata))
-    }
+  fn register_callsite(&self, metadata: &'static Metadata<'static>) -> SubscriberResult<Interest> {
+    Ok(self.is_callsite_enabled(metadata))
+  }
 
-    fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
-        Ok(self.max_level_hint)
-    }
+  fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
+    Ok(self.max_level_hint)
+  }
 }
 
 impl<S, F, R> fmt::Debug for DynFilterFn<S, F, R> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut builder = f.debug_struct("DynFilterFn");
-        if self.register_callsite.is_some() {
-            builder
-                .field("enabled", &format_args!("{}", type_name::<F>()))
-                .field(
-                    "register_callsite",
-                    &format_args!("Some({})", type_name::<R>()),
-                )
-                .field("max_level_hint", &self.max_level_hint)
-                .finish()
-        } else {
-            builder
-                .field("enabled", &format_args!("{}", type_name::<F>()))
-                .field("register_callsite", &format_args!("None"))
-                .field("max_level_hint", &self.max_level_hint)
-                .finish()
-        }
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let mut builder = f.debug_struct("DynFilterFn");
+    if self.register_callsite.is_some() {
+      builder
+        .field("enabled", &format_args!("{}", type_name::<F>()))
+        .field("register_callsite", &format_args!("Some({})", type_name::<R>()))
+        .field("max_level_hint", &self.max_level_hint)
+        .finish()
+    } else {
+      builder
+        .field("enabled", &format_args!("{}", type_name::<F>()))
+        .field("register_callsite", &format_args!("None"))
+        .field("max_level_hint", &self.max_level_hint)
+        .finish()
     }
+  }
 }
 
 impl<S, F, R> Clone for DynFilterFn<S, F, R>
 where
-    F: Clone,
-    R: Clone,
+  F: Clone,
+  R: Clone,
 {
-    fn clone(&self) -> Self {
-        Self {
-            enabled: self.enabled.clone(),
-            register_callsite: self.register_callsite.clone(),
-            max_level_hint: self.max_level_hint,
-            _s: PhantomData,
-        }
+  fn clone(&self) -> Self {
+    Self {
+      enabled:           self.enabled.clone(),
+      register_callsite: self.register_callsite.clone(),
+      max_level_hint:    self.max_level_hint,
+      _s:                PhantomData,
     }
+  }
 }
 
 impl<F, S> From<F> for DynFilterFn<S, F>
 where
-    F: Fn(&Metadata<'_>, &Context<'_, S>) -> bool,
+  F: Fn(&Metadata<'_>, &Context<'_, S>) -> bool,
 {
-    fn from(f: F) -> Self {
-        Self::new(f)
-    }
+  fn from(f: F) -> Self {
+    Self::new(f)
+  }
 }
 
 // === PLF impls ===

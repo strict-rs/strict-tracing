@@ -9,11 +9,13 @@
 //! [`layer` module's documentation]: crate::layer#filtering-with-layers
 //! [`Layer`]: crate::layer
 #[cfg(not(all(feature = "registry", feature = "std")))]
-use crate::Layer;
-#[cfg(not(all(feature = "registry", feature = "std")))]
 use core::any::TypeId;
+
 #[cfg(not(all(feature = "registry", feature = "std")))]
 use tracing_core::Subscriber;
+
+#[cfg(not(all(feature = "registry", feature = "std")))]
+use crate::Layer;
 
 /// Closure-backed filter constructors and implementations.
 mod filter_fn;
@@ -37,7 +39,8 @@ feature! {
 mod level;
 
 pub use self::filter_fn::*;
-pub use self::level::{LevelFilter, ParseError as LevelParseError};
+pub use self::level::LevelFilter;
+pub use self::level::ParseError as LevelParseError;
 
 feature! {
     #![any(feature = "std", feature = "alloc")]
@@ -52,24 +55,24 @@ feature! {
 /// Returns whether a type ID identifies the per-layer-filter downcast marker.
 #[cfg(not(all(feature = "registry", feature = "std")))]
 pub(crate) const fn is_plf_downcast_marker(_: TypeId) -> bool {
-    false
+  false
 }
 
 /// Does a type implementing `Subscriber` contain any per-layer filters?
 #[cfg(not(all(feature = "registry", feature = "std")))]
 pub(crate) const fn subscriber_has_plf<S>(_: &S) -> bool
 where
-    S: Subscriber,
+  S: Subscriber,
 {
-    false
+  false
 }
 
 /// Does a type implementing `Layer` contain any per-layer filters?
 #[cfg(not(all(feature = "registry", feature = "std")))]
 pub(crate) const fn layer_has_plf<L, S>(_: &L) -> bool
 where
-    L: Layer<S>,
-    S: Subscriber,
+  L: Layer<S>,
+  S: Subscriber,
 {
-    false
+  false
 }

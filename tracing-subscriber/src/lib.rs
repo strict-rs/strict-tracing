@@ -46,35 +46,32 @@
 //!
 //! ## Feature Flags
 //!
-//! - `std`: Enables APIs that depend on the Rust standard library
-//!   (enabled by default).
+//! - `std`: Enables APIs that depend on the Rust standard library (enabled by default).
 //! - `alloc`: Depend on [`liballoc`] (enabled by "std").
-//! - `env-filter`: Enables the [`EnvFilter`] type, which implements filtering
-//!   similar to the [`env_logger` crate]. **Requires "std"**.
-//! - `fmt`: Enables the [`fmt`] module, which provides a subscriber
-//!   implementation for printing formatted representations of trace events.
-//!   Enabled by default. **Requires "registry" and "std"**.
-//! - `ansi`: Enables `fmt` support for ANSI terminal colors. Enabled by
-//!   default.
-//! - `registry`: enables the [`registry`] module. Enabled by default.
-//!   **Requires "std"**.
-//! - `json`: Enables `fmt` support for JSON output. In JSON output, the ANSI
-//!   feature does nothing. **Requires "fmt" and "std"**.
-//! - `local-time`: Enables local time formatting when using the [`time`
-//!   crate]'s timestamp formatters with the `fmt` subscriber.
+//! - `env-filter`: Enables the [`EnvFilter`] type, which implements filtering similar to the
+//!   [`env_logger` crate]. **Requires "std"**.
+//! - `fmt`: Enables the [`fmt`] module, which provides a subscriber implementation for printing
+//!   formatted representations of trace events. Enabled by default. **Requires "registry" and
+//!   "std"**.
+//! - `ansi`: Enables `fmt` support for ANSI terminal colors. Enabled by default.
+//! - `registry`: enables the [`registry`] module. Enabled by default. **Requires "std"**.
+//! - `json`: Enables `fmt` support for JSON output. In JSON output, the ANSI feature does nothing.
+//!   **Requires "fmt" and "std"**.
+//! - `local-time`: Enables local time formatting when using the [`time` crate]'s timestamp
+//!   formatters with the `fmt` subscriber.
 //!
 //! [`registry`]: mod@registry
 //!
 //! ### Optional Dependencies
 //!
-//! - [`tracing-log`]: Enables better formatting for events emitted by `log`
-//!   macros in the `fmt` subscriber. Enabled by default.
-//! - [`time`][`time` crate]: Enables support for using the [`time` crate] for timestamp
-//!   formatting in the `fmt` subscriber.
-//! - [`smallvec`]: Causes the `EnvFilter` type to use the `smallvec` crate (rather
-//!   than `Vec`) as a performance optimization. Enabled by default.
-//! - [`parking_lot`]: Use the `parking_lot` crate's `RwLock` implementation
-//!   rather than the Rust standard library's implementation.
+//! - [`tracing-log`]: Enables better formatting for events emitted by `log` macros in the `fmt`
+//!   subscriber. Enabled by default.
+//! - [`time`][`time` crate]: Enables support for using the [`time` crate] for timestamp formatting
+//!   in the `fmt` subscriber.
+//! - [`smallvec`]: Causes the `EnvFilter` type to use the `smallvec` crate (rather than `Vec`) as a
+//!   performance optimization. Enabled by default.
+//! - [`parking_lot`]: Use the `parking_lot` crate's `RwLock` implementation rather than the Rust
+//!   standard library's implementation.
 //!
 //! ### `no_std` Support
 //!
@@ -112,8 +109,8 @@
 //!
 //! The following unstable feature flags are currently available:
 //!
-//! * `valuable`: Enables support for serializing values recorded using the
-//!   [`valuable`] crate as structured JSON in the [`format::Json`] formatter.
+//! * `valuable`: Enables support for serializing values recorded using the [`valuable`] crate as
+//!   structured JSON in the [`format::Json`] formatter.
 //!
 //! #### Enabling Unstable Features
 //!
@@ -164,9 +161,9 @@
 
 #![no_std]
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
-    html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
-    issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
+  html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
+  html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
+  issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
 #![cfg_attr(
     docsrs,
@@ -233,6 +230,6 @@ feature! {
 /// Sealing traits for extension traits whose implementors are owned by this
 /// crate.
 mod sealed {
-    /// Prevents downstream crates from implementing sealed extension traits.
-    pub trait Sealed<A = ()> {}
+  /// Prevents downstream crates from implementing sealed extension traits.
+  pub trait Sealed<A = ()> {}
 }

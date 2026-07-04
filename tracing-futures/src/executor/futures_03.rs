@@ -1,130 +1,137 @@
-use crate::{Instrument as _, Instrumented, WithDispatch};
-use futures_task::{FutureObj, LocalFutureObj, LocalSpawn, Spawn, SpawnError};
+use futures_task::FutureObj;
+use futures_task::LocalFutureObj;
+use futures_task::LocalSpawn;
+use futures_task::Spawn;
+use futures_task::SpawnError;
+
+use crate::Instrument as _;
+use crate::Instrumented;
+use crate::WithDispatch;
 
 impl<T> Spawn for Instrumented<T>
 where
-    T: Spawn,
+  T: Spawn,
 {
-    /// Spawns a future that will be run to completion.
-    ///
-    /// # Errors
-    ///
-    /// The executor may be unable to spawn tasks. Spawn errors should
-    /// represent relatively rare scenarios, such as the executor
-    /// having been shut down so that it is no longer able to accept
-    /// tasks.
-    fn spawn_obj(&self, task: FutureObj<'static, ()>) -> Result<(), SpawnError> {
-        let Some(inner) = self.inner.as_ref() else {
-            return Err(SpawnError::shutdown());
-        };
-        let instrumented_task = task.instrument(self.span.clone());
-        inner.spawn_obj(FutureObj::new(Box::new(instrumented_task)))
-    }
+  /// Spawns a future that will be run to completion.
+  ///
+  /// # Errors
+  ///
+  /// The executor may be unable to spawn tasks. Spawn errors should
+  /// represent relatively rare scenarios, such as the executor
+  /// having been shut down so that it is no longer able to accept
+  /// tasks.
+  fn spawn_obj(&self, task: FutureObj<'static, ()>) -> Result<(), SpawnError> {
+    let Some(inner) = self.inner.as_ref() else {
+      return Err(SpawnError::shutdown());
+    };
+    let instrumented_task = task.instrument(self.span.clone());
+    inner.spawn_obj(FutureObj::new(Box::new(instrumented_task)))
+  }
 
-    /// Determines whether the executor is able to spawn new tasks.
-    ///
-    /// This method will return `Ok` when the executor is *likely*
-    /// (but not guaranteed) to accept a subsequent spawn attempt.
-    /// Likewise, an `Err` return means that `spawn` is likely, but
-    /// not guaranteed, to yield an error.
-    #[inline]
-    fn status(&self) -> Result<(), SpawnError> {
-        let Some(inner) = self.inner.as_ref() else {
-            return Err(SpawnError::shutdown());
-        };
-        inner.status()
-    }
+  /// Determines whether the executor is able to spawn new tasks.
+  ///
+  /// This method will return `Ok` when the executor is *likely*
+  /// (but not guaranteed) to accept a subsequent spawn attempt.
+  /// Likewise, an `Err` return means that `spawn` is likely, but
+  /// not guaranteed, to yield an error.
+  #[inline]
+  fn status(&self) -> Result<(), SpawnError> {
+    let Some(inner) = self.inner.as_ref() else {
+      return Err(SpawnError::shutdown());
+    };
+    inner.status()
+  }
 }
 
 impl<T> Spawn for WithDispatch<T>
 where
-    T: Spawn,
+  T: Spawn,
 {
-    /// Spawns a future that will be run to completion.
-    ///
-    /// # Errors
-    ///
-    /// The executor may be unable to spawn tasks. Spawn errors should
-    /// represent relatively rare scenarios, such as the executor
-    /// having been shut down so that it is no longer able to accept
-    /// tasks.
-    fn spawn_obj(&self, task: FutureObj<'static, ()>) -> Result<(), SpawnError> {
-        self.inner
-            .spawn_obj(FutureObj::new(Box::new(self.with_dispatch(task))))
-    }
+  /// Spawns a future that will be run to completion.
+  ///
+  /// # Errors
+  ///
+  /// The executor may be unable to spawn tasks. Spawn errors should
+  /// represent relatively rare scenarios, such as the executor
+  /// having been shut down so that it is no longer able to accept
+  /// tasks.
+  fn spawn_obj(&self, task: FutureObj<'static, ()>) -> Result<(), SpawnError> {
+    self.inner.spawn_obj(FutureObj::new(Box::new(self.with_dispatch(task))))
+  }
 
-    /// Determines whether the executor is able to spawn new tasks.
-    ///
-    /// This method will return `Ok` when the executor is *likely*
-    /// (but not guaranteed) to accept a subsequent spawn attempt.
-    /// Likewise, an `Err` return means that `spawn` is likely, but
-    /// not guaranteed, to yield an error.
-    #[inline]
-    fn status(&self) -> Result<(), SpawnError> {
-        self.inner.status()
-    }
+  /// Determines whether the executor is able to spawn new tasks.
+  ///
+  /// This method will return `Ok` when the executor is *likely*
+  /// (but not guaranteed) to accept a subsequent spawn attempt.
+  /// Likewise, an `Err` return means that `spawn` is likely, but
+  /// not guaranteed, to yield an error.
+  #[inline]
+  fn status(&self) -> Result<(), SpawnError> {
+    self.inner.status()
+  }
 }
 
 impl<T> LocalSpawn for Instrumented<T>
 where
-    T: LocalSpawn,
+  T: LocalSpawn,
 {
-    /// Spawns a future that will be run to completion.
-    ///
-    /// # Errors
-    ///
-    /// The executor may be unable to spawn tasks. Spawn errors should
-    /// represent relatively rare scenarios, such as the executor
-    /// having been shut down so that it is no longer able to accept
-    /// tasks.
-    fn spawn_local_obj(&self, task: LocalFutureObj<'static, ()>) -> Result<(), SpawnError> {
-        let Some(inner) = self.inner.as_ref() else {
-            return Err(SpawnError::shutdown());
-        };
-        let instrumented_task = task.instrument(self.span.clone());
-        inner.spawn_local_obj(LocalFutureObj::new(Box::new(instrumented_task)))
-    }
+  /// Spawns a future that will be run to completion.
+  ///
+  /// # Errors
+  ///
+  /// The executor may be unable to spawn tasks. Spawn errors should
+  /// represent relatively rare scenarios, such as the executor
+  /// having been shut down so that it is no longer able to accept
+  /// tasks.
+  fn spawn_local_obj(&self, task: LocalFutureObj<'static, ()>) -> Result<(), SpawnError> {
+    let Some(inner) = self.inner.as_ref() else {
+      return Err(SpawnError::shutdown());
+    };
+    let instrumented_task = task.instrument(self.span.clone());
+    inner.spawn_local_obj(LocalFutureObj::new(Box::new(instrumented_task)))
+  }
 
-    /// Determines whether the executor is able to spawn new tasks.
-    ///
-    /// This method will return `Ok` when the executor is *likely*
-    /// (but not guaranteed) to accept a subsequent spawn attempt.
-    /// Likewise, an `Err` return means that `spawn` is likely, but
-    /// not guaranteed, to yield an error.
-    #[inline]
-    fn status_local(&self) -> Result<(), SpawnError> {
-        let Some(inner) = self.inner.as_ref() else {
-            return Err(SpawnError::shutdown());
-        };
-        inner.status_local()
-    }
+  /// Determines whether the executor is able to spawn new tasks.
+  ///
+  /// This method will return `Ok` when the executor is *likely*
+  /// (but not guaranteed) to accept a subsequent spawn attempt.
+  /// Likewise, an `Err` return means that `spawn` is likely, but
+  /// not guaranteed, to yield an error.
+  #[inline]
+  fn status_local(&self) -> Result<(), SpawnError> {
+    let Some(inner) = self.inner.as_ref() else {
+      return Err(SpawnError::shutdown());
+    };
+    inner.status_local()
+  }
 }
 
 impl<T> LocalSpawn for WithDispatch<T>
 where
-    T: LocalSpawn,
+  T: LocalSpawn,
 {
-    /// Spawns a future that will be run to completion.
-    ///
-    /// # Errors
-    ///
-    /// The executor may be unable to spawn tasks. Spawn errors should
-    /// represent relatively rare scenarios, such as the executor
-    /// having been shut down so that it is no longer able to accept
-    /// tasks.
-    fn spawn_local_obj(&self, task: LocalFutureObj<'static, ()>) -> Result<(), SpawnError> {
-        self.inner
-            .spawn_local_obj(LocalFutureObj::new(Box::new(self.with_dispatch(task))))
-    }
+  /// Spawns a future that will be run to completion.
+  ///
+  /// # Errors
+  ///
+  /// The executor may be unable to spawn tasks. Spawn errors should
+  /// represent relatively rare scenarios, such as the executor
+  /// having been shut down so that it is no longer able to accept
+  /// tasks.
+  fn spawn_local_obj(&self, task: LocalFutureObj<'static, ()>) -> Result<(), SpawnError> {
+    self
+      .inner
+      .spawn_local_obj(LocalFutureObj::new(Box::new(self.with_dispatch(task))))
+  }
 
-    /// Determines whether the executor is able to spawn new tasks.
-    ///
-    /// This method will return `Ok` when the executor is *likely*
-    /// (but not guaranteed) to accept a subsequent spawn attempt.
-    /// Likewise, an `Err` return means that `spawn` is likely, but
-    /// not guaranteed, to yield an error.
-    #[inline]
-    fn status_local(&self) -> Result<(), SpawnError> {
-        self.inner.status_local()
-    }
+  /// Determines whether the executor is able to spawn new tasks.
+  ///
+  /// This method will return `Ok` when the executor is *likely*
+  /// (but not guaranteed) to accept a subsequent spawn attempt.
+  /// Likewise, an `Err` return means that `spawn` is likely, but
+  /// not guaranteed, to yield an error.
+  #[inline]
+  fn status_local(&self) -> Result<(), SpawnError> {
+    self.inner.status_local()
+  }
 }

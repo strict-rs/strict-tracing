@@ -12,11 +12,10 @@
 //!
 //! * [`Subscriber`], the trait implemented to collect trace data.
 //!
-//! * [`Metadata`] and [`Callsite`] provide information describing spans and
-//!   `Event`s.
+//! * [`Metadata`] and [`Callsite`] provide information describing spans and `Event`s.
 //!
-//! * [`Field`], [`FieldSet`], [`Value`], and [`ValueSet`] represent the
-//!   structured data attached to a span.
+//! * [`Field`], [`FieldSet`], [`Value`], and [`ValueSet`] represent the structured data attached to
+//!   a span.
 //!
 //! * [`Dispatch`] allows spans and events to be dispatched to `Subscriber`s.
 //!
@@ -66,8 +65,7 @@
 //!
 //! The following unstable feature flags are currently available:
 //!
-//! * `valuable`: Enables support for recording [field values] using the
-//!   [`valuable`] crate.
+//! * `valuable`: Enables support for recording [field values] using the [`valuable`] crate.
 //!
 //! #### Enabling Unstable Features
 //!
@@ -119,9 +117,9 @@
 
 #![no_std]
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
-    html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
-    issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
+  html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
+  html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
+  issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg), deny(rustdoc::broken_intra_doc_links))]
 extern crate alloc;
@@ -131,10 +129,13 @@ extern crate std;
 
 #[doc(hidden)]
 pub mod __macro_support {
-    // Re-export the `core` functions that are used in macros. This allows
-    // a crate to be named `core` and avoid name clashes.
-    // See here: https://github.com/tokio-rs/tracing/issues/2761
-    pub use core::{file, line, module_path, option::Option};
+  // Re-export the `core` functions that are used in macros. This allows
+  // a crate to be named `core` and avoid name clashes.
+  // See here: https://github.com/tokio-rs/tracing/issues/2761
+  pub use core::file;
+  pub use core::line;
+  pub use core::module_path;
+  pub use core::option::Option;
 }
 
 /// Statically constructs an [`Identifier`] for the provided [`Callsite`].
@@ -143,16 +144,17 @@ pub mod __macro_support {
 ///
 /// For example:
 /// ```rust
-/// use tracing_core::{callsite, identify_callsite};
+/// use tracing_core::callsite;
+/// use tracing_core::identify_callsite;
 /// # use tracing_core::{Metadata, subscriber::Interest};
 /// # fn main() {
 /// pub struct MyCallsite {
-///    // ...
+///   // ...
 /// }
 /// impl callsite::Callsite for MyCallsite {
 /// # fn set_interest(&self, _: Interest) { unimplemented!() }
 /// # fn metadata(&self) -> &Metadata { unimplemented!() }
-///     // ...
+///   // ...
 /// }
 ///
 /// static CALLSITE: MyCallsite = MyCallsite {
@@ -167,9 +169,9 @@ pub mod __macro_support {
 /// [`Callsite`]: callsite::Callsite
 #[macro_export]
 macro_rules! identify_callsite {
-    ($callsite:expr) => {
-        $crate::callsite::Identifier($callsite)
-    };
+  ($callsite:expr) => {
+    $crate::callsite::Identifier($callsite)
+  };
 }
 
 /// Statically constructs new span [metadata].
@@ -178,7 +180,9 @@ macro_rules! identify_callsite {
 /// ```rust
 /// # use tracing_core::{callsite::Callsite, subscriber::Interest};
 /// use tracing_core::metadata;
-/// use tracing_core::metadata::{Kind, Level, Metadata};
+/// use tracing_core::metadata::Kind;
+/// use tracing_core::metadata::Level;
+/// use tracing_core::metadata::Metadata;
 /// # fn main() {
 /// # pub struct MyCallsite { }
 /// # impl Callsite for MyCallsite {
@@ -190,7 +194,7 @@ macro_rules! identify_callsite {
 ///     // ...
 /// };
 ///
-/// static FOO_METADATA: Metadata = metadata!{
+/// static FOO_METADATA: Metadata = metadata! {
 ///     name: "foo",
 ///     target: module_path!(),
 ///     level: Level::DEBUG,
@@ -205,42 +209,28 @@ macro_rules! identify_callsite {
 /// [`Metadata::new`]: metadata::Metadata::new
 #[macro_export]
 macro_rules! metadata {
-    (
-        name: $name:expr,
-        target: $target:expr,
-        level: $level:expr,
-        fields: $fields:expr,
-        callsite: $callsite:expr,
-        kind: $kind:expr
-    ) => {
-        $crate::metadata! {
-            name: $name,
-            target: $target,
-            level: $level,
-            fields: $fields,
-            callsite: $callsite,
-            kind: $kind,
-        }
-    };
-    (
-        name: $name:expr,
-        target: $target:expr,
-        level: $level:expr,
-        fields: $fields:expr,
-        callsite: $callsite:expr,
-        kind: $kind:expr,
-    ) => {
-        $crate::metadata::Metadata::new(
-            $name,
-            $target,
-            $level,
-            $crate::__macro_support::Option::Some($crate::__macro_support::file!()),
-            $crate::__macro_support::Option::Some($crate::__macro_support::line!()),
-            $crate::__macro_support::Option::Some($crate::__macro_support::module_path!()),
-            &$crate::field::FieldSet::new($fields, $crate::identify_callsite!($callsite)),
-            $kind,
-        )
-    };
+  (name: $name:expr,target: $target:expr,level: $level:expr,fields: $fields:expr,callsite: $callsite:expr,kind: $kind:expr) => {
+    $crate::metadata! {
+        name: $name,
+        target: $target,
+        level: $level,
+        fields: $fields,
+        callsite: $callsite,
+        kind: $kind,
+    }
+  };
+  (name: $name:expr,target: $target:expr,level: $level:expr,fields: $fields:expr,callsite: $callsite:expr,kind: $kind:expr,) => {
+    $crate::metadata::Metadata::new(
+      $name,
+      $target,
+      $level,
+      $crate::__macro_support::Option::Some($crate::__macro_support::file!()),
+      $crate::__macro_support::Option::Some($crate::__macro_support::line!()),
+      $crate::__macro_support::Option::Some($crate::__macro_support::module_path!()),
+      &$crate::field::FieldSet::new($fields, $crate::identify_callsite!($callsite)),
+      $kind,
+    )
+  };
 }
 
 #[cfg(not(feature = "std"))]
@@ -261,28 +251,39 @@ pub mod subscriber;
 /// Parent relationship requested for a new span or event.
 #[derive(Debug)]
 enum Parent {
-    /// The new span will be a root span.
-    Root,
-    /// The new span will be rooted in the current span.
-    Current,
-    /// The new span has an explicitly-specified parent.
-    Explicit(span::Id),
+  /// The new span will be a root span.
+  Root,
+  /// The new span will be rooted in the current span.
+  Current,
+  /// The new span has an explicitly-specified parent.
+  Explicit(span::Id),
 }
 
 #[doc(inline)]
-pub use self::{
-    callsite::Callsite,
-    dispatcher::Dispatch,
-    event::Event,
-    field::Field,
-    metadata::{Level, LevelFilter, Metadata},
-    subscriber::{Subscriber, SubscriberError, SubscriberResult},
-};
-
-pub use self::{metadata::Kind, subscriber::Interest};
+pub use self::callsite::Callsite;
+#[doc(inline)]
+pub use self::dispatcher::Dispatch;
+#[doc(inline)]
+pub use self::event::Event;
+#[doc(inline)]
+pub use self::field::Field;
+pub use self::metadata::Kind;
+#[doc(inline)]
+pub use self::metadata::Level;
+#[doc(inline)]
+pub use self::metadata::LevelFilter;
+#[doc(inline)]
+pub use self::metadata::Metadata;
+pub use self::subscriber::Interest;
+#[doc(inline)]
+pub use self::subscriber::Subscriber;
+#[doc(inline)]
+pub use self::subscriber::SubscriberError;
+#[doc(inline)]
+pub use self::subscriber::SubscriberResult;
 
 /// Sealed extension points that prevent downstream trait implementations.
 mod sealed {
-    /// Seals traits that must not be implemented outside this crate.
-    pub trait Sealed {}
+  /// Seals traits that must not be implemented outside this crate.
+  pub trait Sealed {}
 }

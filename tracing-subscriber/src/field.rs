@@ -2,13 +2,15 @@
 //!
 //! [fields]: tracing_core::field
 //! [field visitors]: tracing_core::field::Visit
-use crate::sealed::Sealed;
-use core::{fmt, marker::PhantomData};
+use core::fmt;
+use core::marker::PhantomData;
+
+use tracing_core::Event;
 pub use tracing_core::field::Visit;
-use tracing_core::{
-    Event,
-    span::{Attributes, Record},
-};
+use tracing_core::span::Attributes;
+use tracing_core::span::Record;
+
+use crate::sealed::Sealed;
 pub mod debug;
 pub mod delimited;
 pub mod display;
@@ -25,32 +27,32 @@ pub mod display;
 ///
 /// [visitors]: tracing_core::field::Visit
 pub trait MakeVisitor<T> {
-    /// The visitor type produced by this `MakeVisitor`.
-    type Visitor: Visit;
+  /// The visitor type produced by this `MakeVisitor`.
+  type Visitor: Visit;
 
-    /// Make a new visitor for the provided `target`.
-    fn make_visitor(&self, target: T) -> Self::Visitor;
+  /// Make a new visitor for the provided `target`.
+  fn make_visitor(&self, target: T) -> Self::Visitor;
 }
 
 /// A [visitor] that produces output once it has visited a set of fields.
 ///
 /// [visitor]: tracing_core::field::Visit
 pub trait VisitOutput<Out>: Visit {
-    /// Completes the visitor, returning any output.
-    ///
-    /// This is called once a full set of fields has been visited.
-    fn finish(self) -> Out;
+  /// Completes the visitor, returning any output.
+  ///
+  /// This is called once a full set of fields has been visited.
+  fn finish(self) -> Out;
 
-    /// Visit a set of fields, and return the output of finishing the visitor
-    /// once the fields have been visited.
-    fn visit<R>(mut self, fields: &R) -> Out
-    where
-        R: RecordFields,
-        Self: Sized,
-    {
-        fields.record(&mut self);
-        self.finish()
-    }
+  /// Visit a set of fields, and return the output of finishing the visitor
+  /// once the fields have been visited.
+  fn visit<R>(mut self, fields: &R) -> Out
+  where
+    R: RecordFields,
+    Self: Sized,
+  {
+    fields.record(&mut self);
+    self.finish()
+  }
 }
 
 /// Extension trait implemented by types which can be recorded by a [visitor].
@@ -67,45 +69,45 @@ pub trait VisitOutput<Out>: Visit {
 /// use tracing_subscriber::field::RecordFields;
 ///
 /// struct MyVisitor {
-///     // ...
+///   // ...
 /// }
 /// # impl MyVisitor { fn new() -> Self { Self{} } }
 /// impl Visit for MyVisitor {
-///     // ...
+///   // ...
 /// # fn record_debug(&mut self, _: &Field, _: &dyn std::fmt::Debug) {}
 /// }
 ///
 /// fn record_with_my_visitor<R>(r: R)
 /// where
-///     R: RecordFields,
+///   R: RecordFields,
 /// {
-///     let mut visitor = MyVisitor::new();
-///     r.record(&mut visitor);
+///   let mut visitor = MyVisitor::new();
+///   r.record(&mut visitor);
 /// }
 /// ```
 /// [visitor]: tracing_core::field::Visit
 /// [attr]: tracing_core::span::Attributes
 /// [rec]: tracing_core::span::Record
 pub trait RecordFields: Sealed<RecordFieldsMarker> {
-    /// Record all the fields in `self` with the provided `visitor`.
-    fn record(&self, visitor: &mut dyn Visit);
+  /// Record all the fields in `self` with the provided `visitor`.
+  fn record(&self, visitor: &mut dyn Visit);
 }
 
 /// Extension trait implemented for all `MakeVisitor` implementations that
 /// produce a visitor implementing `VisitOutput`.
 pub trait MakeOutput<T, Out>
 where
-    Self: MakeVisitor<T> + Sealed<(T, Out)>,
-    Self::Visitor: VisitOutput<Out>,
+  Self: MakeVisitor<T> + Sealed<(T, Out)>,
+  Self::Visitor: VisitOutput<Out>,
 {
-    /// Visits all fields in `fields` with a new visitor constructed from
-    /// `target`.
-    fn visit_with<F>(&self, target: T, fields: &F) -> Out
-    where
-        F: RecordFields,
-    {
-        self.make_visitor(target).visit(fields)
-    }
+  /// Visits all fields in `fields` with a new visitor constructed from
+  /// `target`.
+  fn visit_with<F>(&self, target: T, fields: &F) -> Out
+  where
+    F: RecordFields,
+  {
+    self.make_visitor(target).visit(fields)
+  }
 }
 
 feature! {
@@ -123,95 +125,95 @@ feature! {
 /// Extension trait implemented by visitors to indicate that they write to a
 /// `fmt::Write` instance, and allow access to that writer.
 pub trait VisitFmt: VisitOutput<fmt::Result> {
-    /// Returns the formatter that this visitor writes to.
-    fn writer(&mut self) -> &mut dyn fmt::Write;
+  /// Returns the formatter that this visitor writes to.
+  fn writer(&mut self) -> &mut dyn fmt::Write;
 }
 
 /// Extension trait providing `MakeVisitor` combinators.
 pub trait MakeExt<T>
 where
-    Self: MakeVisitor<T> + Sized + Sealed<MakeExtMarker<T>>,
+  Self: MakeVisitor<T> + Sized + Sealed<MakeExtMarker<T>>,
 {
-    /// Wraps `self` so that any `fmt::Debug` fields are recorded using the
-    /// alternate formatter (`{:#?}`).
-    fn debug_alt(self) -> debug::Alt<Self> {
-        debug::Alt::new(self)
-    }
+  /// Wraps `self` so that any `fmt::Debug` fields are recorded using the
+  /// alternate formatter (`{:#?}`).
+  fn debug_alt(self) -> debug::Alt<Self> {
+    debug::Alt::new(self)
+  }
 
-    /// Wraps `self` so that any string fields named "message" are recorded
-    /// using `fmt::Display`.
-    fn display_messages(self) -> display::Messages<Self> {
-        display::Messages::new(self)
-    }
+  /// Wraps `self` so that any string fields named "message" are recorded
+  /// using `fmt::Display`.
+  fn display_messages(self) -> display::Messages<Self> {
+    display::Messages::new(self)
+  }
 
-    /// Wraps `self` so that when fields are formatted to a writer, they are
-    /// separated by the provided `delimiter`.
-    fn delimited<D>(self, delimiter: D) -> delimited::Delimited<D, Self>
-    where
-        D: AsRef<str> + Clone,
-        Self::Visitor: VisitFmt,
-    {
-        delimited::Delimited::new(delimiter, self)
-    }
+  /// Wraps `self` so that when fields are formatted to a writer, they are
+  /// separated by the provided `delimiter`.
+  fn delimited<D>(self, delimiter: D) -> delimited::Delimited<D, Self>
+  where
+    D: AsRef<str> + Clone,
+    Self::Visitor: VisitFmt,
+  {
+    delimited::Delimited::new(delimiter, self)
+  }
 }
 
 // === impl RecordFields ===
 
 impl Sealed<RecordFieldsMarker> for Event<'_> {}
 impl RecordFields for Event<'_> {
-    fn record(&self, visitor: &mut dyn Visit) {
-        Event::record(self, visitor);
-    }
+  fn record(&self, visitor: &mut dyn Visit) {
+    Event::record(self, visitor);
+  }
 }
 
 impl Sealed<RecordFieldsMarker> for Attributes<'_> {}
 impl RecordFields for Attributes<'_> {
-    fn record(&self, visitor: &mut dyn Visit) {
-        Attributes::record(self, visitor);
-    }
+  fn record(&self, visitor: &mut dyn Visit) {
+    Attributes::record(self, visitor);
+  }
 }
 
 impl Sealed<RecordFieldsMarker> for Record<'_> {}
 impl RecordFields for Record<'_> {
-    fn record(&self, visitor: &mut dyn Visit) {
-        Record::record(self, visitor);
-    }
+  fn record(&self, visitor: &mut dyn Visit) {
+    Record::record(self, visitor);
+  }
 }
 
 impl<F> Sealed<RecordFieldsMarker> for &F where F: RecordFields {}
 impl<F> RecordFields for &F
 where
-    F: RecordFields,
+  F: RecordFields,
 {
-    fn record(&self, visitor: &mut dyn Visit) {
-        F::record(*self, visitor);
-    }
+  fn record(&self, visitor: &mut dyn Visit) {
+    F::record(*self, visitor);
+  }
 }
 
 // === blanket impls ===
 
 impl<T, V, F> MakeVisitor<T> for F
 where
-    F: Fn(T) -> V,
-    V: Visit,
+  F: Fn(T) -> V,
+  V: Visit,
 {
-    type Visitor = V;
-    fn make_visitor(&self, target: T) -> Self::Visitor {
-        (self)(target)
-    }
+  type Visitor = V;
+  fn make_visitor(&self, target: T) -> Self::Visitor {
+    (self)(target)
+  }
 }
 
 impl<T, Out, M> Sealed<(T, Out)> for M
 where
-    M: MakeVisitor<T>,
-    M::Visitor: VisitOutput<Out>,
+  M: MakeVisitor<T>,
+  M::Visitor: VisitOutput<Out>,
 {
 }
 
 impl<T, Out, M> MakeOutput<T, Out> for M
 where
-    M: MakeVisitor<T>,
-    M::Visitor: VisitOutput<Out>,
+  M: MakeVisitor<T>,
+  M::Visitor: VisitOutput<Out>,
 {
 }
 
@@ -222,165 +224,154 @@ impl<T, M> MakeExt<T> for M where M: MakeVisitor<T> + Sized + Sealed<MakeExtMark
 #[derive(Debug)]
 #[doc(hidden)]
 pub struct MakeExtMarker<T> {
-    _p: PhantomData<T>,
+  _p: PhantomData<T>,
 }
 
 #[derive(Copy, Clone, Debug)]
 #[doc(hidden)]
 pub struct RecordFieldsMarker {
-    _p: (),
+  _p: (),
 }
 
 #[cfg(all(test, feature = "alloc"))]
 #[macro_use]
 pub(in crate::field) mod test_util {
-    use super::*;
-    use alloc::format;
-    pub(in crate::field) use alloc::string::String;
-    use strict_test_support::{TestFailure, ensure_some};
-    use tracing_core::{
-        callsite::Callsite,
-        field::{Field, Value, debug},
-        metadata::{Kind, Level, Metadata},
-        subscriber::Interest,
-    };
+  use alloc::format;
+  pub(in crate::field) use alloc::string::String;
 
-    pub(in crate::field) struct TestAttrs1;
-    pub(in crate::field) struct TestAttrs2;
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure_some;
+  use tracing_core::callsite::Callsite;
+  use tracing_core::field::Field;
+  use tracing_core::field::Value;
+  use tracing_core::field::debug;
+  use tracing_core::metadata::Kind;
+  use tracing_core::metadata::Level;
+  use tracing_core::metadata::Metadata;
+  use tracing_core::subscriber::Interest;
 
-    impl TestAttrs1 {
-        pub(in crate::field) fn with<T>(
-            f: impl FnOnce(Attributes<'_>) -> T,
-        ) -> Result<T, TestFailure> {
-            let fieldset = TEST_META_1.fields();
-            let question: &dyn Value = &"life, the universe, and everything";
-            let tricky: &dyn Value = &true;
-            let can_you_do_it: &dyn Value = &true;
-            let question_field = ensure_some(fieldset.field("question"), "question field exists")?;
-            let question_answer_field = ensure_some(
-                fieldset.field("question.answer"),
-                "question.answer field exists",
-            )?;
-            let tricky_field = ensure_some(fieldset.field("tricky"), "tricky field exists")?;
-            let can_you_do_it_field = ensure_some(
-                fieldset.field("can_you_do_it"),
-                "can_you_do_it field exists",
-            )?;
-            let values = &[
-                (&question_field, Some(question)),
-                (&question_answer_field, None),
-                (&tricky_field, Some(tricky)),
-                (&can_you_do_it_field, Some(can_you_do_it)),
-            ];
-            let valueset = fieldset.value_set(values);
-            let attrs = Attributes::new(&TEST_META_1, &valueset);
-            Ok(f(attrs))
-        }
+  use super::*;
+
+  pub(in crate::field) struct TestAttrs1;
+  pub(in crate::field) struct TestAttrs2;
+
+  impl TestAttrs1 {
+    pub(in crate::field) fn with<T>(f: impl FnOnce(Attributes<'_>) -> T) -> Result<T, TestFailure> {
+      let fieldset = TEST_META_1.fields();
+      let question: &dyn Value = &"life, the universe, and everything";
+      let tricky: &dyn Value = &true;
+      let can_you_do_it: &dyn Value = &true;
+      let question_field = ensure_some(fieldset.field("question"), "question field exists")?;
+      let question_answer_field = ensure_some(fieldset.field("question.answer"), "question.answer field exists")?;
+      let tricky_field = ensure_some(fieldset.field("tricky"), "tricky field exists")?;
+      let can_you_do_it_field = ensure_some(fieldset.field("can_you_do_it"), "can_you_do_it field exists")?;
+      let values = &[
+        (&question_field, Some(question)),
+        (&question_answer_field, None),
+        (&tricky_field, Some(tricky)),
+        (&can_you_do_it_field, Some(can_you_do_it)),
+      ];
+      let valueset = fieldset.value_set(values);
+      let attrs = Attributes::new(&TEST_META_1, &valueset);
+      Ok(f(attrs))
     }
+  }
 
-    impl TestAttrs2 {
-        #[allow(
-            clippy::single_call_fn,
-            reason = "field tests keep alternate attribute fixtures behind named builders"
-        )]
-        pub(in crate::field) fn with<T>(
-            f: impl FnOnce(Attributes<'_>) -> T,
-        ) -> Result<T, TestFailure> {
-            let fieldset = TEST_META_1.fields();
-            let empty_question = debug(&Option::<&str>::None);
-            let question: &dyn Value = &empty_question;
-            let answer: &dyn Value = &42;
-            let tricky: &dyn Value = &true;
-            let can_you_do_it: &dyn Value = &false;
-            let question_field = ensure_some(fieldset.field("question"), "question field exists")?;
-            let question_answer_field = ensure_some(
-                fieldset.field("question.answer"),
-                "question.answer field exists",
-            )?;
-            let tricky_field = ensure_some(fieldset.field("tricky"), "tricky field exists")?;
-            let can_you_do_it_field = ensure_some(
-                fieldset.field("can_you_do_it"),
-                "can_you_do_it field exists",
-            )?;
-            let values = &[
-                (&question_field, Some(question)),
-                (&question_answer_field, Some(answer)),
-                (&tricky_field, Some(tricky)),
-                (&can_you_do_it_field, Some(can_you_do_it)),
-            ];
-            let valueset = fieldset.value_set(values);
-            let attrs = Attributes::new(&TEST_META_1, &valueset);
-            Ok(f(attrs))
-        }
+  impl TestAttrs2 {
+    #[allow(
+      clippy::single_call_fn,
+      reason = "field tests keep alternate attribute fixtures behind named builders"
+    )]
+    pub(in crate::field) fn with<T>(f: impl FnOnce(Attributes<'_>) -> T) -> Result<T, TestFailure> {
+      let fieldset = TEST_META_1.fields();
+      let empty_question = debug(&Option::<&str>::None);
+      let question: &dyn Value = &empty_question;
+      let answer: &dyn Value = &42;
+      let tricky: &dyn Value = &true;
+      let can_you_do_it: &dyn Value = &false;
+      let question_field = ensure_some(fieldset.field("question"), "question field exists")?;
+      let question_answer_field = ensure_some(fieldset.field("question.answer"), "question.answer field exists")?;
+      let tricky_field = ensure_some(fieldset.field("tricky"), "tricky field exists")?;
+      let can_you_do_it_field = ensure_some(fieldset.field("can_you_do_it"), "can_you_do_it field exists")?;
+      let values = &[
+        (&question_field, Some(question)),
+        (&question_answer_field, Some(answer)),
+        (&tricky_field, Some(tricky)),
+        (&can_you_do_it_field, Some(can_you_do_it)),
+      ];
+      let valueset = fieldset.value_set(values);
+      let attrs = Attributes::new(&TEST_META_1, &valueset);
+      Ok(f(attrs))
     }
+  }
 
-    struct TestCallsite1;
-    static TEST_CALLSITE_1: &dyn Callsite = &TestCallsite1;
-    static TEST_META_1: Metadata<'static> = tracing_core::metadata! {
-        name: "field_test1",
-        target: module_path!(),
-        level: Level::INFO,
-        fields: &["question", "question.answer", "tricky", "can_you_do_it"],
-        callsite: TEST_CALLSITE_1,
-        kind: Kind::SPAN,
-    };
+  struct TestCallsite1;
+  static TEST_CALLSITE_1: &dyn Callsite = &TestCallsite1;
+  static TEST_META_1: Metadata<'static> = tracing_core::metadata! {
+      name: "field_test1",
+      target: module_path!(),
+      level: Level::INFO,
+      fields: &["question", "question.answer", "tricky", "can_you_do_it"],
+      callsite: TEST_CALLSITE_1,
+      kind: Kind::SPAN,
+  };
 
-    impl Callsite for TestCallsite1 {
-        fn set_interest(&self, _: Interest) {}
+  impl Callsite for TestCallsite1 {
+    fn set_interest(&self, _: Interest) {}
 
-        fn metadata(&self) -> &Metadata<'_> {
-            &TEST_META_1
-        }
+    fn metadata(&self) -> &Metadata<'_> {
+      &TEST_META_1
     }
+  }
 
-    pub(in crate::field) struct MakeDebug;
-    pub(in crate::field) struct DebugVisitor<'a> {
-        writer: &'a mut dyn fmt::Write,
-        err: fmt::Result,
-    }
+  pub(in crate::field) struct MakeDebug;
+  pub(in crate::field) struct DebugVisitor<'a> {
+    writer: &'a mut dyn fmt::Write,
+    err:    fmt::Result,
+  }
 
-    impl<'a> DebugVisitor<'a> {
-        pub(in crate::field) fn new(writer: &'a mut dyn fmt::Write) -> Self {
-            Self {
-                writer,
-                err: Ok(()),
-            }
-        }
+  impl<'a> DebugVisitor<'a> {
+    pub(in crate::field) fn new(writer: &'a mut dyn fmt::Write) -> Self {
+      Self {
+        writer,
+        err: Ok(()),
+      }
     }
+  }
 
-    impl Visit for DebugVisitor<'_> {
-        #[allow(
-            clippy::use_debug,
-            reason = "test debug visitor intentionally verifies Debug rendering for erased field values"
-        )]
-        fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-            if self.err.is_err() {
-                return;
-            }
-            if let Err(error) = write!(self.writer, "{field}=") {
-                self.err = Err(error);
-                return;
-            }
-            self.err = self.writer.write_str(format!("{value:?}").as_str());
-        }
+  impl Visit for DebugVisitor<'_> {
+    #[allow(
+      clippy::use_debug,
+      reason = "test debug visitor intentionally verifies Debug rendering for erased field values"
+    )]
+    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+      if self.err.is_err() {
+        return;
+      }
+      if let Err(error) = write!(self.writer, "{field}=") {
+        self.err = Err(error);
+        return;
+      }
+      self.err = self.writer.write_str(format!("{value:?}").as_str());
     }
+  }
 
-    impl VisitOutput<fmt::Result> for DebugVisitor<'_> {
-        fn finish(self) -> fmt::Result {
-            self.err
-        }
+  impl VisitOutput<fmt::Result> for DebugVisitor<'_> {
+    fn finish(self) -> fmt::Result {
+      self.err
     }
+  }
 
-    impl VisitFmt for DebugVisitor<'_> {
-        fn writer(&mut self) -> &mut dyn fmt::Write {
-            self.writer
-        }
+  impl VisitFmt for DebugVisitor<'_> {
+    fn writer(&mut self) -> &mut dyn fmt::Write {
+      self.writer
     }
+  }
 
-    impl<'a> MakeVisitor<&'a mut dyn fmt::Write> for MakeDebug {
-        type Visitor = DebugVisitor<'a>;
-        fn make_visitor(&self, writer: &'a mut dyn fmt::Write) -> DebugVisitor<'a> {
-            DebugVisitor::new(writer)
-        }
+  impl<'a> MakeVisitor<&'a mut dyn fmt::Write> for MakeDebug {
+    type Visitor = DebugVisitor<'a>;
+    fn make_visitor(&self, writer: &'a mut dyn fmt::Write) -> DebugVisitor<'a> {
+      DebugVisitor::new(writer)
     }
+  }
 }

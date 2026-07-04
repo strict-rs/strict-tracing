@@ -22,28 +22,32 @@
 #[path = "fmt/yak_shave.rs"]
 pub mod yak_shave;
 
-use std::{
-    error::Error,
-    fmt::{self, Debug, Display, Write as _},
+use std::error::Error;
+use std::fmt::Debug;
+use std::fmt::Display;
+use std::fmt::Write as _;
+use std::fmt::{
+  self,
 };
 
 /// Displays an erased field value with the representation used by `debug_fn`.
 struct DebugValue<'value> {
-    /// The erased field value to format.
-    value: &'value dyn Debug,
+  /// The erased field value to format.
+  value: &'value dyn Debug,
 }
 
 impl Display for DebugValue<'_> {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Debug::fmt(self.value, formatter)
-    }
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    Debug::fmt(self.value, formatter)
+  }
 }
 
 fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    use tracing_subscriber::{fmt::format, prelude::*};
+  use tracing_subscriber::fmt::format;
+  use tracing_subscriber::prelude::*;
 
-    // Format fields using the provided closure.
-    let format = format::debug_fn(|writer, field, value| {
+  // Format fields using the provided closure.
+  let format = format::debug_fn(|writer, field, value| {
         // We'll format the field name and value separated with a colon.
         write!(writer, "{field}: {}", DebugValue { value })
     })
@@ -52,19 +56,16 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
     // `tracing-subscriber` prelude.
     .delimited(", ");
 
-    // Create a `fmt` subscriber that uses our custom event format, and set it
-    // as the default.
-    tracing_subscriber::fmt().fmt_fields(format).try_init()?;
+  // Create a `fmt` subscriber that uses our custom event format, and set it
+  // as the default.
+  tracing_subscriber::fmt().fmt_fields(format).try_init()?;
 
-    // Shave some yaks!
-    let number_of_yaks = 3;
-    // this creates a new event, outside of any spans.
-    tracing::info!(number_of_yaks, "preparing to shave yaks");
+  // Shave some yaks!
+  let number_of_yaks = 3;
+  // this creates a new event, outside of any spans.
+  tracing::info!(number_of_yaks, "preparing to shave yaks");
 
-    let number_shaved = yak_shave::shave_all(number_of_yaks);
-    tracing::info!(
-        all_yaks_shaved = number_shaved == number_of_yaks,
-        "yak shaving completed."
-    );
-    Ok(())
+  let number_shaved = yak_shave::shave_all(number_of_yaks);
+  tracing::info!(all_yaks_shaved = number_shaved == number_of_yaks, "yak shaving completed.");
+  Ok(())
 }

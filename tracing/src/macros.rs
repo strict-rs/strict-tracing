@@ -189,7 +189,7 @@ macro_rules! record_all {
 /// # fn main() {
 /// let span = trace_span!("my span");
 /// span.in_scope(|| {
-///     // do work inside the span...
+///   // do work inside the span...
 /// });
 /// # }
 /// ```
@@ -270,7 +270,7 @@ macro_rules! trace_span {
 /// # fn main() {
 /// let span = debug_span!("my span");
 /// span.in_scope(|| {
-///     // do work inside the span...
+///   // do work inside the span...
 /// });
 /// # }
 /// ```
@@ -351,7 +351,7 @@ macro_rules! debug_span {
 /// # fn main() {
 /// let span = info_span!("my span");
 /// span.in_scope(|| {
-///     // do work inside the span...
+///   // do work inside the span...
 /// });
 /// # }
 /// ```
@@ -432,7 +432,7 @@ macro_rules! info_span {
 /// # fn main() {
 /// let span = warn_span!("my span");
 /// span.in_scope(|| {
-///     // do work inside the span...
+///   // do work inside the span...
 /// });
 /// # }
 /// ```
@@ -512,7 +512,7 @@ macro_rules! warn_span {
 /// # fn main() {
 /// let span = error_span!("my span");
 /// span.in_scope(|| {
-///     // do work inside the span...
+///   // do work inside the span...
 /// });
 /// # }
 /// ```
@@ -598,7 +598,6 @@ macro_rules! error_span {
 /// event!(Level::INFO, the_answer = data.0);
 /// # }
 /// ```
-///
 // /// Note that *unlike `span!`*, `event!` requires a value for all fields. As
 // /// events are recorded immediately when the macro is invoked, there is no
 // /// opportunity for fields to be recorded later. A trailing comma on the final
@@ -1089,16 +1088,15 @@ macro_rules! span_enabled {
 /// metadata provided to the `enabled!` macro. Some situations that can result
 /// in false positives or false negatives include:
 ///
-/// - If a subscriber is using a filter which may enable a span or event based
-///   on field names, but `enabled!` is invoked without listing field names,
-///   `enabled!` may return a false negative if a specific field name would
-///   cause the subscriber to enable something that would otherwise be disabled.
-/// - If a subscriber is using a filter which enables or disables specific events by
-///   file path and line number,  a particular event may be enabled/disabled
-///   even if an `enabled!` invocation with the same level, target, and fields
-///   indicated otherwise.
-/// - The subscriber can choose to enable _only_ spans or _only_ events, which `enabled`
-///   will not reflect.
+/// - If a subscriber is using a filter which may enable a span or event based on field names, but
+///   `enabled!` is invoked without listing field names, `enabled!` may return a false negative if a
+///   specific field name would cause the subscriber to enable something that would otherwise be
+///   disabled.
+/// - If a subscriber is using a filter which enables or disables specific events by file path and
+///   line number,  a particular event may be enabled/disabled even if an `enabled!` invocation with
+///   the same level, target, and fields indicated otherwise.
+/// - The subscriber can choose to enable _only_ spans or _only_ events, which `enabled` will not
+///   reflect.
 ///
 /// `enabled!()` requires a [level](crate::Level) argument, an optional `target:`
 /// argument, and an optional set of field names. If the fields are not provided,
@@ -1111,10 +1109,11 @@ macro_rules! span_enabled {
 /// If the current subscriber is interested in recording `DEBUG`-level spans and
 /// events in the current file and module path, this will evaluate to true:
 /// ```rust
-/// use tracing::{enabled, Level};
+/// use tracing::Level;
+/// use tracing::enabled;
 ///
 /// if enabled!(Level::DEBUG) {
-///     // some expensive work...
+///   // some expensive work...
 /// }
 /// ```
 ///
@@ -2749,10 +2748,9 @@ macro_rules! callsite2 {
 // TODO: determine if this ought to be public API?`
 #[doc(hidden)]
 macro_rules! level_enabled {
-    ($lvl:expr) => {
-        $lvl <= $crate::level_filters::STATIC_MAX_LEVEL
-            && $lvl <= $crate::level_filters::LevelFilter::current()
-    };
+  ($lvl:expr) => {
+    $lvl <= $crate::level_filters::STATIC_MAX_LEVEL && $lvl <= $crate::level_filters::LevelFilter::current()
+  };
 }
 
 #[doc(hidden)]
@@ -3762,15 +3760,15 @@ macro_rules! fieldset {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! level_to_log {
-    ($level:expr) => {
-        match $level {
-            $crate::Level::ERROR => $crate::log::Level::Error,
-            $crate::Level::WARN => $crate::log::Level::Warn,
-            $crate::Level::INFO => $crate::log::Level::Info,
-            $crate::Level::DEBUG => $crate::log::Level::Debug,
-            _ => $crate::log::Level::Trace,
-        }
-    };
+  ($level:expr) => {
+    match $level {
+      $crate::Level::ERROR => $crate::log::Level::Error,
+      $crate::Level::WARN => $crate::log::Level::Warn,
+      $crate::Level::INFO => $crate::log::Level::Info,
+      $crate::Level::DEBUG => $crate::log::Level::Debug,
+      _ => $crate::log::Level::Trace,
+    }
+  };
 }
 
 #[doc(hidden)]
@@ -3788,85 +3786,85 @@ macro_rules! __tracing_stringify {
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __tracing_log {
-    ($level:expr, $callsite:expr, $value_set:expr) => {};
+  ($level:expr, $callsite:expr, $value_set:expr) => {};
 }
 
 #[cfg(feature = "log")]
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __tracing_log {
-    ($level:expr, $callsite:expr, $value_set:expr) => {
-        $crate::if_log_enabled! { $level, {
-            use $crate::log;
-            let level = $crate::level_to_log!($level);
-            if level <= log::max_level() {
-                let meta = $callsite.metadata();
-                let log_meta = log::Metadata::builder()
-                    .level(level)
-                    .target(meta.target())
-                    .build();
-                let logger = log::logger();
-                if logger.enabled(&log_meta) {
-                    $crate::__macro_support::__tracing_log(meta, logger, log_meta, $value_set)
-                }
+  ($level:expr, $callsite:expr, $value_set:expr) => {
+    $crate::if_log_enabled! { $level, {
+        use $crate::log;
+        let level = $crate::level_to_log!($level);
+        if level <= log::max_level() {
+            let meta = $callsite.metadata();
+            let log_meta = log::Metadata::builder()
+                .level(level)
+                .target(meta.target())
+                .build();
+            let logger = log::logger();
+            if logger.enabled(&log_meta) {
+                $crate::__macro_support::__tracing_log(meta, logger, log_meta, $value_set)
             }
-        }}
-    };
+        }
+    }}
+  };
 }
 
 #[cfg(not(feature = "log"))]
 #[doc(hidden)]
 #[macro_export]
 macro_rules! if_log_enabled {
-    ($lvl:expr, $e:expr;) => {
-        $crate::if_log_enabled! { $lvl, $e }
-    };
-    ($lvl:expr, $if_log:block) => {
-        $crate::if_log_enabled! { $lvl, $if_log else {} }
-    };
-    ($lvl:expr, $if_log:block else $else_block:block) => {
-        $else_block
-    };
+  ($lvl:expr, $e:expr;) => {
+    $crate::if_log_enabled! { $lvl, $e }
+  };
+  ($lvl:expr, $if_log:block) => {
+    $crate::if_log_enabled! { $lvl, $if_log else {} }
+  };
+  ($lvl:expr, $if_log:block else $else_block:block) => {
+    $else_block
+  };
 }
 
 #[cfg(all(feature = "log", not(feature = "log-always")))]
 #[doc(hidden)]
 #[macro_export]
 macro_rules! if_log_enabled {
-    ($lvl:expr, $e:expr;) => {
-        $crate::if_log_enabled! { $lvl, $e }
-    };
-    ($lvl:expr, $if_log:block) => {
-        $crate::if_log_enabled! { $lvl, $if_log else {} }
-    };
-    ($lvl:expr, $if_log:block else $else_block:block) => {
-        if $crate::level_to_log!($lvl) <= $crate::log::STATIC_MAX_LEVEL {
-            if !$crate::dispatcher::has_been_set() {
-                $if_log
-            } else {
-                $else_block
-            }
-        } else {
-            $else_block
-        }
-    };
+  ($lvl:expr, $e:expr;) => {
+    $crate::if_log_enabled! { $lvl, $e }
+  };
+  ($lvl:expr, $if_log:block) => {
+    $crate::if_log_enabled! { $lvl, $if_log else {} }
+  };
+  ($lvl:expr, $if_log:block else $else_block:block) => {
+    if $crate::level_to_log!($lvl) <= $crate::log::STATIC_MAX_LEVEL {
+      if !$crate::dispatcher::has_been_set() {
+        $if_log
+      } else {
+        $else_block
+      }
+    } else {
+      $else_block
+    }
+  };
 }
 
 #[cfg(all(feature = "log", feature = "log-always"))]
 #[doc(hidden)]
 #[macro_export]
 macro_rules! if_log_enabled {
-    ($lvl:expr, $e:expr;) => {
-        $crate::if_log_enabled! { $lvl, $e }
-    };
-    ($lvl:expr, $if_log:block) => {
-        $crate::if_log_enabled! { $lvl, $if_log else {} }
-    };
-    ($lvl:expr, $if_log:block else $else_block:block) => {
-        if $crate::level_to_log!($lvl) <= $crate::log::STATIC_MAX_LEVEL {
-            $if_log
-        } else {
-            $else_block
-        }
-    };
+  ($lvl:expr, $e:expr;) => {
+    $crate::if_log_enabled! { $lvl, $e }
+  };
+  ($lvl:expr, $if_log:block) => {
+    $crate::if_log_enabled! { $lvl, $if_log else {} }
+  };
+  ($lvl:expr, $if_log:block else $else_block:block) => {
+    if $crate::level_to_log!($lvl) <= $crate::log::STATIC_MAX_LEVEL {
+      $if_log
+    } else {
+      $else_block
+    }
+  };
 }

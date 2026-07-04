@@ -6,20 +6,18 @@
 //! that describe all `tracing` spans and events. Attributes describing spans
 //! include:
 //!
-//! - An [`Id`] assigned by the subscriber that uniquely identifies it in relation
-//!   to other spans.
+//! - An [`Id`] assigned by the subscriber that uniquely identifies it in relation to other spans.
 //! - The span's [parent] in the trace tree.
-//! - [Metadata] that describes static characteristics of all spans
-//!   originating from that callsite, such as its name, source code location,
-//!   [verbosity level], and the names of its fields.
+//! - [Metadata] that describes static characteristics of all spans originating from that callsite,
+//!   such as its name, source code location, [verbosity level], and the names of its fields.
 //!
 //! # Creating Spans
 //!
 //! Spans are created using the [`span!`] macro. This macro is invoked with the
 //! following arguments, in order:
 //!
-//! - The [`target`] and/or [`parent`][parent] attributes, if the user wishes to
-//!   override their default values.
+//! - The [`target`] and/or [`parent`][parent] attributes, if the user wishes to override their
+//!   default values.
 //! - The span's [verbosity level]
 //! - A string literal providing the span's name.
 //! - Finally, zero or more arbitrary key/value fields.
@@ -28,7 +26,8 @@
 //!
 //! For example:
 //! ```rust
-//! use tracing::{span, Level};
+//! use tracing::Level;
+//! use tracing::span;
 //!
 //! /// Construct a new span at the `INFO` level named "my_span", with a single
 //! /// field named answer , with the value `42`.
@@ -73,12 +72,12 @@
 //!
 //! // Perform some work inside of the context of `my_span`...
 //! // Dropping the `_enter` guard will exit the span.
-//!```
+//! ```
 //!
-//! <div class="example-wrap" style="display:inline-block"><pre class="compile_fail" style="white-space:normal;font:inherit;">
-//!     <strong>Warning</strong>: In asynchronous code that uses async/await syntax,
-//!     <code>Span::enter</code> may produce incorrect traces if the returned drop
-//!     guard is held across an await point. See
+//! <div class="example-wrap" style="display:inline-block"><pre class="compile_fail"
+//! style="white-space:normal;font:inherit;">     <strong>Warning</strong>: In asynchronous code
+//! that uses async/await syntax,     <code>Span::enter</code> may produce incorrect traces if the
+//! returned drop     guard is held across an await point. See
 //!     <a href="struct.Span.html#in-asynchronous-code">the method documentation</a>
 //!     for details.
 //! </pre></div>
@@ -109,13 +108,13 @@
 //! let my_span = span!(Level::TRACE, "my_span", my_var = &my_var);
 //!
 //! my_span.in_scope(|| {
-//!     // perform some work in the context of `my_span`...
+//!   // perform some work in the context of `my_span`...
 //! });
 //!
 //! // Perform some work outside of the context of `my_span`...
 //!
 //! my_span.in_scope(|| {
-//!     // Perform some more work in the context of `my_span`.
+//!   // Perform some more work in the context of `my_span`.
 //! });
 //! ```
 //!
@@ -139,18 +138,18 @@
 //! # use tracing::{Level, span};
 //! // this span is considered the "root" of a new trace tree:
 //! span!(Level::INFO, "root").in_scope(|| {
-//!     // since we are now inside "root", this span is considered a child
-//!     // of "root":
-//!     span!(Level::DEBUG, "outer_child").in_scope(|| {
-//!         // this span is a child of "outer_child", which is in turn a
-//!         // child of "root":
-//!         span!(Level::TRACE, "inner_child").in_scope(|| {
-//!             // and so on...
-//!         });
+//!   // since we are now inside "root", this span is considered a child
+//!   // of "root":
+//!   span!(Level::DEBUG, "outer_child").in_scope(|| {
+//!     // this span is a child of "outer_child", which is in turn a
+//!     // child of "root":
+//!     span!(Level::TRACE, "inner_child").in_scope(|| {
+//!       // and so on...
 //!     });
-//!     // another span created here would also be a child of "root".
+//!   });
+//!   // another span created here would also be a child of "root".
 //! });
-//!```
+//! ```
 //!
 //! In addition, the parent of a span may be explicitly specified in
 //! the `span!` macro. For example:
@@ -202,18 +201,18 @@
 //! # use std::task::{Context, Poll};
 //! # use std::pin::Pin;
 //! struct MyFuture {
-//!    // data
-//!    span: tracing::Span,
+//!   // data
+//!   span: tracing::Span,
 //! }
 //!
 //! impl Future for MyFuture {
-//!     type Output = ();
+//!   type Output = ();
 //!
-//!     fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
-//!         let _enter = self.span.enter();
-//!         // Do actual future work...
+//!   fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
+//!     let _enter = self.span.enter();
+//!     // Do actual future work...
 //! # Poll::Ready(())
-//!     }
+//!   }
 //! }
 //! ```
 //!
@@ -240,13 +239,12 @@
 //! ```
 //! # use tracing::{Level, span};
 //! {
-//!     span!(Level::TRACE, "my_span").in_scope(|| {
-//!         // perform some work in the context of `my_span`...
-//!     }); // --> Subscriber::exit(my_span)
+//!   span!(Level::TRACE, "my_span").in_scope(|| {
+//!     // perform some work in the context of `my_span`...
+//!   }); // --> Subscriber::exit(my_span)
 //!
-//!     // The handle to `my_span` only lives inside of this block; when it is
-//!     // dropped, the subscriber will be informed via `try_close`.
-//!
+//!   // The handle to `my_span` only lives inside of this block; when it is
+//!   // dropped, the subscriber will be informed via `try_close`.
 //! } // --> Subscriber::try_close(my_span) -> true
 //! ```
 //!
@@ -277,7 +275,7 @@
 //! let _enter = span.enter();
 //! for i in 0..n {
 //!     # let _ = i;
-//!     // ...
+//!   // ...
 //! }
 //! ```
 //! Or, should we create a new span for each iteration of the loop, as in:
@@ -285,9 +283,9 @@
 //! # use tracing::{Level, span};
 //! # let n = 1u64;
 //! for i in 0..n {
-//!     let span = span!(Level::TRACE, "my_loop", iteration = i);
-//!     let _enter = span.enter();
-//!     // ...
+//!   let span = span!(Level::TRACE, "my_loop", iteration = i);
+//!   let _enter = span.enter();
+//!   // ...
 //! }
 //! ```
 //!
@@ -318,27 +316,30 @@
 //! [guard]: Entered
 //! [parent]: #span-relationships
 
-pub use tracing_core::span::{Attributes, Id, Record};
+use core::fmt;
+use core::hash::Hash;
+use core::hash::Hasher;
+use core::marker::PhantomData;
+use core::mem;
+use core::ops::Deref;
 
-use crate::{
-    Metadata,
-    dispatcher::{self, Dispatch},
-    field,
-    sealed::Sealed,
+pub use tracing_core::span::Attributes;
+pub use tracing_core::span::Id;
+pub use tracing_core::span::Record;
+
+use crate::Metadata;
+use crate::dispatcher::Dispatch;
+use crate::dispatcher::{
+  self,
 };
-use core::{
-    fmt,
-    hash::{Hash, Hasher},
-    marker::PhantomData,
-    mem,
-    ops::Deref,
-};
+use crate::field;
+use crate::sealed::Sealed;
 
 /// Trait implemented by types which have a span `Id`.
 pub trait AsId: Sealed {
-    /// Returns the `Id` of the span that `self` corresponds to, or `None` if
-    /// this corresponds to a disabled span.
-    fn as_id(&self) -> Option<&Id>;
+  /// Returns the `Id` of the span that `self` corresponds to, or `None` if
+  /// this corresponds to a disabled span.
+  fn as_id(&self) -> Option<&Id>;
 }
 
 /// A handle representing a span, with the capability to enter the span if it
@@ -349,15 +350,15 @@ pub trait AsId: Sealed {
 /// manner regardless of whether or not the trace is currently being collected.
 #[derive(Clone)]
 pub struct Span {
-    /// A handle used to enter the span when it is not executing.
-    ///
-    /// If this is `None`, then the span has either closed or was never enabled.
-    inner: Option<Inner>,
-    /// Metadata describing the span.
-    ///
-    /// This might be `Some` even if `inner` is `None`, in the case that the
-    /// span is disabled but the metadata is needed for `log` support.
-    meta: Option<&'static Metadata<'static>>,
+  /// A handle used to enter the span when it is not executing.
+  ///
+  /// If this is `None`, then the span has either closed or was never enabled.
+  inner: Option<Inner>,
+  /// Metadata describing the span.
+  ///
+  /// This might be `Some` even if `inner` is `None`, in the case that the
+  /// span is disabled but the metadata is needed for `log` support.
+  meta:  Option<&'static Metadata<'static>>,
 }
 
 /// A handle representing the capacity to enter a span which is known to exist.
@@ -367,14 +368,14 @@ pub struct Span {
 /// span handles; users should typically not need to interact with it directly.
 #[derive(Debug)]
 pub(crate) struct Inner {
-    /// The span's ID, as provided by `subscriber`.
-    id: Id,
+  /// The span's ID, as provided by `subscriber`.
+  id: Id,
 
-    /// The subscriber that will receive events relating to this span.
-    ///
-    /// This should be the same subscriber that provided this span with its
-    /// `id`.
-    subscriber: Dispatch,
+  /// The subscriber that will receive events relating to this span.
+  ///
+  /// This should be the same subscriber that provided this span with its
+  /// `id`.
+  subscriber: Dispatch,
 }
 
 /// A guard representing a span which has been entered and is currently
@@ -388,8 +389,8 @@ pub(crate) struct Inner {
 #[derive(Debug)]
 #[must_use = "once a span has been entered, it should be exited"]
 pub struct Entered<'a> {
-    /// The span that was entered.
-    span: &'a Span,
+  /// The span that was entered.
+  span: &'a Span,
 }
 
 /// An owned version of [`Entered`], a guard representing a span which has been
@@ -403,16 +404,16 @@ pub struct Entered<'a> {
 #[derive(Debug)]
 #[must_use = "once a span has been entered, it should be exited"]
 pub struct EnteredSpan {
-    /// The span that was entered.
-    span: Span,
+  /// The span that was entered.
+  span: Span,
 
-    /// ```compile_fail
-    /// use tracing::span::*;
-    /// trait AssertSend: Send {}
-    ///
-    /// impl AssertSend for EnteredSpan {}
-    /// ```
-    _not_send: PhantomNotSend,
+  /// ```compile_fail
+  /// use tracing::span::*;
+  /// trait AssertSend: Send {}
+  ///
+  /// impl AssertSend for EnteredSpan {}
+  /// ```
+  _not_send: PhantomNotSend,
 }
 
 /// `log` target for all span lifecycle (creation/enter/exit/close) records.
@@ -425,1213 +426,1175 @@ const ACTIVITY_LOG_TARGET: &str = "tracing::span::active";
 // ===== impl Span =====
 
 impl Span {
-    /// Constructs a new `Span` with the given [metadata] and set of
-    /// [field values].
-    ///
-    /// The new span will be constructed by the currently-active [`Subscriber`],
-    /// with the current span as its parent (if one exists).
-    ///
-    /// After the span is constructed, [field values] and/or [`follows_from`]
-    /// annotations may be added to it.
-    ///
-    /// [metadata]: super::Metadata
-    /// [`Subscriber`]: super::subscriber::Subscriber
-    /// [field values]: super::field::ValueSet
-    /// [`follows_from`]: super::Span::follows_from
-    #[must_use]
-    pub fn new(meta: &'static Metadata<'static>, values: &field::ValueSet<'_>) -> Self {
-        dispatcher::get_default(|dispatch| Self::new_with(meta, values, dispatch))
-    }
+  /// Constructs a new `Span` with the given [metadata] and set of
+  /// [field values].
+  ///
+  /// The new span will be constructed by the currently-active [`Subscriber`],
+  /// with the current span as its parent (if one exists).
+  ///
+  /// After the span is constructed, [field values] and/or [`follows_from`]
+  /// annotations may be added to it.
+  ///
+  /// [metadata]: super::Metadata
+  /// [`Subscriber`]: super::subscriber::Subscriber
+  /// [field values]: super::field::ValueSet
+  /// [`follows_from`]: super::Span::follows_from
+  #[must_use]
+  pub fn new(meta: &'static Metadata<'static>, values: &field::ValueSet<'_>) -> Self {
+    dispatcher::get_default(|dispatch| Self::new_with(meta, values, dispatch))
+  }
 
-    #[inline]
-    #[doc(hidden)]
-    #[allow(
-        clippy::single_call_fn,
-        reason = "doc-hidden constructor lets macro and manual paths reuse an explicit Dispatch"
-    )]
-    #[must_use]
-    pub fn new_with(
-        meta: &'static Metadata<'static>,
-        values: &field::ValueSet<'_>,
-        dispatch: &Dispatch,
-    ) -> Self {
-        let new_span = Attributes::new(meta, values);
-        Self::make_with(meta, &new_span, dispatch)
-    }
+  #[inline]
+  #[doc(hidden)]
+  #[allow(
+    clippy::single_call_fn,
+    reason = "doc-hidden constructor lets macro and manual paths reuse an explicit Dispatch"
+  )]
+  #[must_use]
+  pub fn new_with(meta: &'static Metadata<'static>, values: &field::ValueSet<'_>, dispatch: &Dispatch) -> Self {
+    let new_span = Attributes::new(meta, values);
+    Self::make_with(meta, &new_span, dispatch)
+  }
 
-    /// Constructs a new `Span` as the root of its own trace tree, with the
-    /// given [metadata] and set of [field values].
-    ///
-    /// After the span is constructed, [field values] and/or [`follows_from`]
-    /// annotations may be added to it.
-    ///
-    /// [metadata]: super::Metadata
-    /// [field values]: super::field::ValueSet
-    /// [`follows_from`]: super::Span::follows_from
-    #[must_use]
-    pub fn new_root(meta: &'static Metadata<'static>, values: &field::ValueSet<'_>) -> Self {
-        dispatcher::get_default(|dispatch| Self::new_root_with(meta, values, dispatch))
-    }
+  /// Constructs a new `Span` as the root of its own trace tree, with the
+  /// given [metadata] and set of [field values].
+  ///
+  /// After the span is constructed, [field values] and/or [`follows_from`]
+  /// annotations may be added to it.
+  ///
+  /// [metadata]: super::Metadata
+  /// [field values]: super::field::ValueSet
+  /// [`follows_from`]: super::Span::follows_from
+  #[must_use]
+  pub fn new_root(meta: &'static Metadata<'static>, values: &field::ValueSet<'_>) -> Self {
+    dispatcher::get_default(|dispatch| Self::new_root_with(meta, values, dispatch))
+  }
 
-    #[inline]
-    #[doc(hidden)]
-    #[allow(
-        clippy::single_call_fn,
-        reason = "doc-hidden root constructor lets macro and manual paths reuse an explicit Dispatch"
-    )]
-    #[must_use]
-    pub fn new_root_with(
-        meta: &'static Metadata<'static>,
-        values: &field::ValueSet<'_>,
-        dispatch: &Dispatch,
-    ) -> Self {
-        let new_span = Attributes::new_root(meta, values);
-        Self::make_with(meta, &new_span, dispatch)
-    }
+  #[inline]
+  #[doc(hidden)]
+  #[allow(
+    clippy::single_call_fn,
+    reason = "doc-hidden root constructor lets macro and manual paths reuse an explicit Dispatch"
+  )]
+  #[must_use]
+  pub fn new_root_with(meta: &'static Metadata<'static>, values: &field::ValueSet<'_>, dispatch: &Dispatch) -> Self {
+    let new_span = Attributes::new_root(meta, values);
+    Self::make_with(meta, &new_span, dispatch)
+  }
 
-    /// Constructs a new `Span` as child of the given parent span, with the
-    /// given [metadata] and set of [field values].
-    ///
-    /// After the span is constructed, [field values] and/or [`follows_from`]
-    /// annotations may be added to it.
-    ///
-    /// [metadata]: super::Metadata
-    /// [field values]: super::field::ValueSet
-    /// [`follows_from`]: super::Span::follows_from
-    pub fn child_of(
-        parent: impl Into<Option<Id>>,
-        meta: &'static Metadata<'static>,
-        values: &field::ValueSet<'_>,
-    ) -> Self {
-        let mut parent_id = parent.into();
-        dispatcher::get_default(move |dispatch| {
-            Self::child_of_with(Option::take(&mut parent_id), meta, values, dispatch)
-        })
-    }
+  /// Constructs a new `Span` as child of the given parent span, with the
+  /// given [metadata] and set of [field values].
+  ///
+  /// After the span is constructed, [field values] and/or [`follows_from`]
+  /// annotations may be added to it.
+  ///
+  /// [metadata]: super::Metadata
+  /// [field values]: super::field::ValueSet
+  /// [`follows_from`]: super::Span::follows_from
+  pub fn child_of(parent: impl Into<Option<Id>>, meta: &'static Metadata<'static>, values: &field::ValueSet<'_>) -> Self {
+    let mut parent_id = parent.into();
+    dispatcher::get_default(move |dispatch| Self::child_of_with(Option::take(&mut parent_id), meta, values, dispatch))
+  }
 
-    #[inline]
-    #[doc(hidden)]
-    #[allow(
-        clippy::single_call_fn,
-        reason = "doc-hidden explicit-parent constructor lets macro paths pass a prepared Dispatch"
-    )]
-    pub fn child_of_with(
-        parent: impl Into<Option<Id>>,
-        meta: &'static Metadata<'static>,
-        values: &field::ValueSet<'_>,
-        dispatch: &Dispatch,
-    ) -> Self {
-        let new_span = parent.into().map_or_else(
-            || Attributes::new_root(meta, values),
-            |parent_id| Attributes::child_of(parent_id, meta, values),
+  #[inline]
+  #[doc(hidden)]
+  #[allow(
+    clippy::single_call_fn,
+    reason = "doc-hidden explicit-parent constructor lets macro paths pass a prepared Dispatch"
+  )]
+  pub fn child_of_with(
+    parent: impl Into<Option<Id>>,
+    meta: &'static Metadata<'static>,
+    values: &field::ValueSet<'_>,
+    dispatch: &Dispatch,
+  ) -> Self {
+    let new_span = parent.into().map_or_else(
+      || Attributes::new_root(meta, values),
+      |parent_id| Attributes::child_of(parent_id, meta, values),
+    );
+    Self::make_with(meta, &new_span, dispatch)
+  }
+
+  /// Constructs a new disabled span with the given `Metadata`.
+  ///
+  /// This should be used when a span is constructed from a known callsite,
+  /// but the subscriber indicates that it is disabled.
+  ///
+  /// Entering, exiting, and recording values on this span will not notify the
+  /// `Subscriber` but _may_ record log messages if the `log` feature flag is
+  /// enabled.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "public disabled-span constructor represents subscriber-disabled callsites"
+  )]
+  #[must_use]
+  pub const fn new_disabled(meta: &'static Metadata<'static>) -> Self {
+    Self {
+      inner: None,
+      meta:  Some(meta),
+    }
+  }
+
+  /// Constructs a new span that is *completely disabled*.
+  ///
+  /// This can be used rather than `Option<Span>` to represent cases where a
+  /// span is not present.
+  ///
+  /// Entering, exiting, and recording values on this span will do nothing.
+  #[must_use]
+  pub const fn none() -> Self {
+    Self {
+      inner: None, meta: None
+    }
+  }
+
+  /// Returns a handle to the span [considered by the `Subscriber`] to be the
+  /// current span.
+  ///
+  /// If the subscriber indicates that it does not track the current span, or
+  /// that the thread from which this function is called is not currently
+  /// inside a span, the returned span will be disabled.
+  ///
+  /// [considered by the `Subscriber`]:
+  ///     super::subscriber::Subscriber::current_span
+  #[must_use]
+  pub fn current() -> Self {
+    dispatcher::get_default(|dispatch| {
+      let current = match dispatch.current_span() {
+        Ok(current) => current,
+        Err(_error) => return Self::none(),
+      };
+      let Some((id, meta)) = current.into_inner() else {
+        return Self::none();
+      };
+      let cloned_id = match dispatch.clone_span(id) {
+        Ok(cloned_id) => cloned_id,
+        Err(_error) => return Self::none(),
+      };
+      Self {
+        inner: Some(Inner::new(cloned_id, dispatch)),
+        meta:  Some(meta),
+      }
+    })
+  }
+
+  /// Construct a span from subscriber-provided attributes.
+  fn make_with(meta: &'static Metadata<'static>, attrs: &Attributes<'_>, dispatch: &Dispatch) -> Self {
+    let Ok(id) = dispatch.new_span(attrs) else {
+      return Self::new_disabled(meta);
+    };
+    let inner = Some(Inner::new(id, dispatch));
+
+    let span = Self {
+      inner,
+      meta: Some(meta),
+    };
+
+    if_log_enabled! { *meta.level(), {
+        let target = if attrs.is_empty() {
+            LIFECYCLE_LOG_TARGET
+        } else {
+            meta.target()
+        };
+        let values = attrs.values();
+        span.log(
+            target,
+            level_to_log!(*meta.level()),
+            format_args!("++ {};{}", meta.name(), crate::log::LogValueSet { values, is_first: false }),
         );
-        Self::make_with(meta, &new_span, dispatch)
+    }}
+
+    span
+  }
+
+  /// Enters this span, returning a guard that will exit the span when dropped.
+  ///
+  /// If this span is enabled by the current subscriber, then this function will
+  /// call [`Subscriber::enter`] with the span's [`Id`], and dropping the guard
+  /// will call [`Subscriber::exit`]. If the span is disabled, this does
+  /// nothing.
+  ///
+  /// # In Asynchronous Code
+  ///
+  /// **Warning**: in asynchronous code that uses [async/await syntax][syntax],
+  /// `Span::enter` should be used very carefully or avoided entirely. Holding
+  /// the drop guard returned by `Span::enter` across `.await` points will
+  /// result in incorrect traces. For example,
+  ///
+  /// ```
+  /// # use tracing::info_span;
+  /// # async fn some_other_async_function() {}
+  /// async fn my_async_function() {
+  ///   let span = info_span!("my_async_function");
+  ///
+  ///   // WARNING: This span will remain entered until this
+  ///   // guard is dropped...
+  ///   let _enter = span.enter();
+  ///   // ...but the `await` keyword may yield, causing the
+  ///   // runtime to switch to another task, while remaining in
+  ///   // this span!
+  ///   some_other_async_function().await
+  ///
+  ///   // ...
+  /// }
+  /// ```
+  ///
+  /// The drop guard returned by `Span::enter` exits the span when it is
+  /// dropped. When an async function or async block yields at an `.await`
+  /// point, the current scope is _exited_, but values in that scope are
+  /// **not** dropped (because the async block will eventually resume
+  /// execution from that await point). This means that _another_ task will
+  /// begin executing while _remaining_ in the entered span. This results in
+  /// an incorrect trace.
+  ///
+  /// Instead of using `Span::enter` in asynchronous code, prefer the
+  /// following:
+  ///
+  /// * To enter a span for a synchronous section of code within an async block or function, prefer
+  ///   [`Span::in_scope`]. Since `in_scope` takes a synchronous closure and exits the span when the
+  ///   closure returns, the span will always be exited before the next await point. For example:
+  ///   ``` # use tracing::info_span; # async fn some_other_async_function(_: ()) {} async fn
+  ///   my_async_function() { let span = info_span!("my_async_function");
+  ///
+  ///       let some_value = span.in_scope(|| {
+  ///           // run some synchronous code inside the span...
+  ///       });
+  ///
+  ///       // This is okay! The span has already been exited before we reach
+  ///       // the await point.
+  ///       some_other_async_function(some_value).await;
+  ///
+  ///       // ...
+  ///   }
+  ///   ```
+  /// * For instrumenting asynchronous code, `tracing` provides the [`Future::instrument`
+  ///   combinator][instrument] for attaching a span to a future (async function or block). This
+  ///   will enter the span _every_ time the future is polled, and exit it whenever the future
+  ///   yields.
+  ///
+  ///   `Instrument` can be used with an async block inside an async function:
+  ///   ```ignore
+  ///   # use tracing::info_span;
+  ///   use tracing::Instrument;
+  ///
+  ///   # async fn some_other_async_function() {}
+  ///   async fn my_async_function() {
+  ///       let span = info_span!("my_async_function");
+  ///       async move {
+  ///          // This is correct! If we yield here, the span will be exited,
+  ///          // and re-entered when we resume.
+  ///          some_other_async_function().await;
+  ///
+  ///          //more asynchronous code inside the span...
+  ///
+  ///       }
+  ///         // instrument the async block with the span...
+  ///         .instrument(span)
+  ///         // ...and await it.
+  ///         .await
+  ///   }
+  ///   ```
+  ///
+  ///   It can also be used to instrument calls to async functions at the
+  ///   callsite:
+  ///   ```ignore
+  ///   # use tracing::debug_span;
+  ///   use tracing::Instrument;
+  ///
+  ///   # async fn some_other_async_function() {}
+  ///   async fn my_async_function() {
+  ///       let some_value = some_other_async_function()
+  ///          .instrument(debug_span!("some_other_async_function"))
+  ///          .await;
+  ///
+  ///       // ...
+  ///   }
+  ///   ```
+  ///
+  /// * The [`#[instrument]` attribute macro][attr] can automatically generate correct code when
+  ///   used on an async function:
+  ///
+  ///   ```ignore
+  ///   # async fn some_other_async_function() {}
+  ///   #[tracing::instrument(level = "info")]
+  ///   async fn my_async_function() {
+  ///
+  ///       // This is correct! If we yield here, the span will be exited,
+  ///       // and re-entered when we resume.
+  ///       some_other_async_function().await;
+  ///
+  ///       // ...
+  ///
+  ///   }
+  ///   ```
+  ///
+  /// Additionally, the [`clippy::await_holding_invalid_type`] lint may be
+  /// used to detect cases where code holds a span guard across an `.await`
+  /// point. By adding the following to a `clippy.toml` file at the root of a
+  /// crate, `clippy` will automatically warn when the `Entered` or
+  /// `EnteredSpan` guards are held across an await point:
+  ///
+  /// ```toml
+  /// await-holding-invalid-types = [
+  ///     { path = "tracing::span::Entered", reason = "spans must be entered and exited on the same thread, entered guards should not be held across '.await' points" },
+  ///     { path = "tracing::span::EnteredSpan", reason = "spans must be entered and exited on the same thread, entered guards should not be held across '.await' points" },
+  /// ]
+  /// ```
+  ///
+  /// [syntax]: https://rust-lang.github.io/async-book/01_getting_started/04_async_await_primer.html
+  /// [`Span::in_scope`]: Span::in_scope()
+  /// [instrument]: crate::Instrument
+  /// [attr]: macro@crate::instrument
+  /// [`clippy::await_holding_invalid_type`]: https://rust-lang.github.io/rust-clippy/master/index.html#/await_holding_invalid_type
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// # use tracing::{span, Level};
+  /// let span = span!(Level::INFO, "my_span");
+  /// let guard = span.enter();
+  ///
+  /// // code here is within the span
+  ///
+  /// drop(guard);
+  ///
+  /// // code here is no longer within the span
+  /// ```
+  ///
+  /// Guards need not be explicitly dropped:
+  ///
+  /// ```
+  /// # use tracing::trace_span;
+  /// fn my_function() -> String {
+  ///   // enter a span for the duration of this function.
+  ///   let span = trace_span!("my_function");
+  ///   let _enter = span.enter();
+  ///
+  ///   // anything happening in functions we call is still inside the span...
+  ///   my_other_function();
+  ///
+  ///   // returning from the function drops the guard, exiting the span.
+  ///   return "Hello world".to_owned();
+  /// }
+  ///
+  /// fn my_other_function() {
+  ///   // ...
+  /// }
+  /// ```
+  ///
+  /// Sub-scopes may be created to limit the duration for which the span is
+  /// entered:
+  ///
+  /// ```
+  /// # use tracing::{info, info_span};
+  /// let span = info_span!("my_great_span");
+  ///
+  /// {
+  ///   let _enter = span.enter();
+  ///
+  ///   // this event occurs inside the span.
+  ///   info!("i'm in the span!");
+  ///
+  ///   // exiting the scope drops the guard, exiting the span.
+  /// }
+  ///
+  /// // this event is not inside the span.
+  /// info!("i'm outside the span!")
+  /// ```
+  ///
+  /// [`Subscriber::enter`]: super::subscriber::Subscriber::enter()
+  /// [`Subscriber::exit`]: super::subscriber::Subscriber::exit()
+  /// [`Id`]: super::Id
+  #[inline]
+  pub fn enter(&self) -> Entered<'_> {
+    self.do_enter();
+    Entered {
+      span: self
+    }
+  }
+
+  /// Enters this span, consuming it and returning a [guard][`EnteredSpan`]
+  /// that will exit the span when dropped.
+  ///
+  /// <pre class="compile_fail" style="white-space:normal;font:inherit;">
+  ///     <strong>Warning</strong>: In asynchronous code that uses async/await syntax,
+  ///     <code>Span::entered</code> may produce incorrect traces if the returned drop
+  ///     guard is held across an await point. See <a href="#in-asynchronous-code">the
+  ///     <code>Span::enter</code> documentation</a> for details.
+  /// </pre>
+  ///
+  ///
+  /// If this span is enabled by the current subscriber, then this function will
+  /// call [`Subscriber::enter`] with the span's [`Id`], and dropping the guard
+  /// will call [`Subscriber::exit`]. If the span is disabled, this does
+  /// nothing.
+  ///
+  /// This is similar to the [`Span::enter`] method, except that it moves the
+  /// span by value into the returned guard, rather than borrowing it.
+  /// Therefore, this method can be used to create and enter a span in a
+  /// single expression, without requiring a `let`-binding. For example:
+  ///
+  /// ```
+  /// # use tracing::info_span;
+  /// let _span = info_span!("something_interesting").entered();
+  /// ```
+  /// rather than:
+  /// ```
+  /// # use tracing::info_span;
+  /// let span = info_span!("something_interesting");
+  /// let _e = span.enter();
+  /// ```
+  ///
+  /// Furthermore, `entered` may be used when the span must be stored in some
+  /// other struct or be passed to a function while remaining entered.
+  ///
+  /// <pre class="ignore" style="white-space:normal;font:inherit;">
+  ///     <strong>Note</strong>: The returned <a href="../struct.EnteredSpan.html">
+  ///     <code>EnteredSpan</code></a> guard does not implement <code>Send</code>.
+  ///     Dropping the guard will exit <em>this</em> span, and if the guard is sent
+  ///     to another thread and dropped there, that thread may never have entered
+  ///     this span. Thus, <code>EnteredSpan</code>s should not be sent between threads.
+  /// </pre>
+  ///
+  /// [syntax]: https://rust-lang.github.io/async-book/01_getting_started/04_async_await_primer.html
+  ///
+  /// # Examples
+  ///
+  /// The returned guard can be [explicitly exited][EnteredSpan::exit],
+  /// returning the un-entered span:
+  ///
+  /// ```
+  /// # use tracing::{Level, span};
+  /// let span = span!(Level::INFO, "doing_something").entered();
+  ///
+  /// // code here is within the span
+  ///
+  /// // explicitly exit the span, returning it
+  /// let span = span.exit();
+  ///
+  /// // code here is no longer within the span
+  ///
+  /// // enter the span again
+  /// let span = span.entered();
+  ///
+  /// // now we are inside the span once again
+  /// ```
+  ///
+  /// Guards need not be explicitly dropped:
+  ///
+  /// ```
+  /// # use tracing::trace_span;
+  /// fn my_function() -> String {
+  ///   // enter a span for the duration of this function.
+  ///   let span = trace_span!("my_function").entered();
+  ///
+  ///   // anything happening in functions we call is still inside the span...
+  ///   my_other_function();
+  ///
+  ///   // returning from the function drops the guard, exiting the span.
+  ///   return "Hello world".to_owned();
+  /// }
+  ///
+  /// fn my_other_function() {
+  ///   // ...
+  /// }
+  /// ```
+  ///
+  /// Since the [`EnteredSpan`] guard can dereference to the [`Span`] itself,
+  /// the span may still be accessed while entered. For example:
+  ///
+  /// ```rust
+  /// # use tracing::info_span;
+  /// use tracing::field;
+  ///
+  /// // create the span with an empty field, and enter it.
+  /// let span = info_span!("my_span", some_field = field::Empty).entered();
+  ///
+  /// // we can still record a value for the field while the span is entered.
+  /// span.record("some_field", &"hello world!");
+  /// ```
+  ///
+  /// [`Subscriber::enter`]: super::subscriber::Subscriber::enter()
+  /// [`Subscriber::exit`]: super::subscriber::Subscriber::exit()
+  /// [`Id`]: super::Id
+  #[inline]
+  pub fn entered(self) -> EnteredSpan {
+    self.do_enter();
+    EnteredSpan {
+      span:      self,
+      _not_send: PHANTOM_NOT_SEND,
+    }
+  }
+
+  /// Returns this span, if it was [enabled] by the current [`Subscriber`], or
+  /// the [current span] (whose lexical distance may be further than expected),
+  ///  if this span [is disabled].
+  ///
+  /// This method can be useful when propagating spans to spawned threads or
+  /// [async tasks]. Consider the following:
+  ///
+  /// ```
+  /// let _parent_span = tracing::info_span!("parent").entered();
+  ///
+  /// // ...
+  ///
+  /// let child_span = tracing::debug_span!("child");
+  ///
+  /// std::thread::spawn(move || {
+  ///   let _entered = child_span.entered();
+  ///
+  ///   tracing::info!("spawned a thread!");
+  ///
+  ///   // ...
+  /// });
+  /// ```
+  ///
+  /// If the current [`Subscriber`] enables the [`DEBUG`] level, then both
+  /// the "parent" and "child" spans will be enabled. Thus, when the "spawned
+  /// a thread!" event occurs, it will be inside of the "child" span. Because
+  /// "parent" is the parent of "child", the event will _also_ be inside of
+  /// "parent".
+  ///
+  /// However, if the [`Subscriber`] only enables the [`INFO`] level, the "child"
+  /// span will be disabled. When the thread is spawned, the
+  /// `child_span.entered()` call will do nothing, since "child" is not
+  /// enabled. In this case, the "spawned a thread!" event occurs outside of
+  /// *any* span, since the "child" span was responsible for propagating its
+  /// parent to the spawned thread.
+  ///
+  /// If this is not the desired behavior, `Span::or_current` can be used to
+  /// ensure that the "parent" span is propagated in both cases, either as a
+  /// parent of "child" _or_ directly. For example:
+  ///
+  /// ```
+  /// let _parent_span = tracing::info_span!("parent").entered();
+  ///
+  /// // ...
+  ///
+  /// // If DEBUG is enabled, then "child" will be enabled, and `or_current`
+  /// // returns "child". Otherwise, if DEBUG is not enabled, "child" will be
+  /// // disabled, and `or_current` returns "parent".
+  /// let child_span = tracing::debug_span!("child").or_current();
+  ///
+  /// std::thread::spawn(move || {
+  ///   let _entered = child_span.entered();
+  ///
+  ///   tracing::info!("spawned a thread!");
+  ///
+  ///   // ...
+  /// });
+  /// ```
+  ///
+  /// When spawning [asynchronous tasks][async tasks], `Span::or_current` can
+  /// be used similarly, in combination with [`instrument`]:
+  ///
+  /// ```
+  /// use tracing::Instrument;
+  /// # // lol
+  /// # mod tokio {
+  /// #     pub(super) fn spawn(_: impl std::future::Future) {}
+  /// # }
+  ///
+  /// let _parent_span = tracing::info_span!("parent").entered();
+  ///
+  /// // ...
+  ///
+  /// let child_span = tracing::debug_span!("child");
+  ///
+  /// tokio::spawn(
+  ///   async {
+  ///     tracing::info!("spawned a task!");
+  ///
+  ///     // ...
+  ///   }
+  ///   .instrument(child_span.or_current()),
+  /// );
+  /// ```
+  ///
+  /// In general, `or_current` should be preferred over nesting an
+  /// [`instrument`]  call inside of an [`in_current_span`] call, as using
+  /// `or_current` will be more efficient.
+  ///
+  /// ```
+  /// use tracing::Instrument;
+  /// # // lol
+  /// # mod tokio {
+  /// #     pub(super) fn spawn(_: impl std::future::Future) {}
+  /// # }
+  /// async fn my_async_fn() {
+  ///   // ...
+  /// }
+  ///
+  /// let _parent_span = tracing::info_span!("parent").entered();
+  ///
+  /// // Do this:
+  /// tokio::spawn(my_async_fn().instrument(tracing::debug_span!("child").or_current()));
+  ///
+  /// // ...rather than this:
+  /// tokio::spawn(my_async_fn().instrument(tracing::debug_span!("child")).in_current_span());
+  /// ```
+  ///
+  /// [enabled]: crate::Subscriber::enabled
+  /// [`Subscriber`]: crate::Subscriber
+  /// [current span]: Span::current
+  /// [is disabled]: Span::is_disabled
+  /// [`INFO`]: crate::Level::INFO
+  /// [`DEBUG`]: crate::Level::DEBUG
+  /// [async tasks]: std::task
+  /// [`instrument`]: crate::instrument::Instrument::instrument
+  /// [`in_current_span`]: crate::instrument::Instrument::in_current_span
+  #[must_use]
+  pub fn or_current(self) -> Self {
+    if self.is_disabled() {
+      return Self::current();
+    }
+    self
+  }
+
+  /// Enter this span and notify log subscribers when configured.
+  fn do_enter(&self) {
+    if let Some(inner) = self.inner.as_ref() {
+      let _ignored = inner.subscriber.enter(inner.id);
     }
 
-    /// Constructs a new disabled span with the given `Metadata`.
-    ///
-    /// This should be used when a span is constructed from a known callsite,
-    /// but the subscriber indicates that it is disabled.
-    ///
-    /// Entering, exiting, and recording values on this span will not notify the
-    /// `Subscriber` but _may_ record log messages if the `log` feature flag is
-    /// enabled.
-    #[allow(
-        clippy::single_call_fn,
-        reason = "public disabled-span constructor represents subscriber-disabled callsites"
-    )]
-    #[must_use]
-    pub const fn new_disabled(meta: &'static Metadata<'static>) -> Self {
-        Self {
-            inner: None,
-            meta: Some(meta),
-        }
-    }
-
-    /// Constructs a new span that is *completely disabled*.
-    ///
-    /// This can be used rather than `Option<Span>` to represent cases where a
-    /// span is not present.
-    ///
-    /// Entering, exiting, and recording values on this span will do nothing.
-    #[must_use]
-    pub const fn none() -> Self {
-        Self {
-            inner: None,
-            meta: None,
-        }
-    }
-
-    /// Returns a handle to the span [considered by the `Subscriber`] to be the
-    /// current span.
-    ///
-    /// If the subscriber indicates that it does not track the current span, or
-    /// that the thread from which this function is called is not currently
-    /// inside a span, the returned span will be disabled.
-    ///
-    /// [considered by the `Subscriber`]:
-    ///     super::subscriber::Subscriber::current_span
-    #[must_use]
-    pub fn current() -> Self {
-        dispatcher::get_default(|dispatch| {
-            let current = match dispatch.current_span() {
-                Ok(current) => current,
-                Err(_error) => return Self::none(),
-            };
-            let Some((id, meta)) = current.into_inner() else {
-                return Self::none();
-            };
-            let cloned_id = match dispatch.clone_span(id) {
-                Ok(cloned_id) => cloned_id,
-                Err(_error) => return Self::none(),
-            };
-            Self {
-                inner: Some(Inner::new(cloned_id, dispatch)),
-                meta: Some(meta),
-            }
-        })
-    }
-
-    /// Construct a span from subscriber-provided attributes.
-    fn make_with(
-        meta: &'static Metadata<'static>,
-        attrs: &Attributes<'_>,
-        dispatch: &Dispatch,
-    ) -> Self {
-        let Ok(id) = dispatch.new_span(attrs) else {
-            return Self::new_disabled(meta);
-        };
-        let inner = Some(Inner::new(id, dispatch));
-
-        let span = Self {
-            inner,
-            meta: Some(meta),
-        };
-
-        if_log_enabled! { *meta.level(), {
-            let target = if attrs.is_empty() {
-                LIFECYCLE_LOG_TARGET
-            } else {
-                meta.target()
-            };
-            let values = attrs.values();
-            span.log(
-                target,
-                level_to_log!(*meta.level()),
-                format_args!("++ {};{}", meta.name(), crate::log::LogValueSet { values, is_first: false }),
-            );
-        }}
-
-        span
-    }
-
-    /// Enters this span, returning a guard that will exit the span when dropped.
-    ///
-    /// If this span is enabled by the current subscriber, then this function will
-    /// call [`Subscriber::enter`] with the span's [`Id`], and dropping the guard
-    /// will call [`Subscriber::exit`]. If the span is disabled, this does
-    /// nothing.
-    ///
-    /// # In Asynchronous Code
-    ///
-    /// **Warning**: in asynchronous code that uses [async/await syntax][syntax],
-    /// `Span::enter` should be used very carefully or avoided entirely. Holding
-    /// the drop guard returned by `Span::enter` across `.await` points will
-    /// result in incorrect traces. For example,
-    ///
-    /// ```
-    /// # use tracing::info_span;
-    /// # async fn some_other_async_function() {}
-    /// async fn my_async_function() {
-    ///     let span = info_span!("my_async_function");
-    ///
-    ///     // WARNING: This span will remain entered until this
-    ///     // guard is dropped...
-    ///     let _enter = span.enter();
-    ///     // ...but the `await` keyword may yield, causing the
-    ///     // runtime to switch to another task, while remaining in
-    ///     // this span!
-    ///     some_other_async_function().await
-    ///
-    ///     // ...
-    /// }
-    /// ```
-    ///
-    /// The drop guard returned by `Span::enter` exits the span when it is
-    /// dropped. When an async function or async block yields at an `.await`
-    /// point, the current scope is _exited_, but values in that scope are
-    /// **not** dropped (because the async block will eventually resume
-    /// execution from that await point). This means that _another_ task will
-    /// begin executing while _remaining_ in the entered span. This results in
-    /// an incorrect trace.
-    ///
-    /// Instead of using `Span::enter` in asynchronous code, prefer the
-    /// following:
-    ///
-    /// * To enter a span for a synchronous section of code within an async
-    ///   block or function, prefer [`Span::in_scope`]. Since `in_scope` takes a
-    ///   synchronous closure and exits the span when the closure returns, the
-    ///   span will always be exited before the next await point. For example:
-    ///   ```
-    ///   # use tracing::info_span;
-    ///   # async fn some_other_async_function(_: ()) {}
-    ///   async fn my_async_function() {
-    ///       let span = info_span!("my_async_function");
-    ///
-    ///       let some_value = span.in_scope(|| {
-    ///           // run some synchronous code inside the span...
-    ///       });
-    ///
-    ///       // This is okay! The span has already been exited before we reach
-    ///       // the await point.
-    ///       some_other_async_function(some_value).await;
-    ///
-    ///       // ...
-    ///   }
-    ///   ```
-    /// * For instrumenting asynchronous code, `tracing` provides the
-    ///   [`Future::instrument` combinator][instrument] for
-    ///   attaching a span to a future (async function or block). This will
-    ///   enter the span _every_ time the future is polled, and exit it whenever
-    ///   the future yields.
-    ///
-    ///   `Instrument` can be used with an async block inside an async function:
-    ///   ```ignore
-    ///   # use tracing::info_span;
-    ///   use tracing::Instrument;
-    ///
-    ///   # async fn some_other_async_function() {}
-    ///   async fn my_async_function() {
-    ///       let span = info_span!("my_async_function");
-    ///       async move {
-    ///          // This is correct! If we yield here, the span will be exited,
-    ///          // and re-entered when we resume.
-    ///          some_other_async_function().await;
-    ///
-    ///          //more asynchronous code inside the span...
-    ///
-    ///       }
-    ///         // instrument the async block with the span...
-    ///         .instrument(span)
-    ///         // ...and await it.
-    ///         .await
-    ///   }
-    ///   ```
-    ///
-    ///   It can also be used to instrument calls to async functions at the
-    ///   callsite:
-    ///   ```ignore
-    ///   # use tracing::debug_span;
-    ///   use tracing::Instrument;
-    ///
-    ///   # async fn some_other_async_function() {}
-    ///   async fn my_async_function() {
-    ///       let some_value = some_other_async_function()
-    ///          .instrument(debug_span!("some_other_async_function"))
-    ///          .await;
-    ///
-    ///       // ...
-    ///   }
-    ///   ```
-    ///
-    /// * The [`#[instrument]` attribute macro][attr] can automatically generate
-    ///   correct code when used on an async function:
-    ///
-    ///   ```ignore
-    ///   # async fn some_other_async_function() {}
-    ///   #[tracing::instrument(level = "info")]
-    ///   async fn my_async_function() {
-    ///
-    ///       // This is correct! If we yield here, the span will be exited,
-    ///       // and re-entered when we resume.
-    ///       some_other_async_function().await;
-    ///
-    ///       // ...
-    ///
-    ///   }
-    ///   ```
-    ///
-    /// Additionally, the [`clippy::await_holding_invalid_type`] lint may be
-    /// used to detect cases where code holds a span guard across an `.await`
-    /// point. By adding the following to a `clippy.toml` file at the root of a
-    /// crate, `clippy` will automatically warn when the `Entered` or
-    /// `EnteredSpan` guards are held across an await point:
-    ///
-    /// ```toml
-    /// await-holding-invalid-types = [
-    ///     { path = "tracing::span::Entered", reason = "spans must be entered and exited on the same thread, entered guards should not be held across '.await' points" },
-    ///     { path = "tracing::span::EnteredSpan", reason = "spans must be entered and exited on the same thread, entered guards should not be held across '.await' points" },
-    /// ]
-    /// ```
-    ///
-    /// [syntax]: https://rust-lang.github.io/async-book/01_getting_started/04_async_await_primer.html
-    /// [`Span::in_scope`]: Span::in_scope()
-    /// [instrument]: crate::Instrument
-    /// [attr]: macro@crate::instrument
-    /// [`clippy::await_holding_invalid_type`]: https://rust-lang.github.io/rust-clippy/master/index.html#/await_holding_invalid_type
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use tracing::{span, Level};
-    /// let span = span!(Level::INFO, "my_span");
-    /// let guard = span.enter();
-    ///
-    /// // code here is within the span
-    ///
-    /// drop(guard);
-    ///
-    /// // code here is no longer within the span
-    ///
-    /// ```
-    ///
-    /// Guards need not be explicitly dropped:
-    ///
-    /// ```
-    /// # use tracing::trace_span;
-    /// fn my_function() -> String {
-    ///     // enter a span for the duration of this function.
-    ///     let span = trace_span!("my_function");
-    ///     let _enter = span.enter();
-    ///
-    ///     // anything happening in functions we call is still inside the span...
-    ///     my_other_function();
-    ///
-    ///     // returning from the function drops the guard, exiting the span.
-    ///     return "Hello world".to_owned();
-    /// }
-    ///
-    /// fn my_other_function() {
-    ///     // ...
-    /// }
-    /// ```
-    ///
-    /// Sub-scopes may be created to limit the duration for which the span is
-    /// entered:
-    ///
-    /// ```
-    /// # use tracing::{info, info_span};
-    /// let span = info_span!("my_great_span");
-    ///
-    /// {
-    ///     let _enter = span.enter();
-    ///
-    ///     // this event occurs inside the span.
-    ///     info!("i'm in the span!");
-    ///
-    ///     // exiting the scope drops the guard, exiting the span.
-    /// }
-    ///
-    /// // this event is not inside the span.
-    /// info!("i'm outside the span!")
-    /// ```
-    ///
-    /// [`Subscriber::enter`]: super::subscriber::Subscriber::enter()
-    /// [`Subscriber::exit`]: super::subscriber::Subscriber::exit()
-    /// [`Id`]: super::Id
-    #[inline]
-    pub fn enter(&self) -> Entered<'_> {
-        self.do_enter();
-        Entered { span: self }
-    }
-
-    /// Enters this span, consuming it and returning a [guard][`EnteredSpan`]
-    /// that will exit the span when dropped.
-    ///
-    /// <pre class="compile_fail" style="white-space:normal;font:inherit;">
-    ///     <strong>Warning</strong>: In asynchronous code that uses async/await syntax,
-    ///     <code>Span::entered</code> may produce incorrect traces if the returned drop
-    ///     guard is held across an await point. See <a href="#in-asynchronous-code">the
-    ///     <code>Span::enter</code> documentation</a> for details.
-    /// </pre>
-    ///
-    ///
-    /// If this span is enabled by the current subscriber, then this function will
-    /// call [`Subscriber::enter`] with the span's [`Id`], and dropping the guard
-    /// will call [`Subscriber::exit`]. If the span is disabled, this does
-    /// nothing.
-    ///
-    /// This is similar to the [`Span::enter`] method, except that it moves the
-    /// span by value into the returned guard, rather than borrowing it.
-    /// Therefore, this method can be used to create and enter a span in a
-    /// single expression, without requiring a `let`-binding. For example:
-    ///
-    /// ```
-    /// # use tracing::info_span;
-    /// let _span = info_span!("something_interesting").entered();
-    /// ```
-    /// rather than:
-    /// ```
-    /// # use tracing::info_span;
-    /// let span = info_span!("something_interesting");
-    /// let _e = span.enter();
-    /// ```
-    ///
-    /// Furthermore, `entered` may be used when the span must be stored in some
-    /// other struct or be passed to a function while remaining entered.
-    ///
-    /// <pre class="ignore" style="white-space:normal;font:inherit;">
-    ///     <strong>Note</strong>: The returned <a href="../struct.EnteredSpan.html">
-    ///     <code>EnteredSpan</code></a> guard does not implement <code>Send</code>.
-    ///     Dropping the guard will exit <em>this</em> span, and if the guard is sent
-    ///     to another thread and dropped there, that thread may never have entered
-    ///     this span. Thus, <code>EnteredSpan</code>s should not be sent between threads.
-    /// </pre>
-    ///
-    /// [syntax]: https://rust-lang.github.io/async-book/01_getting_started/04_async_await_primer.html
-    ///
-    /// # Examples
-    ///
-    /// The returned guard can be [explicitly exited][EnteredSpan::exit],
-    /// returning the un-entered span:
-    ///
-    /// ```
-    /// # use tracing::{Level, span};
-    /// let span = span!(Level::INFO, "doing_something").entered();
-    ///
-    /// // code here is within the span
-    ///
-    /// // explicitly exit the span, returning it
-    /// let span = span.exit();
-    ///
-    /// // code here is no longer within the span
-    ///
-    /// // enter the span again
-    /// let span = span.entered();
-    ///
-    /// // now we are inside the span once again
-    /// ```
-    ///
-    /// Guards need not be explicitly dropped:
-    ///
-    /// ```
-    /// # use tracing::trace_span;
-    /// fn my_function() -> String {
-    ///     // enter a span for the duration of this function.
-    ///     let span = trace_span!("my_function").entered();
-    ///
-    ///     // anything happening in functions we call is still inside the span...
-    ///     my_other_function();
-    ///
-    ///     // returning from the function drops the guard, exiting the span.
-    ///     return "Hello world".to_owned();
-    /// }
-    ///
-    /// fn my_other_function() {
-    ///     // ...
-    /// }
-    /// ```
-    ///
-    /// Since the [`EnteredSpan`] guard can dereference to the [`Span`] itself,
-    /// the span may still be accessed while entered. For example:
-    ///
-    /// ```rust
-    /// # use tracing::info_span;
-    /// use tracing::field;
-    ///
-    /// // create the span with an empty field, and enter it.
-    /// let span = info_span!("my_span", some_field = field::Empty).entered();
-    ///
-    /// // we can still record a value for the field while the span is entered.
-    /// span.record("some_field", &"hello world!");
-    /// ```
-    ///
-    /// [`Subscriber::enter`]: super::subscriber::Subscriber::enter()
-    /// [`Subscriber::exit`]: super::subscriber::Subscriber::exit()
-    /// [`Id`]: super::Id
-    #[inline]
-    pub fn entered(self) -> EnteredSpan {
-        self.do_enter();
-        EnteredSpan {
-            span: self,
-            _not_send: PHANTOM_NOT_SEND,
-        }
-    }
-
-    /// Returns this span, if it was [enabled] by the current [`Subscriber`], or
-    /// the [current span] (whose lexical distance may be further than expected),
-    ///  if this span [is disabled].
-    ///
-    /// This method can be useful when propagating spans to spawned threads or
-    /// [async tasks]. Consider the following:
-    ///
-    /// ```
-    /// let _parent_span = tracing::info_span!("parent").entered();
-    ///
-    /// // ...
-    ///
-    /// let child_span = tracing::debug_span!("child");
-    ///
-    /// std::thread::spawn(move || {
-    ///     let _entered = child_span.entered();
-    ///
-    ///     tracing::info!("spawned a thread!");
-    ///
-    ///     // ...
-    /// });
-    /// ```
-    ///
-    /// If the current [`Subscriber`] enables the [`DEBUG`] level, then both
-    /// the "parent" and "child" spans will be enabled. Thus, when the "spawned
-    /// a thread!" event occurs, it will be inside of the "child" span. Because
-    /// "parent" is the parent of "child", the event will _also_ be inside of
-    /// "parent".
-    ///
-    /// However, if the [`Subscriber`] only enables the [`INFO`] level, the "child"
-    /// span will be disabled. When the thread is spawned, the
-    /// `child_span.entered()` call will do nothing, since "child" is not
-    /// enabled. In this case, the "spawned a thread!" event occurs outside of
-    /// *any* span, since the "child" span was responsible for propagating its
-    /// parent to the spawned thread.
-    ///
-    /// If this is not the desired behavior, `Span::or_current` can be used to
-    /// ensure that the "parent" span is propagated in both cases, either as a
-    /// parent of "child" _or_ directly. For example:
-    ///
-    /// ```
-    /// let _parent_span = tracing::info_span!("parent").entered();
-    ///
-    /// // ...
-    ///
-    /// // If DEBUG is enabled, then "child" will be enabled, and `or_current`
-    /// // returns "child". Otherwise, if DEBUG is not enabled, "child" will be
-    /// // disabled, and `or_current` returns "parent".
-    /// let child_span = tracing::debug_span!("child").or_current();
-    ///
-    /// std::thread::spawn(move || {
-    ///     let _entered = child_span.entered();
-    ///
-    ///     tracing::info!("spawned a thread!");
-    ///
-    ///     // ...
-    /// });
-    /// ```
-    ///
-    /// When spawning [asynchronous tasks][async tasks], `Span::or_current` can
-    /// be used similarly, in combination with [`instrument`]:
-    ///
-    /// ```
-    /// use tracing::Instrument;
-    /// # // lol
-    /// # mod tokio {
-    /// #     pub(super) fn spawn(_: impl std::future::Future) {}
-    /// # }
-    ///
-    /// let _parent_span = tracing::info_span!("parent").entered();
-    ///
-    /// // ...
-    ///
-    /// let child_span = tracing::debug_span!("child");
-    ///
-    /// tokio::spawn(
-    ///     async {
-    ///         tracing::info!("spawned a task!");
-    ///
-    ///         // ...
-    ///
-    ///     }.instrument(child_span.or_current())
-    /// );
-    /// ```
-    ///
-    /// In general, `or_current` should be preferred over nesting an
-    /// [`instrument`]  call inside of an [`in_current_span`] call, as using
-    /// `or_current` will be more efficient.
-    ///
-    /// ```
-    /// use tracing::Instrument;
-    /// # // lol
-    /// # mod tokio {
-    /// #     pub(super) fn spawn(_: impl std::future::Future) {}
-    /// # }
-    /// async fn my_async_fn() {
-    ///     // ...
-    /// }
-    ///
-    /// let _parent_span = tracing::info_span!("parent").entered();
-    ///
-    /// // Do this:
-    /// tokio::spawn(
-    ///     my_async_fn().instrument(tracing::debug_span!("child").or_current())
-    /// );
-    ///
-    /// // ...rather than this:
-    /// tokio::spawn(
-    ///     my_async_fn()
-    ///         .instrument(tracing::debug_span!("child"))
-    ///         .in_current_span()
-    /// );
-    /// ```
-    ///
-    /// [enabled]: crate::Subscriber::enabled
-    /// [`Subscriber`]: crate::Subscriber
-    /// [current span]: Span::current
-    /// [is disabled]: Span::is_disabled
-    /// [`INFO`]: crate::Level::INFO
-    /// [`DEBUG`]: crate::Level::DEBUG
-    /// [async tasks]: std::task
-    /// [`instrument`]: crate::instrument::Instrument::instrument
-    /// [`in_current_span`]: crate::instrument::Instrument::in_current_span
-    #[must_use]
-    pub fn or_current(self) -> Self {
-        if self.is_disabled() {
-            return Self::current();
-        }
-        self
-    }
-
-    /// Enter this span and notify log subscribers when configured.
-    fn do_enter(&self) {
-        if let Some(inner) = self.inner.as_ref() {
-            let _ignored = inner.subscriber.enter(inner.id);
-        }
-
-        if_log_enabled! { crate::Level::TRACE, {
-            if let Some(meta) = self.meta {
-                self.log(ACTIVITY_LOG_TARGET, log::Level::Trace, format_args!("-> {};", meta.name()));
-            }
-        }}
-    }
-
-    // Called from [`Entered`] and [`EnteredSpan`] drops.
-    //
-    // Running this behaviour on drop rather than with an explicit function
-    // call means that spans may still be exited when unwinding.
-    /// Exit this span and notify log subscribers when configured.
-    fn do_exit(&self) {
-        if let Some(inner) = self.inner.as_ref() {
-            let _ignored = inner.subscriber.exit(inner.id);
-        }
-
-        if_log_enabled! { crate::Level::TRACE, {
-            if let Some(meta) = self.meta {
-                self.log(ACTIVITY_LOG_TARGET, log::Level::Trace, format_args!("<- {};", meta.name()));
-            }
-        }}
-    }
-
-    /// Executes the given function in the context of this span.
-    ///
-    /// If this span is enabled, then this function enters the span, invokes `f`
-    /// and then exits the span. If the span is disabled, `f` will still be
-    /// invoked, but in the context of the currently-executing span (if there is
-    /// one).
-    ///
-    /// Returns the result of evaluating `f`.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// # use tracing::{trace, span, Level};
-    /// let my_span = span!(Level::TRACE, "my_span");
-    ///
-    /// my_span.in_scope(|| {
-    ///     // this event occurs within the span.
-    ///     trace!("i'm in the span!");
-    /// });
-    ///
-    /// // this event occurs outside the span.
-    /// trace!("i'm not in the span!");
-    /// ```
-    ///
-    /// Calling a function and returning the result:
-    /// ```
-    /// # use tracing::{info_span, Level};
-    /// fn hello_world() -> String {
-    ///     "Hello world!".to_owned()
-    /// }
-    ///
-    /// let span = info_span!("hello_world");
-    /// // the span will be entered for the duration of the call to
-    /// // `hello_world`.
-    /// let a_string = span.in_scope(hello_world);
-    ///
-    pub fn in_scope<F: FnOnce() -> T, T>(&self, f: F) -> T {
-        let _enter = self.enter();
-        f()
-    }
-
-    /// Returns a [`Field`][super::field::Field] for the field with the
-    /// given `name`, if one exists,
-    pub fn field<Q: field::AsField + ?Sized>(&self, field: &Q) -> Option<field::Field> {
-        self.metadata().and_then(|meta| field.as_field(meta))
-    }
-
-    /// Returns true if this `Span` has a field for the given
-    /// [`Field`][super::field::Field] or field name.
-    #[inline]
-    pub fn has_field<Q: field::AsField + ?Sized>(&self, field: &Q) -> bool {
-        self.field(field).is_some()
-    }
-
-    /// Records that the field described by `field` has the value `value`.
-    ///
-    /// This may be used with [`field::Empty`] to declare fields whose values
-    /// are not known when the span is created, and record them later:
-    /// ```
-    /// use tracing::{trace_span, field};
-    ///
-    /// // Create a span with two fields: `greeting`, with the value "hello world", and
-    /// // `parting`, without a value.
-    /// let span = trace_span!("my_span", greeting = "hello world", parting = field::Empty);
-    ///
-    /// // ...
-    ///
-    /// // Now, record a value for parting as well.
-    /// // (note that the field name is passed as a string slice)
-    /// span.record("parting", "goodbye world!");
-    /// ```
-    /// However, it may also be used to record a _new_ value for a field whose
-    /// value was already recorded:
-    /// ```
-    /// use tracing::info_span;
-    /// # fn do_something() -> Result<(), ()> { Err(()) }
-    ///
-    /// // Initially, let's assume that our attempt to do something is going okay...
-    /// let span = info_span!("doing_something", is_okay = true);
-    /// let _e = span.enter();
-    ///
-    /// match do_something() {
-    ///     Ok(something) => {
-    ///         // ...
-    ///     }
-    ///     Err(_) => {
-    ///         // Things are no longer okay!
-    ///         span.record("is_okay", false);
-    ///     }
-    /// }
-    /// ```
-    ///
-    /// <pre class="ignore" style="white-space:normal;font:inherit;">
-    ///     <strong>Note</strong>: The fields associated with a span are part
-    ///     of its <a href="../struct.Metadata.html"><code>Metadata</code></a>.
-    ///     The <a href="../struct.Metadata.html"><code>Metadata</code></a>
-    ///     describing a particular span is constructed statically when the span
-    ///     is created and cannot be extended later to add new fields. Therefore,
-    ///     you cannot record a value for a field that was not specified when the
-    ///     span was created:
-    /// </pre>
-    ///
-    /// ```
-    /// use tracing::{trace_span, field};
-    ///
-    /// // Create a span with two fields: `greeting`, with the value "hello world", and
-    /// // `parting`, without a value.
-    /// let span = trace_span!("my_span", greeting = "hello world", parting = field::Empty);
-    ///
-    /// // ...
-    ///
-    /// // Now, you try to record a value for a new field, `new_field`, which was not
-    /// // declared as `Empty` or populated when you created `span`.
-    /// // You won't get any error, but the assignment will have no effect!
-    /// span.record("new_field", "interesting_value_you_really_need");
-    ///
-    /// // Instead, all fields that may be recorded after span creation should be declared up front,
-    /// // using field::Empty when a value is not known, as we did for `parting`.
-    /// // This `record` call will indeed replace field::Empty with "you will be remembered".
-    /// span.record("parting", "you will be remembered");
-    /// ```
-    ///
-    /// <div class="example-wrap" style="display:inline-block">
-    /// <pre class="ignore" style="white-space:normal;font:inherit;">
-    /// **Note**: To record several values in just one call, see the [`record_all!`](crate::record_all!) macro.
-    /// </pre></div>
-    ///
-    /// [`field::Empty`]: super::field::Empty
-    /// [`Metadata`]: super::Metadata
-    pub fn record<Q: field::AsField + ?Sized, V: field::Value>(
-        &self,
-        field_name: &Q,
-        value: V,
-    ) -> &Self {
-        if let Some(meta) = self.meta
-            && let Some(field) = field_name.as_field(meta)
-        {
-            let value_ref: &dyn field::Value = &value;
-            let values = [(&field, Some(value_ref))];
-            let value_set = meta.fields().value_set(&values);
-            let _span = self.record_all(&value_set);
-        }
-
-        self
-    }
-
-    /// Records all the fields in the provided `ValueSet`.
-    #[doc(hidden)]
-    #[must_use]
-    pub fn record_all(&self, values: &field::ValueSet<'_>) -> &Self {
-        let record = Record::new(values);
-        if let Some(ref inner) = self.inner {
-            inner.record(&record);
-        }
-
-        #[cfg(feature = "log")]
+    if_log_enabled! { crate::Level::TRACE, {
         if let Some(meta) = self.meta {
-            if_log_enabled! { *meta.level(), {
-                let target = if record.is_empty() {
-                    LIFECYCLE_LOG_TARGET
-                } else {
-                    meta.target()
-                };
-                self.log(
-                    target,
-                    level_to_log!(*meta.level()),
-                    format_args!("{};{}", meta.name(), crate::log::LogValueSet { values, is_first: false }),
-                );
-            }}
+            self.log(ACTIVITY_LOG_TARGET, log::Level::Trace, format_args!("-> {};", meta.name()));
         }
+    }}
+  }
 
-        self
+  // Called from [`Entered`] and [`EnteredSpan`] drops.
+  //
+  // Running this behaviour on drop rather than with an explicit function
+  // call means that spans may still be exited when unwinding.
+  /// Exit this span and notify log subscribers when configured.
+  fn do_exit(&self) {
+    if let Some(inner) = self.inner.as_ref() {
+      let _ignored = inner.subscriber.exit(inner.id);
     }
 
-    /// Returns `true` if this span was disabled by the subscriber and does not
-    /// exist.
-    ///
-    /// See also [`is_none`].
-    ///
-    /// [`is_none`]: Span::is_none()
-    #[inline]
-    #[must_use]
-    pub const fn is_disabled(&self) -> bool {
-        self.inner.is_none()
-    }
-
-    /// Returns `true` if this span was constructed by [`Span::none`] and is
-    /// empty.
-    ///
-    /// If `is_none` returns `true` for a given span, then [`is_disabled`] will
-    /// also return `true`. However, when a span is disabled by the subscriber
-    /// rather than constructed by `Span::none`, this method will return
-    /// `false`, while `is_disabled` will return `true`.
-    ///
-    /// [`Span::none`]: Span::none()
-    /// [`is_disabled`]: Span::is_disabled()
-    #[inline]
-    #[must_use]
-    pub const fn is_none(&self) -> bool {
-        self.is_disabled() && self.meta.is_none()
-    }
-
-    /// Indicates that the span with the given ID has an indirect causal
-    /// relationship with this span.
-    ///
-    /// This relationship differs somewhat from the parent-child relationship: a
-    /// span may have any number of prior spans, rather than a single one; and
-    /// spans are not considered to be executing _inside_ of the spans they
-    /// follow from. This means that a span may close even if subsequent spans
-    /// that follow from it are still open, and time spent inside of a
-    /// subsequent span should not be included in the time its precedents were
-    /// executing. This is used to model causal relationships such as when a
-    /// single future spawns several related background tasks, et cetera.
-    ///
-    /// If this span is disabled, or the resulting follows-from relationship
-    /// would be invalid, this function will do nothing.
-    ///
-    /// # Examples
-    ///
-    /// Setting a `follows_from` relationship with a `Span`:
-    /// ```
-    /// # use tracing::{span, Id, Level, Span};
-    /// let span1 = span!(Level::INFO, "span_1");
-    /// let span2 = span!(Level::DEBUG, "span_2");
-    /// span2.follows_from(span1);
-    /// ```
-    ///
-    /// Setting a `follows_from` relationship with the current span:
-    /// ```
-    /// # use tracing::{span, Id, Level, Span};
-    /// let span = span!(Level::INFO, "hello!");
-    /// span.follows_from(Span::current());
-    /// ```
-    ///
-    /// Setting a `follows_from` relationship with a `Span` reference:
-    /// ```
-    /// # use tracing::{span, Id, Level, Span};
-    /// let span = span!(Level::INFO, "hello!");
-    /// let curr = Span::current();
-    /// span.follows_from(&curr);
-    /// ```
-    ///
-    /// Setting a `follows_from` relationship with an `Id`:
-    /// ```
-    /// # use tracing::{span, Id, Level, Span};
-    /// let span = span!(Level::INFO, "hello!");
-    /// let id = span.id();
-    /// span.follows_from(id);
-    /// ```
-    pub fn follows_from(&self, from_id: impl Into<Option<Id>>) -> &Self {
-        if let Some(inner) = self.inner.as_ref()
-            && let Some(precedent) = from_id.into()
-        {
-            inner.follows_from(precedent);
+    if_log_enabled! { crate::Level::TRACE, {
+        if let Some(meta) = self.meta {
+            self.log(ACTIVITY_LOG_TARGET, log::Level::Trace, format_args!("<- {};", meta.name()));
         }
-        self
+    }}
+  }
+
+  /// Executes the given function in the context of this span.
+  ///
+  /// If this span is enabled, then this function enters the span, invokes `f`
+  /// and then exits the span. If the span is disabled, `f` will still be
+  /// invoked, but in the context of the currently-executing span (if there is
+  /// one).
+  ///
+  /// Returns the result of evaluating `f`.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// # use tracing::{trace, span, Level};
+  /// let my_span = span!(Level::TRACE, "my_span");
+  ///
+  /// my_span.in_scope(|| {
+  ///   // this event occurs within the span.
+  ///   trace!("i'm in the span!");
+  /// });
+  ///
+  /// // this event occurs outside the span.
+  /// trace!("i'm not in the span!");
+  /// ```
+  ///
+  /// Calling a function and returning the result:
+  /// ```
+  /// # use tracing::{info_span, Level};
+  /// fn hello_world() -> String {
+  ///     "Hello world!".to_owned()
+  /// }
+  ///
+  /// let span = info_span!("hello_world");
+  /// // the span will be entered for the duration of the call to
+  /// // `hello_world`.
+  /// let a_string = span.in_scope(hello_world);
+  pub fn in_scope<F: FnOnce() -> T, T>(&self, f: F) -> T {
+    let _enter = self.enter();
+    f()
+  }
+
+  /// Returns a [`Field`][super::field::Field] for the field with the
+  /// given `name`, if one exists,
+  pub fn field<Q: field::AsField + ?Sized>(&self, field: &Q) -> Option<field::Field> {
+    self.metadata().and_then(|meta| field.as_field(meta))
+  }
+
+  /// Returns true if this `Span` has a field for the given
+  /// [`Field`][super::field::Field] or field name.
+  #[inline]
+  pub fn has_field<Q: field::AsField + ?Sized>(&self, field: &Q) -> bool {
+    self.field(field).is_some()
+  }
+
+  /// Records that the field described by `field` has the value `value`.
+  ///
+  /// This may be used with [`field::Empty`] to declare fields whose values
+  /// are not known when the span is created, and record them later:
+  /// ```
+  /// use tracing::field;
+  /// use tracing::trace_span;
+  ///
+  /// // Create a span with two fields: `greeting`, with the value "hello world", and
+  /// // `parting`, without a value.
+  /// let span = trace_span!("my_span", greeting = "hello world", parting = field::Empty);
+  ///
+  /// // ...
+  ///
+  /// // Now, record a value for parting as well.
+  /// // (note that the field name is passed as a string slice)
+  /// span.record("parting", "goodbye world!");
+  /// ```
+  /// However, it may also be used to record a _new_ value for a field whose
+  /// value was already recorded:
+  /// ```
+  /// use tracing::info_span;
+  /// # fn do_something() -> Result<(), ()> { Err(()) }
+  ///
+  /// // Initially, let's assume that our attempt to do something is going okay...
+  /// let span = info_span!("doing_something", is_okay = true);
+  /// let _e = span.enter();
+  ///
+  /// match do_something() {
+  ///   Ok(something) => {
+  ///     // ...
+  ///   }
+  ///   Err(_) => {
+  ///     // Things are no longer okay!
+  ///     span.record("is_okay", false);
+  ///   }
+  /// }
+  /// ```
+  ///
+  /// <pre class="ignore" style="white-space:normal;font:inherit;">
+  ///     <strong>Note</strong>: The fields associated with a span are part
+  ///     of its <a href="../struct.Metadata.html"><code>Metadata</code></a>.
+  ///     The <a href="../struct.Metadata.html"><code>Metadata</code></a>
+  ///     describing a particular span is constructed statically when the span
+  ///     is created and cannot be extended later to add new fields. Therefore,
+  ///     you cannot record a value for a field that was not specified when the
+  ///     span was created:
+  /// </pre>
+  ///
+  /// ```
+  /// use tracing::field;
+  /// use tracing::trace_span;
+  ///
+  /// // Create a span with two fields: `greeting`, with the value "hello world", and
+  /// // `parting`, without a value.
+  /// let span = trace_span!("my_span", greeting = "hello world", parting = field::Empty);
+  ///
+  /// // ...
+  ///
+  /// // Now, you try to record a value for a new field, `new_field`, which was not
+  /// // declared as `Empty` or populated when you created `span`.
+  /// // You won't get any error, but the assignment will have no effect!
+  /// span.record("new_field", "interesting_value_you_really_need");
+  ///
+  /// // Instead, all fields that may be recorded after span creation should be declared up front,
+  /// // using field::Empty when a value is not known, as we did for `parting`.
+  /// // This `record` call will indeed replace field::Empty with "you will be remembered".
+  /// span.record("parting", "you will be remembered");
+  /// ```
+  ///
+  /// <div class="example-wrap" style="display:inline-block">
+  /// <pre class="ignore" style="white-space:normal;font:inherit;">
+  /// **Note**: To record several values in just one call, see the
+  /// [`record_all!`](crate::record_all!) macro. </pre></div>
+  ///
+  /// [`field::Empty`]: super::field::Empty
+  /// [`Metadata`]: super::Metadata
+  pub fn record<Q: field::AsField + ?Sized, V: field::Value>(&self, field_name: &Q, value: V) -> &Self {
+    if let Some(meta) = self.meta
+      && let Some(field) = field_name.as_field(meta)
+    {
+      let value_ref: &dyn field::Value = &value;
+      let values = [(&field, Some(value_ref))];
+      let value_set = meta.fields().value_set(&values);
+      let _span = self.record_all(&value_set);
     }
 
-    /// Returns this span's `Id`, if it is enabled.
-    #[must_use]
-    pub fn id(&self) -> Option<Id> {
-        self.inner.as_ref().map(Inner::id)
+    self
+  }
+
+  /// Records all the fields in the provided `ValueSet`.
+  #[doc(hidden)]
+  #[must_use]
+  pub fn record_all(&self, values: &field::ValueSet<'_>) -> &Self {
+    let record = Record::new(values);
+    if let Some(ref inner) = self.inner {
+      inner.record(&record);
     }
 
-    /// Returns this span's `Metadata`, if it is enabled.
-    #[must_use]
-    pub const fn metadata(&self) -> Option<&'static Metadata<'static>> {
-        self.meta
-    }
-
-    /// Emit a `log` record for this span when `log` support is enabled.
     #[cfg(feature = "log")]
-    #[inline]
-    fn log(&self, target: &str, level: log::Level, message: fmt::Arguments<'_>) {
-        if let Some(meta) = self.meta
-            && level_to_log!(*meta.level()) <= log::max_level()
-        {
-            let logger = log::logger();
-            let log_meta = log::Metadata::builder().level(level).target(target).build();
-            if logger.enabled(&log_meta) {
-                if let Some(ref inner) = self.inner {
-                    logger.log(
-                        &log::Record::builder()
-                            .metadata(log_meta)
-                            .module_path(meta.module_path())
-                            .file(meta.file())
-                            .line(meta.line())
-                            .args(format_args!("{} span={}", message, inner.id.into_u64()))
-                            .build(),
-                    );
-                } else {
-                    logger.log(
-                        &log::Record::builder()
-                            .metadata(log_meta)
-                            .module_path(meta.module_path())
-                            .file(meta.file())
-                            .line(meta.line())
-                            .args(message)
-                            .build(),
-                    );
-                }
-            }
-        }
+    if let Some(meta) = self.meta {
+      if_log_enabled! { *meta.level(), {
+          let target = if record.is_empty() {
+              LIFECYCLE_LOG_TARGET
+          } else {
+              meta.target()
+          };
+          self.log(
+              target,
+              level_to_log!(*meta.level()),
+              format_args!("{};{}", meta.name(), crate::log::LogValueSet { values, is_first: false }),
+          );
+      }}
     }
 
-    /// Invokes a function with a reference to this span's ID and subscriber.
-    ///
-    /// if this span is enabled, the provided function is called, and the result is returned.
-    /// If the span is disabled, the function is not called, and this method returns `None`
-    /// instead.
-    pub fn with_subscriber<T>(&self, f: impl FnOnce((&Id, &Dispatch)) -> T) -> Option<T> {
-        self.inner
-            .as_ref()
-            .map(|inner| f((&inner.id, &inner.subscriber)))
+    self
+  }
+
+  /// Returns `true` if this span was disabled by the subscriber and does not
+  /// exist.
+  ///
+  /// See also [`is_none`].
+  ///
+  /// [`is_none`]: Span::is_none()
+  #[inline]
+  #[must_use]
+  pub const fn is_disabled(&self) -> bool {
+    self.inner.is_none()
+  }
+
+  /// Returns `true` if this span was constructed by [`Span::none`] and is
+  /// empty.
+  ///
+  /// If `is_none` returns `true` for a given span, then [`is_disabled`] will
+  /// also return `true`. However, when a span is disabled by the subscriber
+  /// rather than constructed by `Span::none`, this method will return
+  /// `false`, while `is_disabled` will return `true`.
+  ///
+  /// [`Span::none`]: Span::none()
+  /// [`is_disabled`]: Span::is_disabled()
+  #[inline]
+  #[must_use]
+  pub const fn is_none(&self) -> bool {
+    self.is_disabled() && self.meta.is_none()
+  }
+
+  /// Indicates that the span with the given ID has an indirect causal
+  /// relationship with this span.
+  ///
+  /// This relationship differs somewhat from the parent-child relationship: a
+  /// span may have any number of prior spans, rather than a single one; and
+  /// spans are not considered to be executing _inside_ of the spans they
+  /// follow from. This means that a span may close even if subsequent spans
+  /// that follow from it are still open, and time spent inside of a
+  /// subsequent span should not be included in the time its precedents were
+  /// executing. This is used to model causal relationships such as when a
+  /// single future spawns several related background tasks, et cetera.
+  ///
+  /// If this span is disabled, or the resulting follows-from relationship
+  /// would be invalid, this function will do nothing.
+  ///
+  /// # Examples
+  ///
+  /// Setting a `follows_from` relationship with a `Span`:
+  /// ```
+  /// # use tracing::{span, Id, Level, Span};
+  /// let span1 = span!(Level::INFO, "span_1");
+  /// let span2 = span!(Level::DEBUG, "span_2");
+  /// span2.follows_from(span1);
+  /// ```
+  ///
+  /// Setting a `follows_from` relationship with the current span:
+  /// ```
+  /// # use tracing::{span, Id, Level, Span};
+  /// let span = span!(Level::INFO, "hello!");
+  /// span.follows_from(Span::current());
+  /// ```
+  ///
+  /// Setting a `follows_from` relationship with a `Span` reference:
+  /// ```
+  /// # use tracing::{span, Id, Level, Span};
+  /// let span = span!(Level::INFO, "hello!");
+  /// let curr = Span::current();
+  /// span.follows_from(&curr);
+  /// ```
+  ///
+  /// Setting a `follows_from` relationship with an `Id`:
+  /// ```
+  /// # use tracing::{span, Id, Level, Span};
+  /// let span = span!(Level::INFO, "hello!");
+  /// let id = span.id();
+  /// span.follows_from(id);
+  /// ```
+  pub fn follows_from(&self, from_id: impl Into<Option<Id>>) -> &Self {
+    if let Some(inner) = self.inner.as_ref()
+      && let Some(precedent) = from_id.into()
+    {
+      inner.follows_from(precedent);
     }
+    self
+  }
+
+  /// Returns this span's `Id`, if it is enabled.
+  #[must_use]
+  pub fn id(&self) -> Option<Id> {
+    self.inner.as_ref().map(Inner::id)
+  }
+
+  /// Returns this span's `Metadata`, if it is enabled.
+  #[must_use]
+  pub const fn metadata(&self) -> Option<&'static Metadata<'static>> {
+    self.meta
+  }
+
+  /// Emit a `log` record for this span when `log` support is enabled.
+  #[cfg(feature = "log")]
+  #[inline]
+  fn log(&self, target: &str, level: log::Level, message: fmt::Arguments<'_>) {
+    if let Some(meta) = self.meta
+      && level_to_log!(*meta.level()) <= log::max_level()
+    {
+      let logger = log::logger();
+      let log_meta = log::Metadata::builder().level(level).target(target).build();
+      if logger.enabled(&log_meta) {
+        if let Some(ref inner) = self.inner {
+          logger.log(
+            &log::Record::builder()
+              .metadata(log_meta)
+              .module_path(meta.module_path())
+              .file(meta.file())
+              .line(meta.line())
+              .args(format_args!("{} span={}", message, inner.id.into_u64()))
+              .build(),
+          );
+        } else {
+          logger.log(
+            &log::Record::builder()
+              .metadata(log_meta)
+              .module_path(meta.module_path())
+              .file(meta.file())
+              .line(meta.line())
+              .args(message)
+              .build(),
+          );
+        }
+      }
+    }
+  }
+
+  /// Invokes a function with a reference to this span's ID and subscriber.
+  ///
+  /// if this span is enabled, the provided function is called, and the result is returned.
+  /// If the span is disabled, the function is not called, and this method returns `None`
+  /// instead.
+  pub fn with_subscriber<T>(&self, f: impl FnOnce((&Id, &Dispatch)) -> T) -> Option<T> {
+    self.inner.as_ref().map(|inner| f((&inner.id, &inner.subscriber)))
+  }
 }
 
 impl PartialEq for Span {
-    fn eq(&self, other: &Self) -> bool {
-        match (self.meta, other.meta) {
-            (Some(this), Some(that)) => {
-                this.callsite() == that.callsite() && self.inner == other.inner
-            }
-            _ => false,
-        }
+  fn eq(&self, other: &Self) -> bool {
+    match (self.meta, other.meta) {
+      (Some(this), Some(that)) => this.callsite() == that.callsite() && self.inner == other.inner,
+      _ => false,
     }
+  }
 }
 
 impl Hash for Span {
-    fn hash<H: Hasher>(&self, hasher: &mut H) {
-        self.inner.hash(hasher);
-    }
+  fn hash<H: Hasher>(&self, hasher: &mut H) {
+    self.inner.hash(hasher);
+  }
 }
 
 impl fmt::Debug for Span {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut span = f.debug_struct("Span");
-        if let Some(meta) = self.meta {
-            let _span_base_fields: &mut fmt::DebugStruct<'_, '_> = span
-                .field("name", &meta.name())
-                .field("level", &meta.level())
-                .field("target", &meta.target());
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    let mut span = f.debug_struct("Span");
+    if let Some(meta) = self.meta {
+      let _span_base_fields: &mut fmt::DebugStruct<'_, '_> = span
+        .field("name", &meta.name())
+        .field("level", &meta.level())
+        .field("target", &meta.target());
 
-            if let Some(ref inner) = self.inner {
-                let _span_id_field: &mut fmt::DebugStruct<'_, '_> = span.field("id", &inner.id());
-            } else {
-                let _span_disabled_field: &mut fmt::DebugStruct<'_, '_> =
-                    span.field("disabled", &true);
-            }
+      if let Some(ref inner) = self.inner {
+        let _span_id_field: &mut fmt::DebugStruct<'_, '_> = span.field("id", &inner.id());
+      } else {
+        let _span_disabled_field: &mut fmt::DebugStruct<'_, '_> = span.field("disabled", &true);
+      }
 
-            if let Some(ref path) = meta.module_path() {
-                let _span_module_path_field: &mut fmt::DebugStruct<'_, '_> =
-                    span.field("module_path", &path);
-            }
+      if let Some(ref path) = meta.module_path() {
+        let _span_module_path_field: &mut fmt::DebugStruct<'_, '_> = span.field("module_path", &path);
+      }
 
-            if let Some(ref line) = meta.line() {
-                let _span_line_field: &mut fmt::DebugStruct<'_, '_> = span.field("line", &line);
-            }
+      if let Some(ref line) = meta.line() {
+        let _span_line_field: &mut fmt::DebugStruct<'_, '_> = span.field("line", &line);
+      }
 
-            if let Some(ref file) = meta.file() {
-                let _span_file_field: &mut fmt::DebugStruct<'_, '_> = span.field("file", &file);
-            }
-        } else {
-            let _span_none_field: &mut fmt::DebugStruct<'_, '_> = span.field("none", &true);
-        }
-
-        span.finish()
+      if let Some(ref file) = meta.file() {
+        let _span_file_field: &mut fmt::DebugStruct<'_, '_> = span.field("file", &file);
+      }
+    } else {
+      let _span_none_field: &mut fmt::DebugStruct<'_, '_> = span.field("none", &true);
     }
+
+    span.finish()
+  }
 }
 
 impl<'a> From<&'a Span> for Option<&'a Id> {
-    fn from(span: &'a Span) -> Self {
-        span.inner.as_ref().map(|inner| &inner.id)
-    }
+  fn from(span: &'a Span) -> Self {
+    span.inner.as_ref().map(|inner| &inner.id)
+  }
 }
 
 impl<'a> From<&'a Span> for Option<Id> {
-    fn from(span: &'a Span) -> Self {
-        span.inner.as_ref().map(Inner::id)
-    }
+  fn from(span: &'a Span) -> Self {
+    span.inner.as_ref().map(Inner::id)
+  }
 }
 
 impl From<Span> for Option<Id> {
-    fn from(span: Span) -> Self {
-        span.inner.as_ref().map(Inner::id)
-    }
+  fn from(span: Span) -> Self {
+    span.inner.as_ref().map(Inner::id)
+  }
 }
 
 impl<'a> From<&'a EnteredSpan> for Option<&'a Id> {
-    fn from(span: &'a EnteredSpan) -> Self {
-        span.inner.as_ref().map(|inner| &inner.id)
-    }
+  fn from(span: &'a EnteredSpan) -> Self {
+    span.inner.as_ref().map(|inner| &inner.id)
+  }
 }
 
 impl<'a> From<&'a EnteredSpan> for Option<Id> {
-    fn from(span: &'a EnteredSpan) -> Self {
-        span.inner.as_ref().map(Inner::id)
-    }
+  fn from(span: &'a EnteredSpan) -> Self {
+    span.inner.as_ref().map(Inner::id)
+  }
 }
 
 impl Drop for Span {
-    fn drop(&mut self) {
-        if let Some(inner) = self.inner.as_ref() {
-            let _ignored = inner.subscriber.try_close(inner.id);
-        }
-
-        if_log_enabled! { crate::Level::TRACE, {
-            if let Some(meta) = self.meta {
-                self.log(
-                    LIFECYCLE_LOG_TARGET,
-                    log::Level::Trace,
-                    format_args!("-- {};", meta.name()),
-                );
-            }
-        }}
+  fn drop(&mut self) {
+    if let Some(inner) = self.inner.as_ref() {
+      let _ignored = inner.subscriber.try_close(inner.id);
     }
+
+    if_log_enabled! { crate::Level::TRACE, {
+        if let Some(meta) = self.meta {
+            self.log(
+                LIFECYCLE_LOG_TARGET,
+                log::Level::Trace,
+                format_args!("-- {};", meta.name()),
+            );
+        }
+    }}
+  }
 }
 
 // ===== impl Inner =====
 
 impl Inner {
-    /// Indicates that the span with the given ID has an indirect causal
-    /// relationship with this span.
-    ///
-    /// This relationship differs somewhat from the parent-child relationship: a
-    /// span may have any number of prior spans, rather than a single one; and
-    /// spans are not considered to be executing _inside_ of the spans they
-    /// follow from. This means that a span may close even if subsequent spans
-    /// that follow from it are still open, and time spent inside of a
-    /// subsequent span should not be included in the time its precedents were
-    /// executing. This is used to model causal relationships such as when a
-    /// single future spawns several related background tasks, et cetera.
-    ///
-    /// If this span is disabled, this function will do nothing. Otherwise, it
-    /// returns `Ok(())` if the other span was added as a precedent of this
-    /// span, or an error if this was not possible.
-    fn follows_from(&self, from: Id) {
-        let _ignored = self.subscriber.record_follows_from(self.id, from);
-    }
+  /// Indicates that the span with the given ID has an indirect causal
+  /// relationship with this span.
+  ///
+  /// This relationship differs somewhat from the parent-child relationship: a
+  /// span may have any number of prior spans, rather than a single one; and
+  /// spans are not considered to be executing _inside_ of the spans they
+  /// follow from. This means that a span may close even if subsequent spans
+  /// that follow from it are still open, and time spent inside of a
+  /// subsequent span should not be included in the time its precedents were
+  /// executing. This is used to model causal relationships such as when a
+  /// single future spawns several related background tasks, et cetera.
+  ///
+  /// If this span is disabled, this function will do nothing. Otherwise, it
+  /// returns `Ok(())` if the other span was added as a precedent of this
+  /// span, or an error if this was not possible.
+  fn follows_from(&self, from: Id) {
+    let _ignored = self.subscriber.record_follows_from(self.id, from);
+  }
 
-    /// Returns the span's ID.
-    const fn id(&self) -> Id {
-        self.id
-    }
+  /// Returns the span's ID.
+  const fn id(&self) -> Id {
+    self.id
+  }
 
-    /// Records values on this span.
-    fn record(&self, values: &Record<'_>) {
-        let _ignored = self.subscriber.record(self.id, values);
-    }
+  /// Records values on this span.
+  fn record(&self, values: &Record<'_>) {
+    let _ignored = self.subscriber.record(self.id, values);
+  }
 
-    /// Construct an enabled span inner handle.
-    fn new(id: Id, subscriber: &Dispatch) -> Self {
-        Self {
-            id,
-            subscriber: subscriber.clone(),
-        }
+  /// Construct an enabled span inner handle.
+  fn new(id: Id, subscriber: &Dispatch) -> Self {
+    Self {
+      id,
+      subscriber: subscriber.clone(),
     }
+  }
 }
 
 impl PartialEq for Inner {
-    fn eq(&self, other: &Self) -> bool {
-        self.id == other.id
-    }
+  fn eq(&self, other: &Self) -> bool {
+    self.id == other.id
+  }
 }
 
 impl Hash for Inner {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.id.hash(state);
-    }
+  fn hash<H: Hasher>(&self, state: &mut H) {
+    self.id.hash(state);
+  }
 }
 
 impl Clone for Inner {
-    fn clone(&self) -> Self {
-        let id = match self.subscriber.clone_span(self.id) {
-            Ok(id) => id,
-            Err(_error) => self.id,
-        };
-        Self {
-            id,
-            subscriber: self.subscriber.clone(),
-        }
+  fn clone(&self) -> Self {
+    let id = match self.subscriber.clone_span(self.id) {
+      Ok(id) => id,
+      Err(_error) => self.id,
+    };
+    Self {
+      id,
+      subscriber: self.subscriber.clone(),
     }
+  }
 }
 
 // ===== impl Entered =====
 
 impl EnteredSpan {
-    /// Returns this span's `Id`, if it is enabled.
-    #[must_use]
-    pub fn id(&self) -> Option<Id> {
-        self.inner.as_ref().map(Inner::id)
-    }
+  /// Returns this span's `Id`, if it is enabled.
+  #[must_use]
+  pub fn id(&self) -> Option<Id> {
+    self.inner.as_ref().map(Inner::id)
+  }
 
-    /// Exits this span, returning the underlying [`Span`].
-    #[inline]
-    #[must_use]
-    pub fn exit(mut self) -> Span {
-        // One does not simply move out of a struct with `Drop`.
-        let span = mem::replace(&mut self.span, Span::none());
-        span.do_exit();
-        span
-    }
+  /// Exits this span, returning the underlying [`Span`].
+  #[inline]
+  #[must_use]
+  pub fn exit(mut self) -> Span {
+    // One does not simply move out of a struct with `Drop`.
+    let span = mem::replace(&mut self.span, Span::none());
+    span.do_exit();
+    span
+  }
 }
 
 impl Deref for EnteredSpan {
-    type Target = Span;
+  type Target = Span;
 
-    #[inline]
-    fn deref(&self) -> &Self::Target {
-        &self.span
-    }
+  #[inline]
+  fn deref(&self) -> &Self::Target {
+    &self.span
+  }
 }
 
 impl Drop for Entered<'_> {
-    fn drop(&mut self) {
-        self.span.do_exit();
-    }
+  fn drop(&mut self) {
+    self.span.do_exit();
+  }
 }
 
 impl Drop for EnteredSpan {
-    fn drop(&mut self) {
-        self.span.do_exit();
-    }
+  fn drop(&mut self) {
+    self.span.do_exit();
+  }
 }
 
 /// Technically, `EnteredSpan` _can_ implement both `Send` *and*
@@ -1651,20 +1614,22 @@ impl Drop for EnteredSpan {
 /// `Send` without requiring an unsafe impl.
 #[derive(Debug)]
 struct PhantomNotSend {
-    /// Marker that keeps `EnteredSpan` from implementing `Send`.
-    ghost: PhantomData<dyn Sync>,
+  /// Marker that keeps `EnteredSpan` from implementing `Send`.
+  ghost: PhantomData<dyn Sync>,
 }
 
 /// Shared marker value for `EnteredSpan` guards.
-const PHANTOM_NOT_SEND: PhantomNotSend = PhantomNotSend { ghost: PhantomData };
+const PHANTOM_NOT_SEND: PhantomNotSend = PhantomNotSend {
+  ghost: PhantomData
+};
 
 #[cfg(test)]
 mod test {
-    use super::*;
+  use super::*;
 
-    #[test]
-    fn test_record_backwards_compat() {
-        let _text_recorded_span = Span::current().record("some-key", "some text");
-        let _bool_recorded_span = Span::current().record("some-key", false);
-    }
+  #[test]
+  fn test_record_backwards_compat() {
+    let _text_recorded_span = Span::current().record("some-key", "some text");
+    let _bool_recorded_span = Span::current().record("some-key", false);
+  }
 }

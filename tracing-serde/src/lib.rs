@@ -129,8 +129,8 @@
 //!
 //! The following unstable feature flags are currently available:
 //!
-//! * `valuable`: Enables [`Visit::record_value`] implementations, for
-//!   serializing values recorded using the [`valuable`] crate.
+//! * `valuable`: Enables [`Visit::record_value`] implementations, for serializing values recorded
+//!   using the [`valuable`] crate.
 //!
 //! #### Enabling Unstable Features
 //!
@@ -168,27 +168,29 @@
 //! [`tracing`]: https://crates.io/crates/tracing
 //! [`serde`]: https://crates.io/crates/serde
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
-    html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
-    issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
+  html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
+  html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
+  issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(docsrs, deny(rustdoc::broken_intra_doc_links))]
 use std::fmt;
 
-use serde::{
-    Serialize,
-    ser::{
-        SerializeMap, SerializeSeq as _, SerializeStruct, SerializeTupleStruct as _, Serializer,
-    },
-};
-
-use tracing_core::{
-    event::Event,
-    field::{Field, FieldSet, Visit},
-    metadata::{Level, Metadata},
-    span::{Attributes, Id, Record},
-};
+use serde::Serialize;
+use serde::ser::SerializeMap;
+use serde::ser::SerializeSeq as _;
+use serde::ser::SerializeStruct;
+use serde::ser::SerializeTupleStruct as _;
+use serde::ser::Serializer;
+use tracing_core::event::Event;
+use tracing_core::field::Field;
+use tracing_core::field::FieldSet;
+use tracing_core::field::Visit;
+use tracing_core::metadata::Level;
+use tracing_core::metadata::Metadata;
+use tracing_core::span::Attributes;
+use tracing_core::span::Id;
+use tracing_core::span::Record;
 
 pub mod fields;
 
@@ -197,12 +199,12 @@ pub mod fields;
 pub struct SerializeField<'a>(&'a Field);
 
 impl Serialize for SerializeField<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.0.name())
-    }
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+  {
+    serializer.serialize_str(self.0.name())
+  }
 }
 
 /// A `serde::Serialize` adapter for a tracing [`FieldSet`].
@@ -210,16 +212,16 @@ impl Serialize for SerializeField<'_> {
 pub struct SerializeFieldSet<'a>(&'a FieldSet);
 
 impl Serialize for SerializeFieldSet<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
-        for element in self.0 {
-            seq.serialize_element(&SerializeField(&element))?;
-        }
-        seq.end()
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+  {
+    let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+    for element in self.0 {
+      seq.serialize_element(&SerializeField(&element))?;
     }
+    seq.end()
+  }
 }
 
 /// A `serde::Serialize` adapter for a tracing [`Level`].
@@ -227,12 +229,12 @@ impl Serialize for SerializeFieldSet<'_> {
 pub struct SerializeLevel<'a>(&'a Level);
 
 impl Serialize for SerializeLevel<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.0.as_str())
-    }
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+  {
+    serializer.serialize_str(self.0.as_str())
+  }
 }
 
 /// A `serde::Serialize` adapter for a tracing span [`Id`].
@@ -240,14 +242,14 @@ impl Serialize for SerializeLevel<'_> {
 pub struct SerializeId<'a>(&'a Id);
 
 impl Serialize for SerializeId<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut state = serializer.serialize_tuple_struct("Id", 1)?;
-        state.serialize_field(&self.0.into_u64())?;
-        state.end()
-    }
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+  {
+    let mut state = serializer.serialize_tuple_struct("Id", 1)?;
+    state.serialize_field(&self.0.into_u64())?;
+    state.end()
+  }
 }
 
 /// A `serde::Serialize` adapter for tracing [`Metadata`].
@@ -255,22 +257,22 @@ impl Serialize for SerializeId<'_> {
 pub struct SerializeMetadata<'a>(&'a Metadata<'a>);
 
 impl Serialize for SerializeMetadata<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut state = serializer.serialize_struct("Metadata", 9)?;
-        state.serialize_field("name", self.0.name())?;
-        state.serialize_field("target", self.0.target())?;
-        state.serialize_field("level", &SerializeLevel(self.0.level()))?;
-        state.serialize_field("module_path", &self.0.module_path())?;
-        state.serialize_field("file", &self.0.file())?;
-        state.serialize_field("line", &self.0.line())?;
-        state.serialize_field("fields", &SerializeFieldSet(self.0.fields()))?;
-        state.serialize_field("is_span", &self.0.is_span())?;
-        state.serialize_field("is_event", &self.0.is_event())?;
-        state.end()
-    }
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+  {
+    let mut state = serializer.serialize_struct("Metadata", 9)?;
+    state.serialize_field("name", self.0.name())?;
+    state.serialize_field("target", self.0.target())?;
+    state.serialize_field("level", &SerializeLevel(self.0.level()))?;
+    state.serialize_field("module_path", &self.0.module_path())?;
+    state.serialize_field("file", &self.0.file())?;
+    state.serialize_field("line", &self.0.line())?;
+    state.serialize_field("fields", &SerializeFieldSet(self.0.fields()))?;
+    state.serialize_field("is_span", &self.0.is_span())?;
+    state.serialize_field("is_event", &self.0.is_event())?;
+    state.end()
+  }
 }
 
 /// Implements `serde::Serialize` to write `Event` data to a serializer.
@@ -278,19 +280,19 @@ impl Serialize for SerializeMetadata<'_> {
 pub struct SerializeEvent<'a>(&'a Event<'a>);
 
 impl Serialize for SerializeEvent<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut event = serializer.serialize_struct("Event", 2)?;
-        event.serialize_field("metadata", &SerializeMetadata(self.0.metadata()))?;
-        let mut visitor = SerdeStructVisitor {
-            serializer: event,
-            state: Ok(()),
-        };
-        self.0.record(&mut visitor);
-        visitor.finish()
-    }
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+  {
+    let mut event = serializer.serialize_struct("Event", 2)?;
+    event.serialize_field("metadata", &SerializeMetadata(self.0.metadata()))?;
+    let mut visitor = SerdeStructVisitor {
+      serializer: event,
+      state:      Ok(()),
+    };
+    self.0.record(&mut visitor);
+    visitor.finish()
+  }
 }
 
 /// Implements `serde::Serialize` to write `Attributes` data to a serializer.
@@ -298,22 +300,22 @@ impl Serialize for SerializeEvent<'_> {
 pub struct SerializeAttributes<'a>(&'a Attributes<'a>);
 
 impl Serialize for SerializeAttributes<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let mut attributes = serializer.serialize_struct("Attributes", 3)?;
-        attributes.serialize_field("metadata", &SerializeMetadata(self.0.metadata()))?;
-        attributes.serialize_field("parent", &self.0.parent().map(SerializeId))?;
-        attributes.serialize_field("is_root", &self.0.is_root())?;
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+  {
+    let mut attributes = serializer.serialize_struct("Attributes", 3)?;
+    attributes.serialize_field("metadata", &SerializeMetadata(self.0.metadata()))?;
+    attributes.serialize_field("parent", &self.0.parent().map(SerializeId))?;
+    attributes.serialize_field("is_root", &self.0.is_root())?;
 
-        let mut visitor = SerdeStructVisitor {
-            serializer: attributes,
-            state: Ok(()),
-        };
-        self.0.record(&mut visitor);
-        visitor.finish()
-    }
+    let mut visitor = SerdeStructVisitor {
+      serializer: attributes,
+      state:      Ok(()),
+    };
+    self.0.record(&mut visitor);
+    visitor.finish()
+  }
 }
 
 /// Implements `serde::Serialize` to write `Record` data to a serializer.
@@ -321,269 +323,265 @@ impl Serialize for SerializeAttributes<'_> {
 pub struct SerializeRecord<'a>(&'a Record<'a>);
 
 impl Serialize for SerializeRecord<'_> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        let map = serializer.serialize_map(None)?;
-        let mut visitor = SerdeMapVisitor::new(map);
-        self.0.record(&mut visitor);
-        visitor.finish()
-    }
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+  {
+    let map = serializer.serialize_map(None)?;
+    let mut visitor = SerdeMapVisitor::new(map);
+    self.0.record(&mut visitor);
+    visitor.finish()
+  }
 }
 
 /// Implements `tracing_core::field::Visit` for some `serde::ser::SerializeMap`.
 #[derive(Debug)]
 pub struct SerdeMapVisitor<S: SerializeMap> {
-    /// Serializer receiving field entries recorded by the visitor.
-    serializer: S,
-    /// First field serialization error, or `Ok(())` while recording can continue.
-    state: Result<(), S::Error>,
+  /// Serializer receiving field entries recorded by the visitor.
+  serializer: S,
+  /// First field serialization error, or `Ok(())` while recording can continue.
+  state:      Result<(), S::Error>,
 }
 
 impl<S> SerdeMapVisitor<S>
 where
-    S: SerializeMap,
+  S: SerializeMap,
 {
-    /// Create a new map visitor.
-    pub const fn new(serializer: S) -> Self {
-        Self {
-            serializer,
-            state: Ok(()),
-        }
+  /// Create a new map visitor.
+  pub const fn new(serializer: S) -> Self {
+    Self {
+      serializer,
+      state: Ok(()),
     }
+  }
 
-    /// Completes serializing the visited object, returning `Ok(())` if all
-    /// fields were serialized correctly, or `Error(S::Error)` if a field could
-    /// not be serialized.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first field serialization error, or the serializer's final
-    /// map completion error.
-    pub fn finish(self) -> Result<S::Ok, S::Error> {
-        self.state?;
-        self.serializer.end()
-    }
+  /// Completes serializing the visited object, returning `Ok(())` if all
+  /// fields were serialized correctly, or `Error(S::Error)` if a field could
+  /// not be serialized.
+  ///
+  /// # Errors
+  ///
+  /// Returns the first field serialization error, or the serializer's final
+  /// map completion error.
+  pub fn finish(self) -> Result<S::Ok, S::Error> {
+    self.state?;
+    self.serializer.end()
+  }
 
-    /// Completes serializing the visited object, returning ownership of the underlying serializer
-    /// if all fields were serialized correctly, or `Err(S::Error)` if a field could not be
-    /// serialized.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first field serialization error.
-    pub fn take_serializer(self) -> Result<S, S::Error> {
-        self.state?;
-        Ok(self.serializer)
-    }
+  /// Completes serializing the visited object, returning ownership of the underlying serializer
+  /// if all fields were serialized correctly, or `Err(S::Error)` if a field could not be
+  /// serialized.
+  ///
+  /// # Errors
+  ///
+  /// Returns the first field serialization error.
+  pub fn take_serializer(self) -> Result<S, S::Error> {
+    self.state?;
+    Ok(self.serializer)
+  }
 }
 
 impl<S> Visit for SerdeMapVisitor<S>
 where
-    S: SerializeMap,
+  S: SerializeMap,
 {
-    #[cfg(all(tracing_unstable, feature = "valuable"))]
-    #[cfg_attr(docsrs, doc(cfg(all(tracing_unstable, feature = "valuable"))))]
-    fn record_value(&mut self, field: &Field, value: valuable_crate::Value<'_>) {
-        if self.state.is_ok() {
-            self.state = self
-                .serializer
-                .serialize_entry(field.name(), &valuable_serde::Serializable::new(value));
-        }
+  #[cfg(all(tracing_unstable, feature = "valuable"))]
+  #[cfg_attr(docsrs, doc(cfg(all(tracing_unstable, feature = "valuable"))))]
+  fn record_value(&mut self, field: &Field, value: valuable_crate::Value<'_>) {
+    if self.state.is_ok() {
+      self.state = self
+        .serializer
+        .serialize_entry(field.name(), &valuable_serde::Serializable::new(value));
     }
+  }
 
-    fn record_bool(&mut self, field: &Field, value: bool) {
-        // If previous fields serialized successfully, continue serializing,
-        // otherwise, short-circuit and do nothing.
-        if self.state.is_ok() {
-            self.state = self.serializer.serialize_entry(field.name(), &value);
-        }
+  fn record_bool(&mut self, field: &Field, value: bool) {
+    // If previous fields serialized successfully, continue serializing,
+    // otherwise, short-circuit and do nothing.
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_entry(field.name(), &value);
     }
+  }
 
-    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        if self.state.is_ok() {
-            self.state = self
-                .serializer
-                .serialize_entry(field.name(), &format_args!("{value:?}"));
-        }
+  fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_entry(field.name(), &format_args!("{value:?}"));
     }
+  }
 
-    fn record_u64(&mut self, field: &Field, value: u64) {
-        if self.state.is_ok() {
-            self.state = self.serializer.serialize_entry(field.name(), &value);
-        }
+  fn record_u64(&mut self, field: &Field, value: u64) {
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_entry(field.name(), &value);
     }
+  }
 
-    fn record_i64(&mut self, field: &Field, value: i64) {
-        if self.state.is_ok() {
-            self.state = self.serializer.serialize_entry(field.name(), &value);
-        }
+  fn record_i64(&mut self, field: &Field, value: i64) {
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_entry(field.name(), &value);
     }
+  }
 
-    fn record_f64(&mut self, field: &Field, value: f64) {
-        if self.state.is_ok() {
-            self.state = self.serializer.serialize_entry(field.name(), &value);
-        }
+  fn record_f64(&mut self, field: &Field, value: f64) {
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_entry(field.name(), &value);
     }
+  }
 
-    fn record_str(&mut self, field: &Field, value: &str) {
-        if self.state.is_ok() {
-            self.state = self.serializer.serialize_entry(field.name(), &value);
-        }
+  fn record_str(&mut self, field: &Field, value: &str) {
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_entry(field.name(), &value);
     }
+  }
 }
 
 /// Implements `tracing_core::field::Visit` for some `serde::ser::SerializeStruct`.
 #[derive(Debug)]
 pub struct SerdeStructVisitor<S: SerializeStruct> {
-    /// Serializer receiving struct fields recorded by the visitor.
-    serializer: S,
-    /// First field serialization error, or `Ok(())` while recording can continue.
-    state: Result<(), S::Error>,
+  /// Serializer receiving struct fields recorded by the visitor.
+  serializer: S,
+  /// First field serialization error, or `Ok(())` while recording can continue.
+  state:      Result<(), S::Error>,
 }
 
 impl<S> Visit for SerdeStructVisitor<S>
 where
-    S: SerializeStruct,
+  S: SerializeStruct,
 {
-    #[cfg(all(tracing_unstable, feature = "valuable"))]
-    #[cfg_attr(docsrs, doc(cfg(all(tracing_unstable, feature = "valuable"))))]
-    fn record_value(&mut self, field: &Field, value: valuable_crate::Value<'_>) {
-        if self.state.is_ok() {
-            self.state = self
-                .serializer
-                .serialize_field(field.name(), &valuable_serde::Serializable::new(value));
-        }
+  #[cfg(all(tracing_unstable, feature = "valuable"))]
+  #[cfg_attr(docsrs, doc(cfg(all(tracing_unstable, feature = "valuable"))))]
+  fn record_value(&mut self, field: &Field, value: valuable_crate::Value<'_>) {
+    if self.state.is_ok() {
+      self.state = self
+        .serializer
+        .serialize_field(field.name(), &valuable_serde::Serializable::new(value));
     }
+  }
 
-    fn record_bool(&mut self, field: &Field, value: bool) {
-        // If previous fields serialized successfully, continue serializing,
-        // otherwise, short-circuit and do nothing.
-        if self.state.is_ok() {
-            self.state = self.serializer.serialize_field(field.name(), &value);
-        }
+  fn record_bool(&mut self, field: &Field, value: bool) {
+    // If previous fields serialized successfully, continue serializing,
+    // otherwise, short-circuit and do nothing.
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_field(field.name(), &value);
     }
+  }
 
-    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        if self.state.is_ok() {
-            self.state = self
-                .serializer
-                .serialize_field(field.name(), &format_args!("{value:?}"));
-        }
+  fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_field(field.name(), &format_args!("{value:?}"));
     }
+  }
 
-    fn record_u64(&mut self, field: &Field, value: u64) {
-        if self.state.is_ok() {
-            self.state = self.serializer.serialize_field(field.name(), &value);
-        }
+  fn record_u64(&mut self, field: &Field, value: u64) {
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_field(field.name(), &value);
     }
+  }
 
-    fn record_i64(&mut self, field: &Field, value: i64) {
-        if self.state.is_ok() {
-            self.state = self.serializer.serialize_field(field.name(), &value);
-        }
+  fn record_i64(&mut self, field: &Field, value: i64) {
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_field(field.name(), &value);
     }
+  }
 
-    fn record_f64(&mut self, field: &Field, value: f64) {
-        if self.state.is_ok() {
-            self.state = self.serializer.serialize_field(field.name(), &value);
-        }
+  fn record_f64(&mut self, field: &Field, value: f64) {
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_field(field.name(), &value);
     }
+  }
 
-    fn record_str(&mut self, field: &Field, value: &str) {
-        if self.state.is_ok() {
-            self.state = self.serializer.serialize_field(field.name(), &value);
-        }
+  fn record_str(&mut self, field: &Field, value: &str) {
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_field(field.name(), &value);
     }
+  }
 }
 
 impl<S: SerializeStruct> SerdeStructVisitor<S> {
-    /// Completes serializing the visited object, returning `Ok(())` if all
-    /// fields were serialized correctly, or `Error(S::Error)` if a field could
-    /// not be serialized.
-    ///
-    /// # Errors
-    ///
-    /// Returns the first field serialization error, or the serializer's final
-    /// struct completion error.
-    pub fn finish(self) -> Result<S::Ok, S::Error> {
-        self.state?;
-        self.serializer.end()
-    }
+  /// Completes serializing the visited object, returning `Ok(())` if all
+  /// fields were serialized correctly, or `Error(S::Error)` if a field could
+  /// not be serialized.
+  ///
+  /// # Errors
+  ///
+  /// Returns the first field serialization error, or the serializer's final
+  /// struct completion error.
+  pub fn finish(self) -> Result<S::Ok, S::Error> {
+    self.state?;
+    self.serializer.end()
+  }
 }
 
 /// Converts tracing values into serializable wrapper types.
 pub trait AsSerde<'a>: sealed::Sealed {
-    /// The `serde::Serialize` adapter returned for this value.
-    type Serializable: Serialize + 'a;
+  /// The `serde::Serialize` adapter returned for this value.
+  type Serializable: Serialize + 'a;
 
-    /// `as_serde` borrows a `tracing` value and returns the serialized value.
-    fn as_serde(&'a self) -> Self::Serializable;
+  /// `as_serde` borrows a `tracing` value and returns the serialized value.
+  fn as_serde(&'a self) -> Self::Serializable;
 }
 
 impl<'a> AsSerde<'a> for Metadata<'a> {
-    type Serializable = SerializeMetadata<'a>;
+  type Serializable = SerializeMetadata<'a>;
 
-    fn as_serde(&'a self) -> Self::Serializable {
-        SerializeMetadata(self)
-    }
+  fn as_serde(&'a self) -> Self::Serializable {
+    SerializeMetadata(self)
+  }
 }
 
 impl<'a> AsSerde<'a> for Event<'a> {
-    type Serializable = SerializeEvent<'a>;
+  type Serializable = SerializeEvent<'a>;
 
-    fn as_serde(&'a self) -> Self::Serializable {
-        SerializeEvent(self)
-    }
+  fn as_serde(&'a self) -> Self::Serializable {
+    SerializeEvent(self)
+  }
 }
 
 impl<'a> AsSerde<'a> for Attributes<'a> {
-    type Serializable = SerializeAttributes<'a>;
+  type Serializable = SerializeAttributes<'a>;
 
-    fn as_serde(&'a self) -> Self::Serializable {
-        SerializeAttributes(self)
-    }
+  fn as_serde(&'a self) -> Self::Serializable {
+    SerializeAttributes(self)
+  }
 }
 
 impl<'a> AsSerde<'a> for Id {
-    type Serializable = SerializeId<'a>;
+  type Serializable = SerializeId<'a>;
 
-    fn as_serde(&'a self) -> Self::Serializable {
-        SerializeId(self)
-    }
+  fn as_serde(&'a self) -> Self::Serializable {
+    SerializeId(self)
+  }
 }
 
 impl<'a> AsSerde<'a> for Record<'a> {
-    type Serializable = SerializeRecord<'a>;
+  type Serializable = SerializeRecord<'a>;
 
-    fn as_serde(&'a self) -> Self::Serializable {
-        SerializeRecord(self)
-    }
+  fn as_serde(&'a self) -> Self::Serializable {
+    SerializeRecord(self)
+  }
 }
 
 impl<'a> AsSerde<'a> for Level {
-    type Serializable = SerializeLevel<'a>;
+  type Serializable = SerializeLevel<'a>;
 
-    fn as_serde(&'a self) -> Self::Serializable {
-        SerializeLevel(self)
-    }
+  fn as_serde(&'a self) -> Self::Serializable {
+    SerializeLevel(self)
+  }
 }
 
 impl<'a> AsSerde<'a> for Field {
-    type Serializable = SerializeField<'a>;
+  type Serializable = SerializeField<'a>;
 
-    fn as_serde(&'a self) -> Self::Serializable {
-        SerializeField(self)
-    }
+  fn as_serde(&'a self) -> Self::Serializable {
+    SerializeField(self)
+  }
 }
 
 impl<'a> AsSerde<'a> for FieldSet {
-    type Serializable = SerializeFieldSet<'a>;
+  type Serializable = SerializeFieldSet<'a>;
 
-    fn as_serde(&'a self) -> Self::Serializable {
-        SerializeFieldSet(self)
-    }
+  fn as_serde(&'a self) -> Self::Serializable {
+    SerializeFieldSet(self)
+  }
 }
 
 impl sealed::Sealed for Event<'_> {}
@@ -604,6 +602,6 @@ impl sealed::Sealed for FieldSet {}
 
 /// Private sealing module for local extension traits.
 mod sealed {
-    /// Marker trait preventing downstream implementations.
-    pub trait Sealed {}
+  /// Marker trait preventing downstream implementations.
+  pub trait Sealed {}
 }

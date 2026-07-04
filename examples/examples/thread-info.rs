@@ -19,21 +19,25 @@
 /// Jul 17 00:38:07.177  INFO large name thread 2 ThreadId(04) thread_info: i=9
 /// ```
 use std::error::Error;
-use std::thread::{self, JoinHandle};
+use std::thread::JoinHandle;
+use std::thread::{
+  self,
+};
 use std::time::Duration;
+
 use tracing::info;
 
 /// Wait for a worker thread and report panics as ordinary example errors.
 fn wait_for_thread(handle: JoinHandle<()>) -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-    if handle.join().is_err() {
-        return Err("worker thread panicked".into());
-    }
+  if handle.join().is_err() {
+    return Err("worker thread panicked".into());
+  }
 
-    Ok(())
+  Ok(())
 }
 
 fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
-    tracing_subscriber::fmt()
+  tracing_subscriber::fmt()
         .with_max_level(tracing::Level::DEBUG)
         // enable thread id to be emitted
         .with_thread_ids(true)
@@ -41,24 +45,20 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
         .with_thread_names(true)
         .try_init()?;
 
-    let do_work = || {
-        for i in 1..10 {
-            info!(i);
-            thread::sleep(Duration::from_millis(1));
-        }
-    };
+  let do_work = || {
+    for i in 1..10 {
+      info!(i);
+      thread::sleep(Duration::from_millis(1));
+    }
+  };
 
-    let thread_with_no_name = thread::spawn(do_work);
-    let thread_one = thread::Builder::new()
-        .name("thread 1".to_owned())
-        .spawn(do_work)?;
-    let thread_two = thread::Builder::new()
-        .name("large name thread 2".to_owned())
-        .spawn(do_work)?;
+  let thread_with_no_name = thread::spawn(do_work);
+  let thread_one = thread::Builder::new().name("thread 1".to_owned()).spawn(do_work)?;
+  let thread_two = thread::Builder::new().name("large name thread 2".to_owned()).spawn(do_work)?;
 
-    wait_for_thread(thread_with_no_name)?;
-    wait_for_thread(thread_one)?;
-    wait_for_thread(thread_two)?;
+  wait_for_thread(thread_with_no_name)?;
+  wait_for_thread(thread_one)?;
+  wait_for_thread(thread_two)?;
 
-    Ok(())
+  Ok(())
 }

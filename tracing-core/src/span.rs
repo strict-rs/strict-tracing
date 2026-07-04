@@ -2,8 +2,10 @@
 
 use core::num::NonZeroU64;
 
+use crate::Metadata;
+use crate::Parent;
+use crate::field;
 use crate::field::FieldSet;
-use crate::{Metadata, Parent, field};
 
 /// Identifies a span within the context of a subscriber.
 ///
@@ -20,19 +22,19 @@ pub struct Id(NonZeroU64);
 /// created.
 #[derive(Debug)]
 pub struct Attributes<'a> {
-    /// Metadata describing the callsite that created the span.
-    metadata: &'static Metadata<'static>,
-    /// Values recorded with the span at creation time.
-    values: &'a field::ValueSet<'a>,
-    /// Parent relationship requested for the new span.
-    parent: Parent,
+  /// Metadata describing the callsite that created the span.
+  metadata: &'static Metadata<'static>,
+  /// Values recorded with the span at creation time.
+  values:   &'a field::ValueSet<'a>,
+  /// Parent relationship requested for the new span.
+  parent:   Parent,
 }
 
 /// A set of fields recorded by a span.
 #[derive(Debug)]
 pub struct Record<'a> {
-    /// Values recorded against an existing span.
-    values: &'a field::ValueSet<'a>,
+  /// Values recorded against an existing span.
+  values: &'a field::ValueSet<'a>,
 }
 
 /// Indicates what [the `Subscriber` considers] the "current" span.
@@ -47,342 +49,346 @@ pub struct Record<'a> {
 /// [`Metadata`]: super::metadata::Metadata
 #[derive(Debug)]
 pub struct Current {
-    /// Internal representation of the current-span state.
-    inner: CurrentInner,
+  /// Internal representation of the current-span state.
+  inner: CurrentInner,
 }
 
 /// Internal states for the current span reported by a subscriber.
 #[derive(Debug)]
 enum CurrentInner {
-    /// The subscriber knows a current span.
-    Current {
-        /// Identifier for the current span.
-        id: Id,
-        /// Metadata for the current span.
-        metadata: &'static Metadata<'static>,
-    },
-    /// The subscriber knows there is no current span.
-    None,
-    /// The subscriber does not track the current span.
-    Unknown,
+  /// The subscriber knows a current span.
+  Current {
+    /// Identifier for the current span.
+    id:       Id,
+    /// Metadata for the current span.
+    metadata: &'static Metadata<'static>,
+  },
+  /// The subscriber knows there is no current span.
+  None,
+  /// The subscriber does not track the current span.
+  Unknown,
 }
 
 // ===== impl Span =====
 
 impl Id {
-    /// Attempts to construct a new span ID from the given `u64`.
-    ///
-    /// Returns `None` if the provided `u64` is 0.
-    #[must_use]
-    pub const fn try_from_u64(value: u64) -> Option<Self> {
-        let Some(id) = NonZeroU64::new(value) else {
-            return None;
-        };
-        Some(Self(id))
-    }
+  /// Attempts to construct a new span ID from the given `u64`.
+  ///
+  /// Returns `None` if the provided `u64` is 0.
+  #[must_use]
+  pub const fn try_from_u64(value: u64) -> Option<Self> {
+    let Some(id) = NonZeroU64::new(value) else {
+      return None;
+    };
+    Some(Self(id))
+  }
 
-    /// Constructs a new span ID from the given `NonZeroU64`.
-    #[allow(
-        clippy::single_call_fn,
-        reason = "public nonzero span ID constructor preserves the checked ID API"
-    )]
-    #[inline]
-    #[must_use]
-    pub const fn from_non_zero_u64(id: NonZeroU64) -> Self {
-        Self(id)
-    }
+  /// Constructs a new span ID from the given `NonZeroU64`.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "public nonzero span ID constructor preserves the checked ID API"
+  )]
+  #[inline]
+  #[must_use]
+  pub const fn from_non_zero_u64(id: NonZeroU64) -> Self {
+    Self(id)
+  }
 
-    /// Returns the span's ID as a `u64`.
-    #[must_use]
-    pub const fn into_u64(self) -> u64 {
-        self.0.get()
-    }
+  /// Returns the span's ID as a `u64`.
+  #[must_use]
+  pub const fn into_u64(self) -> u64 {
+    self.0.get()
+  }
 
-    /// Returns the span's ID as a `NonZeroU64`.
-    #[inline]
-    #[must_use]
-    pub const fn into_non_zero_u64(self) -> NonZeroU64 {
-        self.0
-    }
+  /// Returns the span's ID as a `NonZeroU64`.
+  #[inline]
+  #[must_use]
+  pub const fn into_non_zero_u64(self) -> NonZeroU64 {
+    self.0
+  }
 }
 
 impl<'a> From<&'a Id> for Option<Id> {
-    fn from(id: &'a Id) -> Self {
-        Some(*id)
-    }
+  fn from(id: &'a Id) -> Self {
+    Some(*id)
+  }
 }
 
 // ===== impl Attributes =====
 
 impl<'a> Attributes<'a> {
-    /// Returns `Attributes` describing a new child span of the current span,
-    /// with the provided metadata and values.
-    #[allow(
-        clippy::single_call_fn,
-        reason = "public span Attributes constructor is used by downstream subscriber tests and instrumentation"
-    )]
-    #[must_use]
-    pub const fn new(
-        metadata: &'static Metadata<'static>,
-        values: &'a field::ValueSet<'a>,
-    ) -> Self {
-        Self {
-            metadata,
-            values,
-            parent: Parent::Current,
-        }
+  /// Returns `Attributes` describing a new child span of the current span,
+  /// with the provided metadata and values.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "public span Attributes constructor is used by downstream subscriber tests and instrumentation"
+  )]
+  #[must_use]
+  pub const fn new(metadata: &'static Metadata<'static>, values: &'a field::ValueSet<'a>) -> Self {
+    Self {
+      metadata,
+      values,
+      parent: Parent::Current,
     }
+  }
 
-    /// Returns `Attributes` describing a new span at the root of its own trace
-    /// tree, with the provided metadata and values.
-    #[must_use]
-    pub const fn new_root(
-        metadata: &'static Metadata<'static>,
-        values: &'a field::ValueSet<'a>,
-    ) -> Self {
-        Self {
-            metadata,
-            values,
-            parent: Parent::Root,
-        }
+  /// Returns `Attributes` describing a new span at the root of its own trace
+  /// tree, with the provided metadata and values.
+  #[must_use]
+  pub const fn new_root(metadata: &'static Metadata<'static>, values: &'a field::ValueSet<'a>) -> Self {
+    Self {
+      metadata,
+      values,
+      parent: Parent::Root,
     }
+  }
 
-    /// Returns `Attributes` describing a new child span of the specified
-    /// parent span, with the provided metadata and values.
-    #[must_use]
-    pub const fn child_of(
-        parent: Id,
-        metadata: &'static Metadata<'static>,
-        values: &'a field::ValueSet<'a>,
-    ) -> Self {
-        Attributes {
-            metadata,
-            values,
-            parent: Parent::Explicit(parent),
-        }
+  /// Returns `Attributes` describing a new child span of the specified
+  /// parent span, with the provided metadata and values.
+  #[must_use]
+  pub const fn child_of(parent: Id, metadata: &'static Metadata<'static>, values: &'a field::ValueSet<'a>) -> Self {
+    Attributes {
+      metadata,
+      values,
+      parent: Parent::Explicit(parent),
     }
+  }
 
-    /// Returns a reference to the new span's metadata.
-    #[must_use]
-    pub const fn metadata(&self) -> &'static Metadata<'static> {
-        self.metadata
-    }
+  /// Returns a reference to the new span's metadata.
+  #[must_use]
+  pub const fn metadata(&self) -> &'static Metadata<'static> {
+    self.metadata
+  }
 
-    /// Returns a reference to a `ValueSet` containing any values the new span
-    /// was created with.
-    #[must_use]
-    pub const fn values(&self) -> &field::ValueSet<'a> {
-        self.values
-    }
+  /// Returns a reference to a `ValueSet` containing any values the new span
+  /// was created with.
+  #[must_use]
+  pub const fn values(&self) -> &field::ValueSet<'a> {
+    self.values
+  }
 
-    /// Returns true if the new span should be a root.
-    #[must_use]
-    pub const fn is_root(&self) -> bool {
-        matches!(self.parent, Parent::Root)
-    }
+  /// Returns true if the new span should be a root.
+  #[must_use]
+  pub const fn is_root(&self) -> bool {
+    matches!(self.parent, Parent::Root)
+  }
 
-    /// Returns true if the new span's parent should be determined based on the
-    /// current context.
-    ///
-    /// If this is true and the current thread is currently inside a span, then
-    /// that span should be the new span's parent. Otherwise, if the current
-    /// thread is _not_ inside a span, then the new span will be the root of its
-    /// own trace tree.
-    #[must_use]
-    pub const fn is_contextual(&self) -> bool {
-        matches!(self.parent, Parent::Current)
-    }
+  /// Returns true if the new span's parent should be determined based on the
+  /// current context.
+  ///
+  /// If this is true and the current thread is currently inside a span, then
+  /// that span should be the new span's parent. Otherwise, if the current
+  /// thread is _not_ inside a span, then the new span will be the root of its
+  /// own trace tree.
+  #[must_use]
+  pub const fn is_contextual(&self) -> bool {
+    matches!(self.parent, Parent::Current)
+  }
 
-    /// Returns the new span's explicitly-specified parent, if there is one.
-    ///
-    /// Otherwise (if the new span is a root or is a child of the current span),
-    /// returns `None`.
-    #[must_use]
-    pub const fn parent(&self) -> Option<&Id> {
-        match self.parent {
-            Parent::Explicit(ref parent) => Some(parent),
-            Parent::Root | Parent::Current => None,
-        }
+  /// Returns the new span's explicitly-specified parent, if there is one.
+  ///
+  /// Otherwise (if the new span is a root or is a child of the current span),
+  /// returns `None`.
+  #[must_use]
+  pub const fn parent(&self) -> Option<&Id> {
+    match self.parent {
+      Parent::Explicit(ref parent) => Some(parent),
+      Parent::Root | Parent::Current => None,
     }
+  }
 
-    /// Records all the fields in this set of `Attributes` with the provided
-    /// [Visitor].
-    ///
-    /// [visitor]: super::field::Visit
-    pub fn record(&self, visitor: &mut dyn field::Visit) {
-        self.values.record(visitor);
-    }
+  /// Records all the fields in this set of `Attributes` with the provided
+  /// [Visitor].
+  ///
+  /// [visitor]: super::field::Visit
+  pub fn record(&self, visitor: &mut dyn field::Visit) {
+    self.values.record(visitor);
+  }
 
-    /// Returns `true` if this set of `Attributes` contains a value for the
-    /// given `Field`.
-    #[must_use]
-    pub fn contains(&self, field: &field::Field) -> bool {
-        self.values.contains(field)
-    }
+  /// Returns `true` if this set of `Attributes` contains a value for the
+  /// given `Field`.
+  #[must_use]
+  pub fn contains(&self, field: &field::Field) -> bool {
+    self.values.contains(field)
+  }
 
-    /// Returns true if this set of `Attributes` contains _no_ values.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.values.is_empty()
-    }
+  /// Returns true if this set of `Attributes` contains _no_ values.
+  #[must_use]
+  pub fn is_empty(&self) -> bool {
+    self.values.is_empty()
+  }
 
-    /// Returns the set of all [fields] defined by this span's [`Metadata`].
-    ///
-    /// Note that the [`FieldSet`] returned by this method includes *all* the
-    /// fields declared by this span, not just those with values that are recorded
-    /// as part of this set of `Attributes`. Other fields with values not present in
-    /// this `Attributes`' value set may [record] values later.
-    ///
-    /// [fields]: crate::field
-    /// [record]: Attributes::record()
-    /// [`Metadata`]: crate::metadata::Metadata
-    /// [`FieldSet`]: crate::field::FieldSet
-    #[must_use]
-    pub const fn fields(&self) -> &FieldSet {
-        self.values.field_set()
-    }
+  /// Returns the set of all [fields] defined by this span's [`Metadata`].
+  ///
+  /// Note that the [`FieldSet`] returned by this method includes *all* the
+  /// fields declared by this span, not just those with values that are recorded
+  /// as part of this set of `Attributes`. Other fields with values not present in
+  /// this `Attributes`' value set may [record] values later.
+  ///
+  /// [fields]: crate::field
+  /// [record]: Attributes::record()
+  /// [`Metadata`]: crate::metadata::Metadata
+  /// [`FieldSet`]: crate::field::FieldSet
+  #[must_use]
+  pub const fn fields(&self) -> &FieldSet {
+    self.values.field_set()
+  }
 }
 
 // ===== impl Record =====
 
 impl<'a> Record<'a> {
-    /// Constructs a new `Record` from a `ValueSet`.
-    #[must_use]
-    pub const fn new(values: &'a field::ValueSet<'a>) -> Self {
-        Self { values }
+  /// Constructs a new `Record` from a `ValueSet`.
+  #[must_use]
+  pub const fn new(values: &'a field::ValueSet<'a>) -> Self {
+    Self {
+      values,
     }
+  }
 
-    /// Records all the fields in this `Record` with the provided [Visitor].
-    ///
-    /// [visitor]: super::field::Visit
-    pub fn record(&self, visitor: &mut dyn field::Visit) {
-        self.values.record(visitor);
-    }
+  /// Records all the fields in this `Record` with the provided [Visitor].
+  ///
+  /// [visitor]: super::field::Visit
+  pub fn record(&self, visitor: &mut dyn field::Visit) {
+    self.values.record(visitor);
+  }
 
-    /// Returns the number of fields that would be visited from this `Record`
-    /// when [`Record::record()`] is called
-    ///
-    /// [`Record::record()`]: Record::record()
-    #[must_use]
-    pub fn len(&self) -> usize {
-        self.values.len()
-    }
+  /// Returns the number of fields that would be visited from this `Record`
+  /// when [`Record::record()`] is called
+  ///
+  /// [`Record::record()`]: Record::record()
+  #[must_use]
+  pub fn len(&self) -> usize {
+    self.values.len()
+  }
 
-    /// Returns `true` if this `Record` contains a value for the given `Field`.
-    #[must_use]
-    pub fn contains(&self, field: &field::Field) -> bool {
-        self.values.contains(field)
-    }
+  /// Returns `true` if this `Record` contains a value for the given `Field`.
+  #[must_use]
+  pub fn contains(&self, field: &field::Field) -> bool {
+    self.values.contains(field)
+  }
 
-    /// Returns true if this `Record` contains _no_ values.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
-        self.values.is_empty()
-    }
+  /// Returns true if this `Record` contains _no_ values.
+  #[must_use]
+  pub fn is_empty(&self) -> bool {
+    self.values.is_empty()
+  }
 }
 
 // ===== impl Current =====
 
 impl Current {
-    /// Constructs a new `Current` that indicates the current context is a span
-    /// with the given `metadata` and `metadata`.
-    #[must_use]
-    pub const fn new(id: Id, metadata: &'static Metadata<'static>) -> Self {
-        Self {
-            inner: CurrentInner::Current { id, metadata },
-        }
+  /// Constructs a new `Current` that indicates the current context is a span
+  /// with the given `metadata` and `metadata`.
+  #[must_use]
+  pub const fn new(id: Id, metadata: &'static Metadata<'static>) -> Self {
+    Self {
+      inner: CurrentInner::Current {
+        id,
+        metadata,
+      },
     }
+  }
 
-    /// Constructs a new `Current` that indicates the current context is *not*
-    /// in a span.
-    #[must_use]
-    pub const fn none() -> Self {
-        Self {
-            inner: CurrentInner::None,
-        }
+  /// Constructs a new `Current` that indicates the current context is *not*
+  /// in a span.
+  #[must_use]
+  pub const fn none() -> Self {
+    Self {
+      inner: CurrentInner::None
     }
+  }
 
-    /// Constructs a new `Current` that indicates the `Subscriber` does not
-    /// track a current span.
-    #[allow(
-        clippy::single_call_fn,
-        reason = "name the unknown current-span state separately from a known empty span"
-    )]
-    pub(crate) const fn unknown() -> Self {
-        Self {
-            inner: CurrentInner::Unknown,
-        }
+  /// Constructs a new `Current` that indicates the `Subscriber` does not
+  /// track a current span.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "name the unknown current-span state separately from a known empty span"
+  )]
+  pub(crate) const fn unknown() -> Self {
+    Self {
+      inner: CurrentInner::Unknown,
     }
+  }
 
-    /// Returns `true` if the `Subscriber` that constructed this `Current` tracks a
-    /// current span.
-    ///
-    /// If this returns `true` and [`id`], [`metadata`], or [`into_inner`]
-    /// return `None`, that indicates that we are currently known to *not* be
-    /// inside a span. If this returns `false`, those methods will also return
-    /// `None`, but in this case, that is because the subscriber does not keep
-    /// track of the currently-entered span.
-    ///
-    /// [`id`]: Current::id()
-    /// [`metadata`]: Current::metadata()
-    /// [`into_inner`]: Current::into_inner()
-    #[must_use]
-    pub const fn is_known(&self) -> bool {
-        !matches!(self.inner, CurrentInner::Unknown)
-    }
+  /// Returns `true` if the `Subscriber` that constructed this `Current` tracks a
+  /// current span.
+  ///
+  /// If this returns `true` and [`id`], [`metadata`], or [`into_inner`]
+  /// return `None`, that indicates that we are currently known to *not* be
+  /// inside a span. If this returns `false`, those methods will also return
+  /// `None`, but in this case, that is because the subscriber does not keep
+  /// track of the currently-entered span.
+  ///
+  /// [`id`]: Current::id()
+  /// [`metadata`]: Current::metadata()
+  /// [`into_inner`]: Current::into_inner()
+  #[must_use]
+  pub const fn is_known(&self) -> bool {
+    !matches!(self.inner, CurrentInner::Unknown)
+  }
 
-    /// Consumes `self` and returns the span `Id` and `Metadata` of the current
-    /// span, if one exists and is known.
-    #[must_use]
-    pub const fn into_inner(self) -> Option<(Id, &'static Metadata<'static>)> {
-        match self.inner {
-            CurrentInner::Current { id, metadata } => Some((id, metadata)),
-            CurrentInner::None | CurrentInner::Unknown => None,
-        }
+  /// Consumes `self` and returns the span `Id` and `Metadata` of the current
+  /// span, if one exists and is known.
+  #[must_use]
+  pub const fn into_inner(self) -> Option<(Id, &'static Metadata<'static>)> {
+    match self.inner {
+      CurrentInner::Current {
+        id,
+        metadata,
+      } => Some((id, metadata)),
+      CurrentInner::None | CurrentInner::Unknown => None,
     }
+  }
 
-    /// Borrows the `Id` of the current span, if one exists and is known.
-    #[must_use]
-    pub const fn id(&self) -> Option<&Id> {
-        match self.inner {
-            CurrentInner::Current { ref id, .. } => Some(id),
-            CurrentInner::None | CurrentInner::Unknown => None,
-        }
+  /// Borrows the `Id` of the current span, if one exists and is known.
+  #[must_use]
+  pub const fn id(&self) -> Option<&Id> {
+    match self.inner {
+      CurrentInner::Current {
+        ref id, ..
+      } => Some(id),
+      CurrentInner::None | CurrentInner::Unknown => None,
     }
+  }
 
-    /// Borrows the `Metadata` of the current span, if one exists and is known.
-    #[must_use]
-    pub const fn metadata(&self) -> Option<&'static Metadata<'static>> {
-        match self.inner {
-            CurrentInner::Current { metadata, .. } => Some(metadata),
-            CurrentInner::None | CurrentInner::Unknown => None,
-        }
+  /// Borrows the `Metadata` of the current span, if one exists and is known.
+  #[must_use]
+  pub const fn metadata(&self) -> Option<&'static Metadata<'static>> {
+    match self.inner {
+      CurrentInner::Current {
+        metadata, ..
+      } => Some(metadata),
+      CurrentInner::None | CurrentInner::Unknown => None,
     }
+  }
 }
 
 impl<'a> From<&'a Current> for Option<&'a Id> {
-    fn from(cur: &'a Current) -> Self {
-        cur.id()
-    }
+  fn from(cur: &'a Current) -> Self {
+    cur.id()
+  }
 }
 
 impl<'a> From<&'a Current> for Option<Id> {
-    fn from(cur: &'a Current) -> Self {
-        cur.id().copied()
-    }
+  fn from(cur: &'a Current) -> Self {
+    cur.id().copied()
+  }
 }
 
 impl From<Current> for Option<Id> {
-    fn from(cur: Current) -> Self {
-        match cur.inner {
-            CurrentInner::Current { id, .. } => Some(id),
-            CurrentInner::None | CurrentInner::Unknown => None,
-        }
+  fn from(cur: Current) -> Self {
+    match cur.inner {
+      CurrentInner::Current {
+        id, ..
+      } => Some(id),
+      CurrentInner::None | CurrentInner::Unknown => None,
     }
+  }
 }
 
 impl<'a> From<&'a Current> for Option<&'static Metadata<'static>> {
-    fn from(cur: &'a Current) -> Self {
-        cur.metadata()
-    }
+  fn from(cur: &'a Current) -> Self {
+    cur.metadata()
+  }
 }

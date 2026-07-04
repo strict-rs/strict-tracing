@@ -3,4 +3,5 @@
 //! The rolling appender uses `parking_lot` directly so the lock semantics do
 //! not change across dependency graphs.
 
-pub(crate) use parking_lot::{RwLock, RwLockReadGuard};
+pub(crate) use parking_lot::RwLock;
+pub(crate) use parking_lot::RwLockReadGuard;

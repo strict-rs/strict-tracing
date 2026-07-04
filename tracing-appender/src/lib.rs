@@ -23,8 +23,8 @@
 //! This crate can be used in a few ways to record spans/events:
 //!  - Using a [`RollingFileAppender`] to perform writes to a log file. This will block on writes.
 //!  - Using *any* type implementing [`std::io::Write`] in a non-blocking fashion.
-//!  - Using a combination of [`NonBlocking`] and [`RollingFileAppender`] to allow writes to a log file
-//!    without blocking.
+//!  - Using a combination of [`NonBlocking`] and [`RollingFileAppender`] to allow writes to a log
+//!    file without blocking.
 //!
 //! ## File Appender
 //!
@@ -64,24 +64,23 @@
 //!
 //! ## Non-Blocking Writer
 //!
-//! The example below demonstrates the construction of a `non_blocking` writer with `std::io::stdout()`,
-//! which implements [`MakeWriter`][make_writer].
+//! The example below demonstrates the construction of a `non_blocking` writer with
+//! `std::io::stdout()`, which implements [`MakeWriter`][make_writer].
 //!
 //! ```rust
 //! # fn doc() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 //! let (non_blocking, _guard) = tracing_appender::non_blocking(std::io::stdout());
-//! tracing_subscriber::fmt()
-//!     .with_writer(non_blocking)
-//!     .try_init()?;
+//! tracing_subscriber::fmt().with_writer(non_blocking).try_init()?;
 //! # Ok(())
 //! # }
 //! ```
-//! **Note:** `_guard` is a [`WorkerGuard`] which is returned by [`tracing_appender::non_blocking`][non_blocking]
-//! to ensure buffered logs are flushed to their output in the case of abrupt terminations of a process.
-//! See [`WorkerGuard` module][guard] for more details.
+//! **Note:** `_guard` is a [`WorkerGuard`] which is returned by
+//! [`tracing_appender::non_blocking`][non_blocking] to ensure buffered logs are flushed to their
+//! output in the case of abrupt terminations of a process. See [`WorkerGuard` module][guard] for
+//! more details.
 //!
-//! The example below demonstrates the construction of a [`tracing_appender::non_blocking`][non_blocking]
-//! writer constructed with a [`std::io::Write`]:
+//! The example below demonstrates the construction of a
+//! [`tracing_appender::non_blocking`][non_blocking] writer constructed with a [`std::io::Write`]:
 //!
 //! ```rust
 //! use std::io::Error;
@@ -89,27 +88,26 @@
 //! struct TestWriter;
 //!
 //! impl std::io::Write for TestWriter {
-//!     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-//!         let buf_len = buf.len();
-//!         println!("{:?}", buf);
-//!         Ok(buf_len)
-//!     }
+//!   fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+//!     let buf_len = buf.len();
+//!     println!("{:?}", buf);
+//!     Ok(buf_len)
+//!   }
 //!
-//!     fn flush(&mut self) -> std::io::Result<()> {
-//!         Ok(())
-//!     }
+//!   fn flush(&mut self) -> std::io::Result<()> {
+//!     Ok(())
+//!   }
 //! }
 //!
 //! # fn doc() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 //! let (non_blocking, _guard) = tracing_appender::non_blocking(TestWriter);
-//! tracing_subscriber::fmt()
-//!     .with_writer(non_blocking)
-//!     .try_init()?;
+//! tracing_subscriber::fmt().with_writer(non_blocking).try_init()?;
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! The [`non_blocking` module][non_blocking]'s documentation provides more detail on how to use `non_blocking`.
+//! The [`non_blocking` module][non_blocking]'s documentation provides more detail on how to use
+//! `non_blocking`.
 //!
 //! [non_blocking]: mod@non_blocking
 //! [write]: std::io::Write
@@ -124,9 +122,7 @@
 //! # fn docs() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
 //! let file_appender = tracing_appender::rolling::hourly("/some/directory", "prefix.log")?;
 //! let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-//! tracing_subscriber::fmt()
-//!     .with_writer(non_blocking)
-//!     .try_init()?;
+//! tracing_subscriber::fmt().with_writer(non_blocking).try_init()?;
 //! # Ok(())
 //! # }
 //! ```
@@ -144,16 +140,16 @@
 //! increased past 1.66, three minor versions prior. Increasing the minimum
 //! supported compiler version is not considered a semver breaking change as
 //! long as doing so complies with this policy.
-//!
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
-    html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
-    issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
+  html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
+  html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
+  issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
 #![cfg_attr(docsrs, deny(rustdoc::broken_intra_doc_links))]
-use crate::non_blocking::{NonBlocking, WorkerGuard};
-
 use std::io::Write;
+
+use crate::non_blocking::NonBlocking;
+use crate::non_blocking::WorkerGuard;
 
 pub mod non_blocking;
 
@@ -176,19 +172,19 @@ pub mod sync;
 /// let (non_blocking, _guard) = tracing_appender::non_blocking(std::io::stdout());
 /// let subscriber = tracing_subscriber::fmt().with_writer(non_blocking);
 /// tracing::subscriber::with_default(subscriber.finish(), || {
-///    tracing::event!(tracing::Level::INFO, "Hello");
+///   tracing::event!(tracing::Level::INFO, "Hello");
 /// });
 /// # }
 /// ```
 pub fn non_blocking<T: Write + Send + 'static>(writer: T) -> (NonBlocking, WorkerGuard) {
-    NonBlocking::new(writer)
+  NonBlocking::new(writer)
 }
 
 /// Messages sent from non-blocking writers to the background worker.
 #[derive(Debug)]
 pub(crate) enum Msg {
-    /// Log line payload to be written by the worker.
-    Line(Vec<u8>),
-    /// Shutdown request sent by [`non_blocking::WorkerGuard`].
-    Shutdown,
+  /// Log line payload to be written by the worker.
+  Line(Vec<u8>),
+  /// Shutdown request sent by [`non_blocking::WorkerGuard`].
+  Shutdown,
 }

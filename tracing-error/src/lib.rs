@@ -25,11 +25,10 @@
 //! ## Feature Flags
 //!
 //! - `traced-error` - Enables the [`TracedError`] type and related Traits
-//!     - [`InstrumentResult`] and [`InstrumentError`] extension traits, which
-//!       provide an [`in_current_span()`] method for bundling errors with a
-//!       [`SpanTrace`].
-//!     - [`ExtractSpanTrace`] extension trait, for extracting `SpanTrace`s from
-//!       behind `dyn Error` trait objects.
+//!     - [`InstrumentResult`] and [`InstrumentError`] extension traits, which provide an
+//!       [`in_current_span()`] method for bundling errors with a [`SpanTrace`].
+//!     - [`ExtractSpanTrace`] extension trait, for extracting `SpanTrace`s from behind `dyn Error`
+//!       trait objects.
 //!
 //! ## Usage
 //!
@@ -40,35 +39,37 @@
 //! For example:
 //!
 //! ```rust
-//! use std::{fmt, error::Error};
+//! use std::error::Error;
+//! use std::fmt;
+//!
 //! use tracing_error::SpanTrace;
 //!
 //! #[derive(Debug)]
 //! pub struct MyError {
-//!     context: SpanTrace,
-//!     // ...
+//!   context: SpanTrace,
+//!   // ...
 //! }
 //!
 //! impl fmt::Display for MyError {
-//!     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-//!         // ... format other parts of the error ...
+//!   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+//!     // ... format other parts of the error ...
 //!
-//!         self.context.fmt(f)?;
+//!     self.context.fmt(f)?;
 //!
-//!         // ... format other error context information, cause chain, etc ...
+//!     // ... format other error context information, cause chain, etc ...
 //!         # Ok(())
-//!     }
+//!   }
 //! }
 //!
 //! impl Error for MyError {}
 //!
 //! impl MyError {
-//!     pub fn new() -> Self {
-//!         Self {
-//!             context: SpanTrace::capture(),
-//!             // ... other error information ...
-//!         }
+//!   pub fn new() -> Self {
+//!     Self {
+//!       context: SpanTrace::capture(),
+//!       // ... other error information ...
 //!     }
+//!   }
 //! }
 //! ```
 //!
@@ -96,26 +97,26 @@
 //!
 //! ```rust
 //! use std::error::Error;
+//!
 //! use tracing_error::ExtractSpanTrace as _;
 //!
 //! fn print_extracted_spantraces(error: &(dyn Error + 'static)) {
-//!     let mut error = Some(error);
-//!     let mut ind = 0;
+//!   let mut error = Some(error);
+//!   let mut ind = 0;
 //!
-//!     eprintln!("Error:");
+//!   eprintln!("Error:");
 //!
-//!     while let Some(err) = error {
-//!         if let Some(spantrace) = err.span_trace() {
-//!             eprintln!("found a spantrace:\n{}", spantrace);
-//!         } else {
-//!             eprintln!("{:>4}: {}", ind, err);
-//!         }
-//!
-//!         error = err.source();
-//!         ind += 1;
+//!   while let Some(err) = error {
+//!     if let Some(spantrace) = err.span_trace() {
+//!       eprintln!("found a spantrace:\n{}", spantrace);
+//!     } else {
+//!       eprintln!("{:>4}: {}", ind, err);
 //!     }
-//! }
 //!
+//!     error = err.source();
+//!     ind += 1;
+//!   }
+//! }
 //! ```
 //!
 //! Whereas here, we can still display the content of the `SpanTraces` without
@@ -125,16 +126,16 @@
 //! use std::error::Error;
 //!
 //! fn print_naive_spantraces(error: &(dyn Error + 'static)) {
-//!     let mut error = Some(error);
-//!     let mut ind = 0;
+//!   let mut error = Some(error);
+//!   let mut ind = 0;
 //!
-//!     eprintln!("Error:");
+//!   eprintln!("Error:");
 //!
-//!     while let Some(err) = error {
-//!         eprintln!("{:>4}: {}", ind, err);
-//!         error = err.source();
-//!         ind += 1;
-//!     }
+//!   while let Some(err) = error {
+//!     eprintln!("{:>4}: {}", ind, err);
+//!     error = err.source();
+//!     ind += 1;
+//!   }
 //! }
 //! ```
 //!
@@ -147,13 +148,13 @@
 //! use tracing_subscriber::prelude::*;
 //!
 //! fn main() {
-//!     let subscriber = tracing_subscriber::Registry::default()
+//!   let subscriber = tracing_subscriber::Registry::default()
 //!         // any number of other subscriber layers may be added before or
 //!         // after the `ErrorLayer`...
 //!         .with(ErrorLayer::default());
 //!
-//!     // set the subscriber as the default for the application
-//!     tracing::subscriber::set_global_default(subscriber);
+//!   // set the subscriber as the default for the application
+//!   tracing::subscriber::set_global_default(subscriber);
 //! }
 //! ```
 //!
@@ -177,15 +178,18 @@
 //! increased past 1.66, three minor versions prior. Increasing the minimum
 //! supported compiler version is not considered a semver breaking change as
 //! long as doing so complies with this policy.
-//!
 #![cfg_attr(docsrs, feature(doc_cfg), deny(rustdoc::broken_intra_doc_links))]
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
-    html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
-    issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
+  html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
+  html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
+  issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
-use std::{borrow::Borrow, fmt};
-use tracing::{Dispatch, Metadata, span};
+use std::borrow::Borrow;
+use std::fmt;
+
+use tracing::Dispatch;
+use tracing::Metadata;
+use tracing::span;
 
 /// Type-erased callback for walking span context after a `SpanTrace` capture.
 ///
@@ -193,43 +197,35 @@ use tracing::{Dispatch, Metadata, span};
 /// that callers can downcast to something aware of them without knowing those
 /// types at the callsite.
 pub(crate) struct WithContext(
-    /// Invokes the subscriber-specific context walker for a captured span.
-    fn(&Dispatch, span::Id, visitor: &mut dyn FnMut(&'static Metadata<'static>, &str) -> bool),
+  /// Invokes the subscriber-specific context walker for a captured span.
+  fn(&Dispatch, span::Id, visitor: &mut dyn FnMut(&'static Metadata<'static>, &str) -> bool),
 );
 
 impl fmt::Debug for WithContext {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter
-            .debug_struct("WithContext")
-            .finish_non_exhaustive()
-    }
+  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    formatter.debug_struct("WithContext").finish_non_exhaustive()
+  }
 }
 
 impl WithContext {
-    /// Builds a type-erased callback for visiting formatted span context.
-    #[allow(
-        clippy::single_call_fn,
-        reason = "constructor keeps the type-erased callback field private across sibling modules"
-    )]
-    pub(crate) const fn new(
-        callback: fn(
-            &Dispatch,
-            span::Id,
-            visitor: &mut dyn FnMut(&'static Metadata<'static>, &str) -> bool,
-        ),
-    ) -> Self {
-        Self(callback)
-    }
+  /// Builds a type-erased callback for visiting formatted span context.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "constructor keeps the type-erased callback field private across sibling modules"
+  )]
+  pub(crate) const fn new(callback: fn(&Dispatch, span::Id, visitor: &mut dyn FnMut(&'static Metadata<'static>, &str) -> bool)) -> Self {
+    Self(callback)
+  }
 
-    /// Visits formatted span context with this type-erased callback.
-    pub(crate) fn with_context(
-        &self,
-        dispatch: &Dispatch,
-        id: impl Borrow<span::Id>,
-        mut visitor: impl FnMut(&'static Metadata<'static>, &str) -> bool,
-    ) {
-        (self.0)(dispatch, *id.borrow(), &mut visitor);
-    }
+  /// Visits formatted span context with this type-erased callback.
+  pub(crate) fn with_context(
+    &self,
+    dispatch: &Dispatch,
+    id: impl Borrow<span::Id>,
+    mut visitor: impl FnMut(&'static Metadata<'static>, &str) -> bool,
+  ) {
+    (self.0)(dispatch, *id.borrow(), &mut visitor);
+  }
 }
 
 mod backtrace;
@@ -237,22 +233,30 @@ mod backtrace;
 mod error;
 #[path = "layer.rs"]
 mod layer_impl;
+pub use self::backtrace::SpanTrace;
+pub use self::backtrace::SpanTraceStatus;
+#[cfg(feature = "traced-error")]
+pub use self::error::ExtractSpanTrace;
+#[cfg(feature = "traced-error")]
+pub use self::error::InstrumentError;
+#[cfg(feature = "traced-error")]
+pub use self::error::InstrumentResult;
+#[cfg(feature = "traced-error")]
+pub use self::error::TracedError;
+pub use self::layer_impl::ErrorLayer;
 /// Crate-root alias for internal bridge types shared by sibling modules.
 pub(crate) use crate as layer;
-
-pub use self::backtrace::{SpanTrace, SpanTraceStatus};
-#[cfg(feature = "traced-error")]
-pub use self::error::{ExtractSpanTrace, InstrumentError, InstrumentResult, TracedError};
-pub use self::layer_impl::ErrorLayer;
 
 #[cfg(feature = "traced-error")]
 #[cfg_attr(docsrs, doc(cfg(feature = "traced-error")))]
 pub mod prelude {
-    //! The `tracing-error` prelude.
-    //!
-    //! This brings into scope the `InstrumentError`, `InstrumentResult`, and `ExtractSpanTrace`
-    //! extension traits. These traits allow attaching `SpanTrace`s to errors and
-    //! subsequently retrieving them from `dyn Error` trait objects.
+  //! The `tracing-error` prelude.
+  //!
+  //! This brings into scope the `InstrumentError`, `InstrumentResult`, and `ExtractSpanTrace`
+  //! extension traits. These traits allow attaching `SpanTrace`s to errors and
+  //! subsequently retrieving them from `dyn Error` trait objects.
 
-    pub use crate::{ExtractSpanTrace as _, InstrumentError as _, InstrumentResult as _};
+  pub use crate::ExtractSpanTrace as _;
+  pub use crate::InstrumentError as _;
+  pub use crate::InstrumentResult as _;
 }

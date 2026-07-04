@@ -1,14 +1,20 @@
 //! Example binary for tracing workspace checks.
 
+use std::error::Error;
+use std::time::Duration;
+
 use bytes::Bytes;
-use http::{Method, Request, Uri};
+use http::Method;
+use http::Request;
+use http::Uri;
 use http_body_util::Empty;
 use hyper_util::client::legacy::Client;
 use hyper_util::rt::TokioExecutor;
-use std::error::Error;
-use std::time::Duration;
-use tower::{Service as _, ServiceBuilder};
-use tracing::{Span, info, info_span};
+use tower::Service as _;
+use tower::ServiceBuilder;
+use tracing::Span;
+use tracing::info;
+use tracing::info_span;
 use tracing_tower::request_span;
 
 /// Error type returned by the Tower client example.
@@ -16,43 +22,38 @@ type Err = Box<dyn Error + Send + Sync + 'static>;
 
 /// Create the tracing span attached to an outbound request.
 #[allow(
-    clippy::single_call_fn,
-    reason = "keeps the `tracing_tower` request span callback explicit"
+  clippy::single_call_fn,
+  reason = "keeps the `tracing_tower` request span callback explicit"
 )]
 fn req_span<A>(req: &Request<A>) -> Span {
-    let span = info_span!(
-        "request",
-        req.method = ?req.method(),
-        req.uri = ?req.uri(),
-        req.version = ?req.version(),
-        headers = ?req.headers()
-    );
-    info!(parent: &span, "sending request");
-    span
+  let span = info_span!(
+      "request",
+      req.method = ?req.method(),
+      req.uri = ?req.uri(),
+      req.version = ?req.version(),
+      headers = ?req.headers()
+  );
+  info!(parent: &span, "sending request");
+  span
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Err> {
-    tracing_subscriber::fmt()
-        .with_env_filter("tower=trace")
-        .try_init()?;
+  tracing_subscriber::fmt().with_env_filter("tower=trace").try_init()?;
 
-    let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
+  let client: Client<_, Empty<Bytes>> = Client::builder(TokioExecutor::new()).build_http();
 
-    let mut svc = ServiceBuilder::new()
-        .timeout(Duration::from_millis(250))
-        .layer(request_span::layer(req_span))
-        .service(client);
+  let mut svc = ServiceBuilder::new()
+    .timeout(Duration::from_millis(250))
+    .layer(request_span::layer(req_span))
+    .service(client);
 
-    let uri = Uri::from_static("http://httpbin.org");
+  let uri = Uri::from_static("http://httpbin.org");
 
-    let req = Request::builder()
-        .method(Method::GET)
-        .uri(uri)
-        .body(Empty::<Bytes>::new())?;
+  let req = Request::builder().method(Method::GET).uri(uri).body(Empty::<Bytes>::new())?;
 
-    let res = svc.call(req).await?;
-    info!(message = "got a response", res.headers = ?res.headers());
+  let res = svc.call(req).await?;
+  info!(message = "got a response", res.headers = ?res.headers());
 
-    Ok(())
+  Ok(())
 }

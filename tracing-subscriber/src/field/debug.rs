@@ -1,8 +1,12 @@
 //! `MakeVisitor` wrappers for working with `fmt::Debug` fields.
-use super::{MakeVisitor, VisitFmt, VisitOutput};
-use tracing_core::field::{Field, Visit};
-
 use core::fmt;
+
+use tracing_core::field::Field;
+use tracing_core::field::Visit;
+
+use super::MakeVisitor;
+use super::VisitFmt;
+use super::VisitOutput;
 
 /// A visitor wrapper that ensures any `fmt::Debug` fields are formatted using
 /// the alternate (`:#`) formatter.
@@ -15,77 +19,77 @@ pub struct Alt<V>(V);
 // === impl Alt ===
 //
 impl<V> Alt<V> {
-    /// Wraps the provided visitor so that any `fmt::Debug` fields are formatted
-    /// using the alternative (`:#`) formatter.
-    #[allow(
-        clippy::single_call_fn,
-        reason = "public field visitor constructor is part of the formatting extension API"
-    )]
-    pub const fn new(inner: V) -> Self {
-        Self(inner)
-    }
+  /// Wraps the provided visitor so that any `fmt::Debug` fields are formatted
+  /// using the alternative (`:#`) formatter.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "public field visitor constructor is part of the formatting extension API"
+  )]
+  pub const fn new(inner: V) -> Self {
+    Self(inner)
+  }
 }
 
 impl<T, V> MakeVisitor<T> for Alt<V>
 where
-    V: MakeVisitor<T>,
+  V: MakeVisitor<T>,
 {
-    type Visitor = Alt<V::Visitor>;
+  type Visitor = Alt<V::Visitor>;
 
-    #[inline]
-    fn make_visitor(&self, target: T) -> Self::Visitor {
-        Alt(self.0.make_visitor(target))
-    }
+  #[inline]
+  fn make_visitor(&self, target: T) -> Self::Visitor {
+    Alt(self.0.make_visitor(target))
+  }
 }
 
 impl<V> Visit for Alt<V>
 where
-    V: Visit,
+  V: Visit,
 {
-    #[inline]
-    fn record_f64(&mut self, field: &Field, value: f64) {
-        self.0.record_f64(field, value);
-    }
+  #[inline]
+  fn record_f64(&mut self, field: &Field, value: f64) {
+    self.0.record_f64(field, value);
+  }
 
-    #[inline]
-    fn record_i64(&mut self, field: &Field, value: i64) {
-        self.0.record_i64(field, value);
-    }
+  #[inline]
+  fn record_i64(&mut self, field: &Field, value: i64) {
+    self.0.record_i64(field, value);
+  }
 
-    #[inline]
-    fn record_u64(&mut self, field: &Field, value: u64) {
-        self.0.record_u64(field, value);
-    }
+  #[inline]
+  fn record_u64(&mut self, field: &Field, value: u64) {
+    self.0.record_u64(field, value);
+  }
 
-    #[inline]
-    fn record_bool(&mut self, field: &Field, value: bool) {
-        self.0.record_bool(field, value);
-    }
+  #[inline]
+  fn record_bool(&mut self, field: &Field, value: bool) {
+    self.0.record_bool(field, value);
+  }
 
-    /// Visit a string value.
-    fn record_str(&mut self, field: &Field, value: &str) {
-        self.0.record_str(field, value);
-    }
+  /// Visit a string value.
+  fn record_str(&mut self, field: &Field, value: &str) {
+    self.0.record_str(field, value);
+  }
 
-    // TODO(eliza): add RecordError when stable
-    // fn record_error(&mut self, field: &Field, value: &(dyn std::error::Error + 'static)) {
-    //     self.record_debug(field, &format_args!("{}", value))
-    // }
+  // TODO(eliza): add RecordError when stable
+  // fn record_error(&mut self, field: &Field, value: &(dyn std::error::Error + 'static)) {
+  //     self.record_debug(field, &format_args!("{}", value))
+  // }
 
-    #[inline]
-    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-        self.0.record_debug(field, &format_args!("{value:#?}"));
-    }
+  #[inline]
+  fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+    self.0.record_debug(field, &format_args!("{value:#?}"));
+  }
 }
 
 impl<V, O> VisitOutput<O> for Alt<V>
 where
-    V: VisitOutput<O>,
+  V: VisitOutput<O>,
 {
-    #[inline]
-    fn finish(self) -> O {
-        self.0.finish()
-    }
+  #[inline]
+  fn finish(self) -> O {
+    self.0.finish()
+  }
 }
 
 feature! {
@@ -106,10 +110,10 @@ feature! {
 
 impl<V> VisitFmt for Alt<V>
 where
-    V: VisitFmt,
+  V: VisitFmt,
 {
-    #[inline]
-    fn writer(&mut self) -> &mut dyn fmt::Write {
-        self.0.writer()
-    }
+  #[inline]
+  fn writer(&mut self) -> &mut dyn fmt::Write {
+    self.0.writer()
+  }
 }

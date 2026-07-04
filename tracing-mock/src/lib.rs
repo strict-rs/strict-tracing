@@ -1,4 +1,4 @@
-#![doc = "Testing utilities for `tracing` diagnostics."]
+//! Testing utilities for `tracing` diagnostics.
 #![cfg_attr(docsrs, feature(doc_cfg), deny(rustdoc::broken_intra_doc_links))]
 pub mod ancestry;
 pub mod event;

@@ -6,11 +6,12 @@
 
 #![cfg_attr(docsrs, feature(doc_cfg), deny(rustdoc::broken_intra_doc_links))]
 #![doc(
-    html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
-    html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
-    issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
+  html_logo_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/logo-type.png",
+  html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
+  issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
 use std::fmt;
+
 use tower_service::Service;
 use tracing::Level;
 
@@ -29,69 +30,68 @@ pub type InstrumentedService<S, R> = service_span::Service<request_span::Service
 /// Extension methods for adding `tracing` spans to Tower services.
 pub trait InstrumentableService<Request>
 where
-    Self: Service<Request> + Sized,
+  Self: Service<Request> + Sized,
 {
-    /// Instruments the service with a service span and per-request spans.
-    fn instrument<G>(self, svc_span: G) -> InstrumentedService<Self, Request>
-    where
-        G: GetSpan<Self>,
-        Request: fmt::Debug,
-    {
-        let req_span: fn(&Request) -> tracing::Span =
-            |request| tracing::span!(Level::TRACE, "request", ?request);
-        let service_span = svc_span.span_for(&self);
-        self.trace_requests(req_span).trace_service(service_span)
-    }
+  /// Instruments the service with a service span and per-request spans.
+  fn instrument<G>(self, svc_span: G) -> InstrumentedService<Self, Request>
+  where
+    G: GetSpan<Self>,
+    Request: fmt::Debug,
+  {
+    let req_span: fn(&Request) -> tracing::Span = |request| tracing::span!(Level::TRACE, "request", ?request);
+    let service_span = svc_span.span_for(&self);
+    self.trace_requests(req_span).trace_service(service_span)
+  }
 
-    /// Instruments each request handled by this service with a new span.
-    fn trace_requests<G>(self, get_span: G) -> request_span::Service<Self, Request, G>
-    where
-        G: GetSpan<Request> + Clone,
-    {
-        request_span::Service::new(self, get_span)
-    }
+  /// Instruments each request handled by this service with a new span.
+  fn trace_requests<G>(self, get_span: G) -> request_span::Service<Self, Request, G>
+  where
+    G: GetSpan<Request> + Clone,
+  {
+    request_span::Service::new(self, get_span)
+  }
 
-    /// Instruments this service with a span entered around service calls.
-    fn trace_service<G>(self, get_span: G) -> service_span::Service<Self>
-    where
-        G: GetSpan<Self>,
-    {
-        let span = get_span.span_for(&self);
-        service_span::Service::new(self, span)
-    }
+  /// Instruments this service with a span entered around service calls.
+  fn trace_service<G>(self, get_span: G) -> service_span::Service<Self>
+  where
+    G: GetSpan<Self>,
+  {
+    let span = get_span.span_for(&self);
+    service_span::Service::new(self, span)
+  }
 }
 
 impl<S, R> InstrumentableService<R> for S where S: Service<R> + Sized {}
 
 /// Produces a span for a target value.
 pub trait GetSpan<T>: sealed::Sealed<T> {
-    /// Returns the span that should be used to instrument `target`.
-    fn span_for(&self, target: &T) -> tracing::Span;
+  /// Returns the span that should be used to instrument `target`.
+  fn span_for(&self, target: &T) -> tracing::Span;
 }
 
 impl<T, F> sealed::Sealed<T> for F where F: Fn(&T) -> tracing::Span {}
 
 impl<T, F> GetSpan<T> for F
 where
-    F: Fn(&T) -> tracing::Span,
+  F: Fn(&T) -> tracing::Span,
 {
-    #[inline]
-    fn span_for(&self, target: &T) -> tracing::Span {
-        (self)(target)
-    }
+  #[inline]
+  fn span_for(&self, target: &T) -> tracing::Span {
+    (self)(target)
+  }
 }
 
 impl<T> sealed::Sealed<T> for tracing::Span {}
 
 impl<T> GetSpan<T> for tracing::Span {
-    #[inline]
-    fn span_for(&self, _: &T) -> tracing::Span {
-        self.clone()
-    }
+  #[inline]
+  fn span_for(&self, _: &T) -> tracing::Span {
+    self.clone()
+  }
 }
 
 /// Sealing trait for span-producing implementations.
 mod sealed {
-    /// Prevent external implementations of [`super::GetSpan`].
-    pub trait Sealed<T = ()> {}
+  /// Prevent external implementations of [`super::GetSpan`].
+  pub trait Sealed<T = ()> {}
 }

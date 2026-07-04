@@ -5,7 +5,7 @@ pub mod yak_shave;
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
-    tracing_subscriber::fmt()
+  tracing_subscriber::fmt()
         .pretty()
         .with_thread_names(true)
         // enable everything
@@ -13,14 +13,11 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
         // sets this to be the default, global subscriber for this application.
         .try_init()?;
 
-    let number_of_yaks = 3;
-    // this creates a new event, outside of any spans.
-    tracing::info!(number_of_yaks, "preparing to shave yaks");
+  let number_of_yaks = 3;
+  // this creates a new event, outside of any spans.
+  tracing::info!(number_of_yaks, "preparing to shave yaks");
 
-    let number_shaved = yak_shave::shave_all(number_of_yaks);
-    tracing::info!(
-        all_yaks_shaved = number_shaved == number_of_yaks,
-        "yak shaving completed"
-    );
-    Ok(())
+  let number_shaved = yak_shave::shave_all(number_of_yaks);
+  tracing::info!(all_yaks_shaved = number_shaved == number_of_yaks, "yak shaving completed");
+  Ok(())
 }
