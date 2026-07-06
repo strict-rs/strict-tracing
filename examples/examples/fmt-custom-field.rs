@@ -23,12 +23,10 @@
 pub mod yak_shave;
 
 use std::error::Error;
+use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Write as _;
-use std::fmt::{
-  self,
-};
 
 /// Displays an erased field value with the representation used by `debug_fn`.
 struct DebugValue<'value> {
@@ -47,10 +45,10 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
   use tracing_subscriber::prelude::*;
 
   // Format fields using the provided closure.
-  let format = format::debug_fn(|writer, field, value| {
-        // We'll format the field name and value separated with a colon.
-        write!(writer, "{field}: {}", DebugValue { value })
-    })
+  let format = format::debug_fn(|writer, field, field_value| {
+    // We'll format the field name and value separated with a colon.
+    write!(writer, "{field}: {}", DebugValue { value: field_value })
+  })
     // Separate each field with a comma.
     // This method is provided by an extension trait in the
     // `tracing-subscriber` prelude.

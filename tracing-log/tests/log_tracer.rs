@@ -24,10 +24,16 @@ mod tests {
   use tracing_log::LogTracer;
   use tracing_log::NormalizeEvent as _;
 
+  /// One observed normalized metadata record.
+  type NormalizedMetadataObservation = (bool, Option<OwnedMetadata>);
+
+  /// Ordered log of normalized metadata observations.
+  type NormalizedMetadataLog = Vec<NormalizedMetadataObservation>;
+
   /// Subscriber state captured by the test subscriber.
   struct State {
     /// Metadata observed from emitted events.
-    normalized_metadata: Mutex<Vec<(bool, Option<OwnedMetadata>)>>,
+    normalized_metadata: Mutex<NormalizedMetadataLog>,
   }
 
   /// Owned projection of metadata fields used for equality assertions.

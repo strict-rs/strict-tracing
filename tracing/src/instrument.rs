@@ -6,10 +6,8 @@ use core::task::Poll;
 
 use pin_project_lite::pin_project;
 
+use crate::dispatcher;
 use crate::dispatcher::Dispatch;
-use crate::dispatcher::{
-  self,
-};
 use crate::span::Span;
 
 /// Attaches spans to a [`std::future::Future`].

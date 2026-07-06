@@ -550,27 +550,16 @@ impl EnvFilter {
         // if not, we can avoid the thread local access + iterating over the
         // spans in the current scope.
         if self.has_dynamics && self.dynamics.max_level >= *level {
-            if metadata.is_span() {
-                // If the metadata is a span, see if we care about its callsite.
-                let enabled_by_cs =
-                    try_lock!(self.by_cs.read(), else false).contains_key(&metadata.callsite());
-                if enabled_by_cs {
-                    return true;
-                }
+            let enabled_by_callsite = metadata.is_span()
+                && try_lock!(self.by_cs.read(), else false).contains_key(&metadata.callsite());
+            if enabled_by_callsite {
+                return true;
             }
 
-            let enabled_by_scope = {
-                let Ok(scope) = self.scope.get_or_default().try_borrow() else {
-                    return false;
-                };
-                for filter in &*scope {
-                    if filter >= level {
-                        return true;
-                    }
-                }
-                false
+            let Ok(scope) = self.scope.get_or_default().try_borrow() else {
+                return false;
             };
-            if enabled_by_scope {
+            if scope.iter().any(|filter| filter >= level) {
                 return true;
             }
         }
@@ -719,6 +708,15 @@ impl EnvFilter {
         }
     }
 
+    /// Returns the interest determined by static directives, or `disabled` when none match.
+    fn static_interest_or(&self, metadata: &Metadata<'_>, disabled: Interest) -> Interest {
+        if self.statics.enabled(metadata) {
+            Interest::always()
+        } else {
+            disabled
+        }
+    }
+
     /// Registers a callsite with this filter's dynamic and static tables.
     fn register_callsite_for_filter(&self, metadata: &'static Metadata<'static>) -> Interest {
         if self.has_dynamics && metadata.is_span() {
@@ -734,22 +732,14 @@ impl EnvFilter {
                     return Interest::always();
                 }
                 directive::CallsiteMatchResult::Rejected => {
-                    if self.statics.enabled(metadata) {
-                        return Interest::always();
-                    }
-
-                    return Interest::never();
+                    return self.static_interest_or(metadata, Interest::never());
                 }
                 directive::CallsiteMatchResult::Unmatched => {}
             }
         }
 
         // Otherwise, check if any of our static filters enable this metadata.
-        if self.statics.enabled(metadata) {
-            Interest::always()
-        } else {
-            self.base_interest()
-        }
+        self.static_interest_or(metadata, self.base_interest())
     }
 }
 
@@ -967,11 +957,12 @@ impl Error for FromEnvError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::format;
+    use alloc::{format, string::ToString as _};
     use core::mem::size_of_val;
     use core::num::NonZeroU64;
-    use strict_test_support::{TestFailure, ensure, ensure_ok};
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_ok, ensure_some};
     use tracing_core::field::FieldSet;
+    use tracing_core::metadata::SourceLocation;
     use tracing_core::*;
 
     const NO_SUBSCRIBER_SPAN_ID: span::Id = match span::Id::try_from_u64(0xDEAD) {
@@ -1018,9 +1009,7 @@ mod tests {
                 "test",
                 "test",
                 Level::TRACE,
-                None,
-                None,
-                None,
+                &SourceLocation::empty(),
                 &FieldSet::new(&[], identify_callsite!(&Cs)),
                 Kind::SPAN,
             );
@@ -1028,118 +1017,102 @@ mod tests {
         }
     }
 
-    #[test]
-    fn callsite_enabled_no_span_directive() -> Result<(), TestFailure> {
-        static META: &Metadata<'static> = &Metadata::new(
-            "mySpan",
-            "app",
-            Level::TRACE,
-            None,
-            None,
-            None,
-            &FieldSet::new(&[], identify_callsite!(&Cs)),
-            Kind::SPAN,
-        );
+    /// Static span metadata at `TRACE` with no fields, shared by the callsite tests.
+    static SPAN_META_TRACE: Metadata<'static> = Metadata::new(
+        "mySpan",
+        "app",
+        Level::TRACE,
+        &SourceLocation::empty(),
+        &FieldSet::new(&[], identify_callsite!(&Cs)),
+        Kind::SPAN,
+    );
 
-        let filter = EnvFilter::new("app=debug").with_subscriber(NoSubscriber);
+    /// Static span metadata at `ERROR` with no fields for the off-directive test.
+    static SPAN_META_ERROR: Metadata<'static> = Metadata::new(
+        "mySpan",
+        "app",
+        Level::ERROR,
+        &SourceLocation::empty(),
+        &FieldSet::new(&[], identify_callsite!(&Cs)),
+        Kind::SPAN,
+    );
+
+    /// Static span metadata at `TRACE` carrying one field for the field-directive tests.
+    static SPAN_META_TRACE_FIELD: Metadata<'static> = Metadata::new(
+        "mySpan",
+        "app",
+        Level::TRACE,
+        &SourceLocation::empty(),
+        &FieldSet::new(&["field"], identify_callsite!(&Cs)),
+        Kind::SPAN,
+    );
+
+    /// Registers `metadata` against a filter built from `directive` and checks the interest verdict.
+    fn ensure_callsite_interest(
+        metadata: &'static Metadata<'static>,
+        directive: &str,
+        expect_enabled: bool,
+        message: &'static str,
+    ) -> Result<(), TestFailure> {
+        let filter = EnvFilter::new(directive).with_subscriber(NoSubscriber);
         let interest = ensure_ok(
-            filter.register_callsite(META),
+            filter.register_callsite(metadata),
             "callsite registration succeeds",
         )?;
-        ensure(interest.is_never(), "span directive should not enable callsite")
+        let enabled = if expect_enabled {
+            interest.is_always()
+        } else {
+            interest.is_never()
+        };
+        ensure(enabled, message)
+    }
+
+    #[test]
+    fn callsite_enabled_no_span_directive() -> Result<(), TestFailure> {
+        ensure_callsite_interest(
+            &SPAN_META_TRACE,
+            "app=debug",
+            false,
+            "span directive should not enable callsite",
+        )
     }
 
     #[test]
     fn callsite_off() -> Result<(), TestFailure> {
-        static META: &Metadata<'static> = &Metadata::new(
-            "mySpan",
-            "app",
-            Level::ERROR,
-            None,
-            None,
-            None,
-            &FieldSet::new(&[], identify_callsite!(&Cs)),
-            Kind::SPAN,
-        );
-
-        let filter = EnvFilter::new("app=off").with_subscriber(NoSubscriber);
-        let interest = ensure_ok(
-            filter.register_callsite(META),
-            "callsite registration succeeds",
-        )?;
-        ensure(interest.is_never(), "off directive should disable callsite")
+        ensure_callsite_interest(
+            &SPAN_META_ERROR,
+            "app=off",
+            false,
+            "off directive should disable callsite",
+        )
     }
 
     #[test]
     fn callsite_enabled_includes_span_directive() -> Result<(), TestFailure> {
-        static META: &Metadata<'static> = &Metadata::new(
-            "mySpan",
-            "app",
-            Level::TRACE,
-            None,
-            None,
-            None,
-            &FieldSet::new(&[], identify_callsite!(&Cs)),
-            Kind::SPAN,
-        );
-
-        let filter = EnvFilter::new("app[mySpan]=debug").with_subscriber(NoSubscriber);
-        let interest = ensure_ok(
-            filter.register_callsite(META),
-            "callsite registration succeeds",
-        )?;
-        ensure(
-            interest.is_always(),
+        ensure_callsite_interest(
+            &SPAN_META_TRACE,
+            "app[mySpan]=debug",
+            true,
             "matching span directive should enable callsite",
         )
     }
 
     #[test]
     fn callsite_enabled_includes_span_directive_field() -> Result<(), TestFailure> {
-        static META: &Metadata<'static> = &Metadata::new(
-            "mySpan",
-            "app",
-            Level::TRACE,
-            None,
-            None,
-            None,
-            &FieldSet::new(&["field"], identify_callsite!(&Cs)),
-            Kind::SPAN,
-        );
-
-        let filter =
-            EnvFilter::new("app[mySpan{field=\"value\"}]=debug").with_subscriber(NoSubscriber);
-        let interest = ensure_ok(
-            filter.register_callsite(META),
-            "callsite registration succeeds",
-        )?;
-        ensure(
-            interest.is_always(),
+        ensure_callsite_interest(
+            &SPAN_META_TRACE_FIELD,
+            "app[mySpan{field=\"value\"}]=debug",
+            true,
             "matching span field directive should enable callsite",
         )
     }
 
     #[test]
     fn callsite_enabled_includes_span_directive_multiple_fields() -> Result<(), TestFailure> {
-        static META: &Metadata<'static> = &Metadata::new(
-            "mySpan",
-            "app",
-            Level::TRACE,
-            None,
-            None,
-            None,
-            &FieldSet::new(&["field"], identify_callsite!(&Cs)),
-            Kind::SPAN,
-        );
-
-        let filter = EnvFilter::new("app[mySpan{field=\"value\",field2=2}]=debug")
-            .with_subscriber(NoSubscriber);
-        let interest = ensure_ok(
-            filter.register_callsite(META),
-            "callsite registration succeeds",
-        )?;
-        ensure(
-            interest.is_never(),
+        ensure_callsite_interest(
+            &SPAN_META_TRACE_FIELD,
+            "app[mySpan{field=\"value\",field2=2}]=debug",
+            false,
             "multi-field directive should not enable single-field callsite",
         )
     }
@@ -1200,6 +1173,112 @@ mod tests {
         ensure(
             EnvFilter::builder().parse("").is_ok(),
             "empty env filter should parse",
+        )
+    }
+
+    #[test]
+    fn constructors_apply_lossy_and_strict_parse_contracts() -> Result<(), TestFailure> {
+        let lossy = EnvFilter::new("app=info,broken[");
+        ensure_eq(
+            &lossy.to_string().as_str(),
+            &"app=info",
+            "lossy constructor drops invalid directives and keeps valid ones",
+        )?;
+
+        let strict_error = ensure_some(
+            EnvFilter::try_new("app=info,broken[").err(),
+            "strict constructor rejects invalid directives",
+        )?;
+        let strict_message = strict_error.to_string();
+        ensure(
+            strict_message.contains("invalid filter directive"),
+            "strict constructor reports invalid directive category",
+        )?;
+
+        let from_str = ensure_ok(
+            "app=warn".parse::<EnvFilter>(),
+            "FromStr delegates to strict parsing",
+        )?;
+        ensure_eq(
+            &from_str.to_string().as_str(),
+            &"app=warn",
+            "FromStr preserves strict directive text",
+        )?;
+
+        let default_filter = EnvFilter::default();
+        ensure_eq(
+            &default_filter.to_string().as_str(),
+            &"",
+            "default filter has no directives",
+        )
+    }
+
+    #[test]
+    fn default_directive_is_used_when_lossy_input_has_no_valid_directives() -> Result<(), TestFailure> {
+        let defaulted = EnvFilter::new("broken[");
+
+        ensure_eq(
+            &defaulted.to_string().as_str(),
+            &"error",
+            "lossy constructor falls back to the error directive",
+        )
+    }
+
+    #[test]
+    fn from_env_errors_preserve_parse_and_environment_sources() -> Result<(), TestFailure> {
+        let parse_error = ensure_some(
+            EnvFilter::try_new("broken[").err(),
+            "parse error is available",
+        )?;
+        let parse_env_error = FromEnvError::from(parse_error);
+        let parse_display = parse_env_error.to_string();
+        ensure(
+            parse_display.contains("invalid filter directive"),
+            "parse-backed environment error displays parse message",
+        )?;
+        ensure(
+            parse_env_error.source().is_some(),
+            "parse-backed environment error exposes source",
+        )?;
+
+        let missing_env_error = FromEnvError::from(env::VarError::NotPresent);
+        ensure_eq(
+            &missing_env_error.to_string().as_str(),
+            &"environment variable not found",
+            "environment-backed error displays variable failure",
+        )?;
+        ensure(
+            missing_env_error.source().is_some(),
+            "environment-backed error exposes source",
+        )
+    }
+
+    #[test]
+    fn static_dynamic_and_value_directives_report_level_hints() -> Result<(), TestFailure> {
+        let static_filter = EnvFilter::new("app=info");
+        ensure(
+            static_filter.base_interest().is_never(),
+            "static-only filters have no dynamic base interest",
+        )?;
+        ensure(
+            static_filter.max_level_hint_for_filter() == Some(LevelFilter::INFO),
+            "static filter reports its maximum level hint",
+        )?;
+
+        let dynamic_filter = EnvFilter::new("[mySpan]=debug");
+        ensure(
+            dynamic_filter.base_interest().is_sometimes(),
+            "dynamic filters use sometimes interest as the base",
+        )?;
+        ensure(
+            dynamic_filter.max_level_hint_for_filter() == Some(LevelFilter::DEBUG),
+            "dynamic filter reports its maximum level hint",
+        )?;
+
+        let value_filter = EnvFilter::new("[mySpan{field=\"value\"}]=debug");
+        ensure(
+            value_filter.max_level_hint_for_filter() == Some(LevelFilter::TRACE),
+            "value filters report trace because span values are known after registration",
         )
     }
 }

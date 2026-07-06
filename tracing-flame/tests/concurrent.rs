@@ -12,10 +12,8 @@ mod tests {
 
   use tracing::Level;
   use tracing::span;
+  use tracing::subscriber;
   use tracing::subscriber::SetGlobalDefaultError;
-  use tracing::subscriber::{
-    self,
-  };
   use tracing_flame::FlameError;
   use tracing_flame::FlameLayer;
   use tracing_subscriber::prelude::*;
@@ -109,9 +107,8 @@ mod tests {
       sleep(Duration::from_millis(10));
       let inner_span = span!(Level::ERROR, "Inner");
       let worker_thread = thread::spawn(move || {
-        inner_span.in_scope(|| {
-          sleep(Duration::from_millis(50));
-        });
+        let _inner_guard = inner_span.enter();
+        sleep(Duration::from_millis(50));
       });
       sleep(Duration::from_millis(20));
       worker_thread

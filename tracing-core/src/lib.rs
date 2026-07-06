@@ -57,6 +57,9 @@
 //!
 //!   **Note**:`tracing-core`'s `no_std` support requires `liballoc`.
 //!
+//! * `test-util`: Exposes the `test_util` module of subscriber fixtures for exercising the crate in
+//!   tests (implies `std`). Off by default; enable it only from `dev-dependencies`.
+//!
 //! ### Unstable Features
 //!
 //! These feature flags enable **unstable** features. The public API may break in 0.1.x
@@ -176,7 +179,7 @@ macro_rules! identify_callsite {
 
 /// Statically constructs new span [metadata].
 ///
-/// /// For example:
+/// For example:
 /// ```rust
 /// # use tracing_core::{callsite::Callsite, subscriber::Interest};
 /// use tracing_core::metadata;
@@ -224,9 +227,10 @@ macro_rules! metadata {
       $name,
       $target,
       $level,
-      $crate::__macro_support::Option::Some($crate::__macro_support::file!()),
-      $crate::__macro_support::Option::Some($crate::__macro_support::line!()),
-      $crate::__macro_support::Option::Some($crate::__macro_support::module_path!()),
+      &$crate::metadata::SourceLocation::empty()
+        .with_module_path($crate::__macro_support::Option::Some($crate::__macro_support::module_path!()))
+        .with_file($crate::__macro_support::Option::Some($crate::__macro_support::file!()))
+        .with_line($crate::__macro_support::Option::Some($crate::__macro_support::line!())),
       &$crate::field::FieldSet::new($fields, $crate::identify_callsite!($callsite)),
       $kind,
     )
@@ -247,6 +251,10 @@ pub mod field;
 pub mod metadata;
 pub mod span;
 pub mod subscriber;
+
+#[cfg(feature = "test-util")]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+pub mod test_util;
 
 /// Parent relationship requested for a new span or event.
 #[derive(Debug)]

@@ -22,11 +22,9 @@
 //! [echo-example]: https://github.com/tokio-rs/tokio/blob/master/tokio/examples/echo.rs
 use std::env;
 use std::error::Error as StdError;
-use std::fmt;
 use std::net::SocketAddr;
 
-use tokio::io::AsyncReadExt as _;
-use tokio::io::AsyncWriteExt as _;
+use tokio::io;
 use tokio::net::TcpListener;
 use tracing::Instrument as _;
 use tracing::debug;
@@ -37,25 +35,6 @@ use tracing::warn;
 
 /// Error type returned by the example.
 type Error = Box<dyn StdError + Send + Sync + 'static>;
-
-/// Error returned when a socket read reports more bytes than the buffer holds.
-#[derive(Debug)]
-struct BufferLengthError {
-  /// Number of bytes reported by the socket read.
-  bytes_read: usize,
-  /// Length of the buffer passed to the socket read.
-  buffer_len: usize,
-}
-
-impl fmt::Display for BufferLengthError {
-  fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-    let bytes_read = self.bytes_read;
-    let buffer_len = self.buffer_len;
-    write!(formatter, "socket read reported {bytes_read} bytes for a {buffer_len} byte buffer")
-  }
-}
-
-impl StdError for BufferLengthError {}
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -80,7 +59,7 @@ async fn main() -> Result<(), Error> {
 
   loop {
     // Asynchronously wait for an inbound socket.
-    let (mut socket, peer_addr) = listener.accept().await?;
+    let (socket, peer_addr) = listener.accept().await?;
 
     info!(message = "Got connection from", %peer_addr);
 
@@ -92,44 +71,19 @@ async fn main() -> Result<(), Error> {
     // Essentially here we're executing a new task to run concurrently,
     // which will allow all of our clients to be processed concurrently.
 
-    tokio::spawn(async move {
-      let mut buf = [0; 1024];
-
-      // In a loop, read data from the socket and write the data back.
-      loop {
-        let n = socket
-          .read(&mut buf)
-          .instrument(trace_span!("read"))
+    tokio::spawn(
+      async move {
+        let (mut reader, mut writer) = socket.into_split();
+        let bytes_copied = io::copy(&mut reader, &mut writer)
+          .instrument(trace_span!("copy"))
           .await
-          .inspect(|bytes_read| {
-            debug!(bytes_read = *bytes_read);
-          })
-          .inspect_err(|error| {
-            warn!(%error);
-          })?;
-
-        if n == 0 {
-          return Ok::<(), Error>(());
-        }
-
-        let bytes = buf.get(..n).ok_or(BufferLengthError {
-          bytes_read: n,
-          buffer_len: buf.len(),
-        })?;
-
-        socket
-          .write_all(bytes)
-          .instrument(trace_span!("write"))
-          .await
-          .inspect_err(|error| {
-            warn!(%error);
-          })?;
-        debug!(bytes_written = n);
-
-        info!(message = "echo'd data", %peer_addr, size = n);
+          .inspect_err(|error| warn!(%error))?;
+        debug!(bytes_copied);
+        info!(message = "echo'd data", %peer_addr, size = bytes_copied);
+        Ok::<(), Error>(())
       }
-    })
-    .instrument(info_span!("echo", %peer_addr))
+      .instrument(info_span!("echo", %peer_addr)),
+    )
     .await??;
   }
 }

@@ -125,12 +125,10 @@ async fn main() -> Result<(), Error> {
     let conn_span = server_span.clone();
     let _task = tokio::spawn(
       async move {
-        if let Err(err) = auto::Builder::new(TokioExecutor::new())
+        let _connection_error = auto::Builder::new(TokioExecutor::new())
           .serve_connection(io, service_fn(echo))
           .await
-        {
-          debug!(error = %err, "connection error");
-        }
+          .inspect_err(|err| debug!(error = %err, "connection error"));
       }
       .instrument(conn_span),
     );

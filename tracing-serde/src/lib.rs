@@ -129,8 +129,9 @@
 //!
 //! The following unstable feature flags are currently available:
 //!
-//! * `valuable`: Enables [`Visit::record_value`] implementations, for serializing values recorded
-//!   using the [`valuable`] crate.
+//! * `valuable`: Enables `Visit::record_value` implementations, for serializing values recorded
+//!   using the [`valuable`] crate. The `Visit::record_value` method is available only with the
+//!   unstable `valuable` feature.
 //!
 //! #### Enabling Unstable Features
 //!
@@ -387,49 +388,49 @@ where
 {
   #[cfg(all(tracing_unstable, feature = "valuable"))]
   #[cfg_attr(docsrs, doc(cfg(all(tracing_unstable, feature = "valuable"))))]
-  fn record_value(&mut self, field: &Field, value: valuable_crate::Value<'_>) {
+  fn record_value(&mut self, field: &Field, field_value: valuable_crate::Value<'_>) {
     if self.state.is_ok() {
       self.state = self
         .serializer
-        .serialize_entry(field.name(), &valuable_serde::Serializable::new(value));
+        .serialize_entry(field.name(), &valuable_serde::Serializable::new(field_value));
     }
   }
 
-  fn record_bool(&mut self, field: &Field, value: bool) {
+  fn record_bool(&mut self, field: &Field, field_value: bool) {
     // If previous fields serialized successfully, continue serializing,
     // otherwise, short-circuit and do nothing.
     if self.state.is_ok() {
-      self.state = self.serializer.serialize_entry(field.name(), &value);
+      self.state = self.serializer.serialize_entry(field.name(), &field_value);
     }
   }
 
-  fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+  fn record_debug(&mut self, field: &Field, field_value: &dyn fmt::Debug) {
     if self.state.is_ok() {
-      self.state = self.serializer.serialize_entry(field.name(), &format_args!("{value:?}"));
+      self.state = self.serializer.serialize_entry(field.name(), &format_args!("{field_value:?}"));
     }
   }
 
-  fn record_u64(&mut self, field: &Field, value: u64) {
+  fn record_u64(&mut self, field: &Field, field_value: u64) {
     if self.state.is_ok() {
-      self.state = self.serializer.serialize_entry(field.name(), &value);
+      self.state = self.serializer.serialize_entry(field.name(), &field_value);
     }
   }
 
-  fn record_i64(&mut self, field: &Field, value: i64) {
+  fn record_i64(&mut self, field: &Field, field_value: i64) {
     if self.state.is_ok() {
-      self.state = self.serializer.serialize_entry(field.name(), &value);
+      self.state = self.serializer.serialize_entry(field.name(), &field_value);
     }
   }
 
-  fn record_f64(&mut self, field: &Field, value: f64) {
+  fn record_f64(&mut self, field: &Field, field_value: f64) {
     if self.state.is_ok() {
-      self.state = self.serializer.serialize_entry(field.name(), &value);
+      self.state = self.serializer.serialize_entry(field.name(), &field_value);
     }
   }
 
-  fn record_str(&mut self, field: &Field, value: &str) {
+  fn record_str(&mut self, field: &Field, field_value: &str) {
     if self.state.is_ok() {
-      self.state = self.serializer.serialize_entry(field.name(), &value);
+      self.state = self.serializer.serialize_entry(field.name(), &field_value);
     }
   }
 }
@@ -449,49 +450,49 @@ where
 {
   #[cfg(all(tracing_unstable, feature = "valuable"))]
   #[cfg_attr(docsrs, doc(cfg(all(tracing_unstable, feature = "valuable"))))]
-  fn record_value(&mut self, field: &Field, value: valuable_crate::Value<'_>) {
+  fn record_value(&mut self, field: &Field, field_value: valuable_crate::Value<'_>) {
     if self.state.is_ok() {
       self.state = self
         .serializer
-        .serialize_field(field.name(), &valuable_serde::Serializable::new(value));
+        .serialize_field(field.name(), &valuable_serde::Serializable::new(field_value));
     }
   }
 
-  fn record_bool(&mut self, field: &Field, value: bool) {
+  fn record_bool(&mut self, field: &Field, field_value: bool) {
     // If previous fields serialized successfully, continue serializing,
     // otherwise, short-circuit and do nothing.
     if self.state.is_ok() {
-      self.state = self.serializer.serialize_field(field.name(), &value);
+      self.state = self.serializer.serialize_field(field.name(), &field_value);
     }
   }
 
-  fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+  fn record_debug(&mut self, field: &Field, field_value: &dyn fmt::Debug) {
     if self.state.is_ok() {
-      self.state = self.serializer.serialize_field(field.name(), &format_args!("{value:?}"));
+      self.state = self.serializer.serialize_field(field.name(), &format_args!("{field_value:?}"));
     }
   }
 
-  fn record_u64(&mut self, field: &Field, value: u64) {
+  fn record_u64(&mut self, field: &Field, field_value: u64) {
     if self.state.is_ok() {
-      self.state = self.serializer.serialize_field(field.name(), &value);
+      self.state = self.serializer.serialize_field(field.name(), &field_value);
     }
   }
 
-  fn record_i64(&mut self, field: &Field, value: i64) {
+  fn record_i64(&mut self, field: &Field, field_value: i64) {
     if self.state.is_ok() {
-      self.state = self.serializer.serialize_field(field.name(), &value);
+      self.state = self.serializer.serialize_field(field.name(), &field_value);
     }
   }
 
-  fn record_f64(&mut self, field: &Field, value: f64) {
+  fn record_f64(&mut self, field: &Field, field_value: f64) {
     if self.state.is_ok() {
-      self.state = self.serializer.serialize_field(field.name(), &value);
+      self.state = self.serializer.serialize_field(field.name(), &field_value);
     }
   }
 
-  fn record_str(&mut self, field: &Field, value: &str) {
+  fn record_str(&mut self, field: &Field, field_value: &str) {
     if self.state.is_ok() {
-      self.state = self.serializer.serialize_field(field.name(), &value);
+      self.state = self.serializer.serialize_field(field.name(), &field_value);
     }
   }
 }

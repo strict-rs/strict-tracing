@@ -18,6 +18,7 @@ mod tests {
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
   use tracing::Level;
+  use tracing::level_filters::STATIC_MAX_LEVEL;
   use tracing::span;
   use tracing::subscriber::set_global_default;
   use tracing_mock::*;
@@ -50,6 +51,12 @@ mod tests {
     // test will work even with no-std.
     ensure_ok(set_global_default(subscriber), "global subscriber should install")?;
 
+    // Under a `max_level_*` cap that statically disables TRACE, the spans are
+    // compiled out before the subscriber's filter can run, so each callsite is
+    // evaluated zero times instead of climbing to one and then two.
+    let expected_once = usize::from(STATIC_MAX_LEVEL.enables(Level::TRACE));
+    let expected_twice = expected_once.saturating_mul(2);
+
     // Enter "charlie" and then "dave". The dispatcher expects to see "dave" but
     // not "charlie."
     let charlie = span!(Level::TRACE, "charlie");
@@ -62,10 +69,14 @@ mod tests {
     // The filter should have seen each span a single time.
     ensure_eq(
       &charlie_count.load(Ordering::Relaxed),
-      &1,
+      &expected_once,
       "charlie filter runs once after first span",
     )?;
-    ensure_eq(&dave_count.load(Ordering::Relaxed), &1, "dave filter runs once after first span")?;
+    ensure_eq(
+      &dave_count.load(Ordering::Relaxed),
+      &expected_once,
+      "dave filter runs once after first span",
+    )?;
 
     charlie.in_scope(|| dave.in_scope(|| {}));
 
@@ -73,12 +84,12 @@ mod tests {
     // been called.
     ensure_eq(
       &charlie_count.load(Ordering::Relaxed),
-      &1,
+      &expected_once,
       "charlie filter remains cached after nested enter",
     )?;
     ensure_eq(
       &dave_count.load(Ordering::Relaxed),
-      &1,
+      &expected_once,
       "dave filter remains cached after nested enter",
     )?;
 
@@ -86,17 +97,29 @@ mod tests {
     // should cause the filter to be reapplied.
     let charlie2 = span!(Level::TRACE, "charlie");
     charlie.in_scope(|| {});
-    ensure_eq(&charlie_count.load(Ordering::Relaxed), &2, "new charlie callsite evaluates filter")?;
+    ensure_eq(
+      &charlie_count.load(Ordering::Relaxed),
+      &expected_twice,
+      "new charlie callsite evaluates filter",
+    )?;
     ensure_eq(
       &dave_count.load(Ordering::Relaxed),
-      &1,
+      &expected_once,
       "dave filter stays cached before second dave callsite",
     )?;
 
     // But, the filter should not be re-evaluated for the new "charlie" span
     // when it is re-entered.
     charlie2.in_scope(|| span!(Level::TRACE, "dave").in_scope(|| {}));
-    ensure_eq(&charlie_count.load(Ordering::Relaxed), &2, "second charlie span stays cached")?;
-    ensure_eq(&dave_count.load(Ordering::Relaxed), &2, "new dave callsite evaluates filter")
+    ensure_eq(
+      &charlie_count.load(Ordering::Relaxed),
+      &expected_twice,
+      "second charlie span stays cached",
+    )?;
+    ensure_eq(
+      &dave_count.load(Ordering::Relaxed),
+      &expected_twice,
+      "new dave callsite evaluates filter",
+    )
   }
 }

@@ -89,9 +89,9 @@
 //! [`init`]: LogTracer::init
 //! [`init_with_filter`]: LogTracer::init_with_filter
 //! [`tracing`]: https://crates.io/crates/tracing
-//! [`tracing::Subscriber`]: https://docs.rs/tracing/latest/tracing/trait.Subscriber.html
-//! [`Subscriber`]: https://docs.rs/tracing/latest/tracing/trait.Subscriber.html
-//! [`tracing::Event`]: https://docs.rs/tracing/latest/tracing/struct.Event.html
+//! [`tracing::Subscriber`]: tracing_core::Subscriber
+//! [`Subscriber`]: tracing_core::Subscriber
+//! [`tracing::Event`]: tracing_core::Event
 //! [flags]: https://docs.rs/tracing/latest/tracing/#crate-feature-flags
 //! [`Builder::with_interest_cache`]: log_tracer::Builder::with_interest_cache
 #![doc(
@@ -107,20 +107,17 @@ use std::sync::LazyLock;
 
 use tracing_core::Event;
 use tracing_core::Metadata;
+use tracing_core::callsite;
 use tracing_core::callsite::Callsite;
-use tracing_core::callsite::{
-  self,
-};
 use tracing_core::dispatcher;
+use tracing_core::field;
 use tracing_core::field::Field;
 use tracing_core::field::Visit;
-use tracing_core::field::{
-  self,
-};
 use tracing_core::identify_callsite;
 use tracing_core::metadata::Kind;
 use tracing_core::metadata::Level;
 use tracing_core::metadata::LevelFilter;
+use tracing_core::metadata::SourceLocation;
 use tracing_core::subscriber;
 
 #[cfg(feature = "log-tracer")]
@@ -173,16 +170,16 @@ pub(crate) fn dispatch_record(record: &log::Record<'_>) -> io::Result<()> {
     let log_line = record.line();
 
     let module = log_module.as_ref().map(|module_path| {
-      let value: &dyn field::Value = module_path;
-      value
+      let field_value: &dyn field::Value = module_path;
+      field_value
     });
     let file = log_file.as_ref().map(|file_path| {
-      let value: &dyn field::Value = file_path;
-      value
+      let field_value: &dyn field::Value = file_path;
+      field_value
     });
     let line = log_line.as_ref().map(|line_number| {
-      let value: &dyn field::Value = line_number;
-      value
+      let field_value: &dyn field::Value = line_number;
+      field_value
     });
     let message: &dyn field::Value = record.args();
 
@@ -240,9 +237,7 @@ impl<'a> AsTrace for log::Metadata<'a> {
       "log record",
       self.target(),
       self.level().as_trace(),
-      None,
-      None,
-      None,
+      &SourceLocation::empty(),
       &field::FieldSet::new(FIELD_NAMES, cs_id),
       Kind::EVENT,
     )
@@ -304,9 +299,7 @@ macro_rules! log_cs {
       "log event",
       "log",
       $level,
-      ::core::option::Option::None,
-      ::core::option::Option::None,
-      ::core::option::Option::None,
+      &SourceLocation::empty(),
       &field::FieldSet::new(FIELD_NAMES, identify_callsite!(&$cs)),
       Kind::EVENT,
     );
@@ -417,9 +410,10 @@ impl<'a> AsTrace for log::Record<'a> {
       "log record",
       self.target(),
       self.level().as_trace(),
-      self.file(),
-      self.line(),
-      self.module_path(),
+      &SourceLocation::empty()
+        .with_module_path(self.module_path())
+        .with_file(self.file())
+        .with_line(self.line()),
       &field::FieldSet::new(FIELD_NAMES, cs_id),
       Kind::EVENT,
     )
@@ -528,9 +522,10 @@ impl NormalizedMetadata<'_> {
       self.name,
       self.target(),
       self.level,
-      self.file(),
-      self.line,
-      self.module_path(),
+      &SourceLocation::empty()
+        .with_module_path(self.module_path())
+        .with_file(self.file())
+        .with_line(self.line),
       &field::FieldSet::new(NORMALIZED_FIELD_NAMES, self.callsite),
       self.kind,
     )
@@ -680,21 +675,21 @@ struct LogVisitor {
 impl Visit for LogVisitor {
   fn record_debug(&mut self, _field: &Field, _value: &dyn fmt::Debug) {}
 
-  fn record_u64(&mut self, field: &Field, value: u64) {
+  fn record_u64(&mut self, field: &Field, field_value: u64) {
     if field == &self.fields.line {
-      self.line = Some(value);
+      self.line = Some(field_value);
     }
   }
 
-  fn record_str(&mut self, field: &Field, value: &str) {
+  fn record_str(&mut self, field: &Field, field_value: &str) {
     if field == &self.fields.file {
-      self.file = Some(value.to_owned());
+      self.file = Some(field_value.to_owned());
     }
     if field == &self.fields.target {
-      self.target = Some(value.to_owned());
+      self.target = Some(field_value.to_owned());
     }
     if field == &self.fields.module {
-      self.module_path = Some(value.to_owned());
+      self.module_path = Some(field_value.to_owned());
     }
   }
 }
@@ -711,8 +706,32 @@ mod test {
   use strict_test_support::TestFailure;
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
+  use strict_test_support::ensure_ok;
+  use strict_test_support::ensure_some;
 
   use super::*;
+
+  struct NonLogCallsite;
+
+  static NON_LOG_CALLSITE: NonLogCallsite = NonLogCallsite;
+  static NON_LOG_FIELDS: field::FieldSet = field::FieldSet::new(&["message"], identify_callsite!(&NON_LOG_CALLSITE));
+  static NON_LOG_METADATA: Metadata<'static> = Metadata::new(
+    "non-log event",
+    "non_log",
+    Level::INFO,
+    &SourceLocation::empty(),
+    &NON_LOG_FIELDS,
+    Kind::EVENT,
+  );
+  static BAD_FIELD_HANDLES: Result<Fields, io::ErrorKind> = Err(io::ErrorKind::InvalidData);
+
+  impl Callsite for NonLogCallsite {
+    fn set_interest(&self, _: subscriber::Interest) {}
+
+    fn metadata(&self) -> &'static Metadata<'static> {
+      &NON_LOG_METADATA
+    }
+  }
 
   fn test_callsite(level: log::Level) -> Result<(), TestFailure> {
     let record = log::Record::builder()
@@ -757,5 +776,225 @@ mod test {
   #[test]
   fn trace_callsite_is_correct() -> Result<(), TestFailure> {
     test_callsite(log::Level::Trace)
+  }
+
+  #[test]
+  fn levels_convert_between_log_and_tracing_without_reordering() -> Result<(), TestFailure> {
+    let levels = [
+      (Level::ERROR, log::Level::Error),
+      (Level::WARN, log::Level::Warn),
+      (Level::INFO, log::Level::Info),
+      (Level::DEBUG, log::Level::Debug),
+      (Level::TRACE, log::Level::Trace),
+    ];
+
+    for (trace_level, log_level) in levels {
+      ensure(trace_level.as_log() == log_level, "tracing level converts to matching log level")?;
+      ensure(log_level.as_trace() == trace_level, "log level converts to matching tracing level")?;
+    }
+
+    Ok(())
+  }
+
+  #[test]
+  fn level_filters_convert_between_log_and_tracing_without_reordering() -> Result<(), TestFailure> {
+    let filters = [
+      (LevelFilter::OFF, log::LevelFilter::Off),
+      (LevelFilter::ERROR, log::LevelFilter::Error),
+      (LevelFilter::WARN, log::LevelFilter::Warn),
+      (LevelFilter::INFO, log::LevelFilter::Info),
+      (LevelFilter::DEBUG, log::LevelFilter::Debug),
+      (LevelFilter::TRACE, log::LevelFilter::Trace),
+    ];
+
+    for (trace_filter, log_filter) in filters {
+      ensure(
+        trace_filter.as_log() == log_filter,
+        "tracing filter converts to matching log filter",
+      )?;
+      ensure(
+        log_filter.as_trace() == trace_filter,
+        "log filter converts to matching tracing filter",
+      )?;
+    }
+
+    Ok(())
+  }
+
+  #[test]
+  fn metadata_conversions_preserve_level_target_and_source_location() -> Result<(), TestFailure> {
+    let trace_meta = INFO_META.as_log();
+    ensure(trace_meta.level() == log::Level::Info, "tracing metadata converts level")?;
+    ensure(trace_meta.target() == "log", "tracing metadata converts target")?;
+
+    let log_meta = log::Metadata::builder().level(log::Level::Warn).target("log_target").build();
+    let converted = log_meta.as_trace();
+    ensure(converted.name() == "log record", "log metadata conversion uses synthetic name")?;
+    ensure(converted.level() == &Level::WARN, "log metadata conversion preserves level")?;
+    ensure(converted.target() == "log_target", "log metadata conversion preserves target")?;
+    ensure(converted.file().is_none(), "metadata conversion has no source file")?;
+    ensure(converted.line().is_none(), "metadata conversion has no source line")?;
+    ensure(
+      converted.fields().field("message").is_some(),
+      "metadata conversion exposes message field",
+    )
+  }
+
+  #[test]
+  fn record_conversion_preserves_source_location_fields() -> Result<(), TestFailure> {
+    let record = log::Record::builder()
+      .args(format_args!("record message"))
+      .level(log::Level::Debug)
+      .target("record_target")
+      .file(Some("record.rs"))
+      .line(Some(37))
+      .module_path(Some("record_module"))
+      .build();
+
+    let metadata = record.as_trace();
+    ensure(metadata.level() == &Level::DEBUG, "record conversion preserves level")?;
+    ensure(metadata.target() == "record_target", "record conversion preserves target")?;
+    ensure(
+      metadata.module_path() == Some("record_module"),
+      "record conversion preserves module path",
+    )?;
+    ensure(metadata.file() == Some("record.rs"), "record conversion preserves file")?;
+    ensure(metadata.line() == Some(37), "record conversion preserves line")
+  }
+
+  #[test]
+  fn field_lookup_accepts_every_synthetic_level_and_reports_stored_errors() -> Result<(), TestFailure> {
+    for level in [Level::TRACE, Level::DEBUG, Level::INFO, Level::WARN, Level::ERROR] {
+      let fields = ensure_ok(level_to_fields(level), "lookup tracing field handles")?;
+      ensure(fields.message.name() == "message", "tracing field lookup returns message handle")?;
+    }
+
+    for level in [
+      log::Level::Trace,
+      log::Level::Debug,
+      log::Level::Info,
+      log::Level::Warn,
+      log::Level::Error,
+    ] {
+      let fields = ensure_ok(loglevel_to_fields(level), "lookup log field handles")?;
+      ensure(fields.target.name() == "log.target", "log field lookup returns target handle")?;
+    }
+
+    let error = ensure_some(field_handles(&BAD_FIELD_HANDLES).err(), "stored field lookup error is returned")?;
+    ensure(
+      error.kind() == io::ErrorKind::InvalidData,
+      "stored field lookup error kind is preserved",
+    )
+  }
+
+  #[test]
+  fn log_visitor_records_only_matching_metadata_fields() -> Result<(), TestFailure> {
+    let fields = ensure_ok(level_to_fields(Level::INFO), "lookup info field handles")?;
+    let wrong_field = ensure_some(TRACE_META.fields().field("message"), "lookup unrelated field")?;
+    let mut visitor = LogVisitor {
+      target: None,
+      module_path: None,
+      file: None,
+      line: None,
+      fields,
+    };
+
+    visitor.record_debug(&wrong_field, &"ignored");
+    visitor.record_str(&wrong_field, "ignored");
+    visitor.record_u64(&wrong_field, 999);
+    ensure(visitor.target.is_none(), "unrelated string field does not set target")?;
+    ensure(visitor.module_path.is_none(), "unrelated string field does not set module path")?;
+    ensure(visitor.file.is_none(), "unrelated string field does not set file")?;
+    ensure(visitor.line.is_none(), "unrelated integer field does not set line")?;
+
+    visitor.record_str(&fields.target, "real_target");
+    visitor.record_str(&fields.module, "real_module");
+    visitor.record_str(&fields.file, "real.rs");
+    visitor.record_u64(&fields.line, 42);
+
+    ensure(visitor.target.as_deref() == Some("real_target"), "target field is recorded")?;
+    ensure(visitor.module_path.as_deref() == Some("real_module"), "module field is recorded")?;
+    ensure(visitor.file.as_deref() == Some("real.rs"), "file field is recorded")?;
+    ensure(visitor.line == Some(42), "line field is recorded")
+  }
+
+  #[test]
+  fn normalized_metadata_accessors_preserve_owned_log_context() -> Result<(), TestFailure> {
+    let metadata = NormalizedMetadata {
+      name:        "log event",
+      target:      Cow::Owned("real_target".to_owned()),
+      level:       Level::WARN,
+      module_path: Some(Cow::Owned("real_module".to_owned())),
+      file:        Some(Cow::Owned("real.rs".to_owned())),
+      line:        Some(64),
+      callsite:    INFO_META.callsite(),
+      kind:        Kind::EVENT,
+    };
+
+    ensure_eq(&metadata.name(), &"log event", "normalized metadata exposes name")?;
+    ensure_eq(&metadata.target(), &"real_target", "normalized metadata exposes target")?;
+    ensure(metadata.level() == &Level::WARN, "normalized metadata exposes level")?;
+    ensure(
+      metadata.module_path() == Some("real_module"),
+      "normalized metadata exposes module path",
+    )?;
+    ensure(metadata.file() == Some("real.rs"), "normalized metadata exposes file")?;
+    ensure(metadata.line() == Some(64), "normalized metadata exposes line")?;
+    ensure(metadata.callsite() == INFO_META.callsite(), "normalized metadata exposes callsite")?;
+    ensure(
+      metadata.fields().field("message").is_some(),
+      "normalized metadata exposes message field",
+    )?;
+    ensure(metadata.is_event(), "normalized metadata kind reports event")?;
+    ensure(!metadata.is_span(), "normalized metadata kind does not report span")?;
+
+    let converted = metadata.as_metadata();
+    ensure(converted.name() == "log event", "as_metadata preserves name")?;
+    ensure(converted.target() == "real_target", "as_metadata preserves target")?;
+    ensure(converted.module_path() == Some("real_module"), "as_metadata preserves module path")?;
+    ensure(converted.file() == Some("real.rs"), "as_metadata preserves file")?;
+    ensure(converted.line() == Some(64), "as_metadata preserves line")
+  }
+
+  #[test]
+  fn event_normalization_reconstructs_log_metadata_and_rejects_non_log_events() -> Result<(), TestFailure> {
+    let fields = ensure_ok(level_to_fields(Level::INFO), "lookup info field handles")?;
+    let message_args = format_args!("hello");
+    let message: &dyn field::Value = &message_args;
+    let target: &dyn field::Value = &"real_target";
+    let module_path: &dyn field::Value = &"real_module";
+    let file: &dyn field::Value = &"real.rs";
+    let line_number = 33_u64;
+    let line: &dyn field::Value = &line_number;
+    let info_field_set = INFO_META.fields();
+    let info_values = [
+      (&fields.message, Some(message)),
+      (&fields.target, Some(target)),
+      (&fields.module, Some(module_path)),
+      (&fields.file, Some(file)),
+      (&fields.line, Some(line)),
+    ];
+    let values = info_field_set.value_set(&info_values);
+    let event = Event::new(&INFO_META, &values);
+
+    ensure(event.is_log(), "synthetic log event is recognized")?;
+    let normalized = ensure_some(event.normalized_metadata(), "synthetic log event normalizes")?;
+    ensure_eq(&normalized.name(), &"log event", "normalized event uses log event name")?;
+    ensure_eq(&normalized.target(), &"real_target", "normalized event uses recorded target")?;
+    ensure(
+      normalized.module_path() == Some("real_module"),
+      "normalized event uses recorded module",
+    )?;
+    ensure(normalized.file() == Some("real.rs"), "normalized event uses recorded file")?;
+    ensure(normalized.line() == Some(33), "normalized event uses recorded line")?;
+
+    let non_log_message: &dyn field::Value = &"not log";
+    let non_log_field_set = NON_LOG_METADATA.fields();
+    let non_log_field = ensure_some(non_log_field_set.field("message"), "lookup non-log field")?;
+    let non_log_value_pairs = [(&non_log_field, Some(non_log_message))];
+    let non_log_values = non_log_field_set.value_set(&non_log_value_pairs);
+    let non_log_event = Event::new(&NON_LOG_METADATA, &non_log_values);
+    ensure(!non_log_event.is_log(), "non-log event is not recognized as log")?;
+    ensure(non_log_event.normalized_metadata().is_none(), "non-log event does not normalize")
   }
 }

@@ -19,7 +19,7 @@ use crate::filter::FilterId;
 use crate::layer::Context;
 use crate::layer::Layer;
 #[cfg(all(feature = "registry", feature = "std"))]
-use crate::registry::CloseSpan as _;
+use crate::registry::CloseSpan;
 use crate::registry::LookupSpan;
 #[cfg(all(feature = "registry", feature = "std"))]
 use crate::registry::Registry;
@@ -199,11 +199,7 @@ where
       // If we have a registry's close guard, indicate that the span is
       // closing.
       #[cfg(all(feature = "registry", feature = "std"))]
-      {
-        if let Some(handle) = close_handle.as_mut() {
-          handle.set_closing();
-        }
-      }
+      let _closed = close_handle.as_mut().map(CloseSpan::set_closing);
 
       self.layer.on_close(id, self.ctx())?;
       Ok(true)

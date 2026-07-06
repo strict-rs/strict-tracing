@@ -12,10 +12,10 @@
 
 ## Repository Mode and Ownership
 
-This repository is a Rust workspace rooted at `Cargo.toml`. Workspace crates live under `crates/<name>/`; start new work there with a domain-specific crate name. CI is defined in `.github/workflows/ci.yml`. Shared policy files include `clippy.toml`, `rustfmt.toml`, `deny.toml`, `dupes.toml`, and `rust-toolchain.toml`.
+This repository is a Rust workspace rooted at `Cargo.toml`. Workspace member crates live in the members directory declared by `[workspace.metadata.config.layout]` in the root `Cargo.toml` — the template default is `crates/<name>/`; fork-derived repositories may declare `kind = "flat"` (members at the repository root) or another members directory. Start new work there with a domain-specific crate name. CI is defined in `.github/workflows/ci.yml`. Shared policy files include `clippy.toml`, `rustfmt.toml`, `deny.toml`, `dupes.toml`, and `rust-toolchain.toml`.
 
 - **Template-maintainer mode:** when the task is explicitly about maintaining shared template automation or policy, treat `xtask/`, root policy files, generated references, the `justfile`, CI, and template documentation as first-class deliverables.
-- **Product-repository mode:** otherwise, the repository's own `crates/*` deliverables are primary. Treat template automation as shared support unless the task is explicitly about maintaining or updating that machinery.
+- **Product-repository mode:** otherwise, the repository's own workspace member crates are the primary deliverables. Treat template automation as shared support unless the task is explicitly about maintaining or updating that machinery.
 - **Generated outputs:** coverage reports and metrics live under `cov/`; badges live under `badges/`; snapshot and compile-diagnostic artifacts live beside the tests that own them.
 - **Generated references:** do not hand-edit generated reference files unless the task is specifically to repair generated output; update the generator and run the generator instead.
 - **Dependencies:** declare external dependencies in the root `[workspace.dependencies]`, then opt in from member crates with `{name}.workspace = true` under `[dependencies]`, `[dev-dependencies]`, or `[build-dependencies]`.
@@ -59,13 +59,14 @@ Use `just` as the canonical entry point; the repo intentionally guards direct `c
 
 `just update-template` may reconcile template-managed config contracts. Treat those contracts as ownership rules, not accidental file copies or text merges over arbitrary TOML: the template can mandate values, allow validated consumer entries, expose explicit consumer overrides, derive values from repo facts, or forbid unsupported shapes.
 
-- A template snapshot is the checked-out `rust-template` input used for one update run. A target is the repository where the command is running. A baseline is the target's stored memory of previously applied template-owned values, used when the updater needs to distinguish template drift from consumer intent.
+- A template snapshot is the checked-out `rust-template` input used for one update run. A target is the repository where the command is running. Config-file updates are element-level contracts reconciled from template metadata and target facts; `update-template` must not create target-side baseline directories or scratch files to decide ownership.
 - Change template-owned fields through the declared consumer surface, not by fighting the generated or managed file. If the template exposes an opt-out, deviation, override, or extension surface, declare the local intent there; explicit deviations and extensions must be typed, auditable, and include nonempty reasons when that surface requires them. If no surface exists, treat surprising reconciliation as an upstream contract issue to raise.
 - When the template contract owns `deny.toml` source policy, `[sources].unknown-git` and `[sources].unknown-registry` are template-owned values; consumer edits are restored or rejected according to the contract. `[sources].allow-registry` may preserve valid consumer registry entries only when the contract exposes a consumer-entry surface for them.
 - When the template manages `deny.toml` `[sources].allow-git`, the allow-list comes from actual Git package sources in the target `Cargo.lock`, plus explicit consumer declarations or deviations when the contract allows them. A raw Cargo lockfile source is the exact `Cargo.lock` source string, such as `git+ssh://git@github.com/earthlings-dev/rust-mutant-fleet.git?branch=main#...`; a cargo-deny source URL is the value written to `deny.toml`, such as `ssh://git@github.com/earthlings-dev/rust-mutant-fleet.git`, after removing Cargo's `git+` prefix plus query and revision/hash suffixes.
 - A comparison key is internal updater bookkeeping for matching URL aliases and recognizing the target repository's own identity. Consumers do not write comparison keys, depend on their spelling, or add them to config.
 - Do not add the target repository's own Git URL to `[sources].allow-git` merely because root `[patch]` tables mention that remote. Repo-owned crates should resolve through local `path` patches and be absent from `Cargo.lock` as external Git sources.
 - Do not preserve stale Git allow-list entries that are absent from `Cargo.lock`. If an absent source is truly intentional, use the explicit consumer deviation or extension metadata surface exposed by the template; do not silently keep the stale entry in the managed key.
+- The workspace layout declaration `[workspace.metadata.config.layout]` (`schema-version = "0.1.0"` plus `kind = "members-dir"` with `members-dir = "<dir>"`, or `kind = "flat"`) is consumer-owned and is never reconciled as an update lane. Guidance generation routes the shared members-directory fragment tree through it — relocating `crates/`-encoded template targets into the declared members directory, or skipping them in flat repositories — and layout-aware workflows (crate scaffolding, source-scan gates) honor the same declaration. An absent table means the template default `crates/` layout.
 
 ### Gate selection
 
@@ -80,7 +81,7 @@ Use `just` as the canonical entry point; the repo intentionally guards direct `c
 `fmt`, `check`, `lint`, `test`, `test-doc`, `test-all`, and `doc` accept an optional leading path and a `--` tool passthrough:
 
 - `just lint` — whole workspace (run from the root; xtask's `ensure_root` anchors there via `cargo metadata` regardless of where you invoked `just`).
-- `just lint src` (from `crates/foo/`) — scopes to the crate that owns `src` (resolved against the directory you ran `just` from, mapped to `-p foo` through `cargo_metadata`). A path operand that doesn't exist inside the workspace is an error that points you at `--`.
+- `just lint src` (from a member crate directory such as `crates/foo/`) — scopes to the crate that owns `src` (resolved against the directory you ran `just` from, mapped to `-p foo` through `cargo_metadata`). A path operand that doesn't exist inside the workspace is an error that points you at `--`.
 - `just lint -- --fix` — forwards `--fix` verbatim to `cargo clippy`. Everything before your `--` is the command's own input (the scope path); everything after is the tool's.
 
 The path-scopable `justfile` recipes and `just x` forward `--from "{{invocation_directory()}}"`; recipes with operands or command-specific flags forward raw `{{args}}`. Extension commands receive the resolved invocation directory through `CommandContext::invocation_dir()`; see `xtask/AGENTS.md` for the parser and dispatch internals.

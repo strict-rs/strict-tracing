@@ -108,29 +108,29 @@ where
   V: VisitFmt,
   D: AsRef<str>,
 {
-  fn record_i64(&mut self, field: &Field, value: i64) {
+  fn record_i64(&mut self, field: &Field, field_value: i64) {
     self.delimit();
-    self.inner.record_i64(field, value);
+    self.inner.record_i64(field, field_value);
   }
 
-  fn record_u64(&mut self, field: &Field, value: u64) {
+  fn record_u64(&mut self, field: &Field, field_value: u64) {
     self.delimit();
-    self.inner.record_u64(field, value);
+    self.inner.record_u64(field, field_value);
   }
 
-  fn record_bool(&mut self, field: &Field, value: bool) {
+  fn record_bool(&mut self, field: &Field, field_value: bool) {
     self.delimit();
-    self.inner.record_bool(field, value);
+    self.inner.record_bool(field, field_value);
   }
 
-  fn record_str(&mut self, field: &Field, value: &str) {
+  fn record_str(&mut self, field: &Field, field_value: &str) {
     self.delimit();
-    self.inner.record_str(field, value);
+    self.inner.record_str(field, field_value);
   }
 
-  fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+  fn record_debug(&mut self, field: &Field, field_value: &dyn fmt::Debug) {
     self.delimit();
-    self.inner.record_debug(field, value);
+    self.inner.record_debug(field, field_value);
   }
 }
 

@@ -7,6 +7,12 @@ use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
 use tracing_mock::*;
 
+/// Pair destructured by instrumentation tests.
+type Pair = (usize, usize);
+
+/// Nested pair destructured by instrumentation tests.
+type NestedPair = (Pair, Pair);
+
 #[test]
 fn destructure_tuples() -> Result<(), TestFailure> {
   #[instrument]
@@ -40,7 +46,7 @@ fn destructure_tuples() -> Result<(), TestFailure> {
 #[test]
 fn destructure_nested_tuples() -> Result<(), TestFailure> {
   #[instrument]
-  fn my_fn(((arg1, arg2), (arg3, arg4)): ((usize, usize), (usize, usize))) {}
+  fn my_fn(((arg1, arg2), (arg3, arg4)): NestedPair) {}
 
   let span = expect::span().named("my_fn");
 

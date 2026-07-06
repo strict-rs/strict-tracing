@@ -96,14 +96,11 @@ mod tests {
       }
 
       fn enabled(&self, _metadata: &Metadata<'_>, _: layer::Context<'_, S>) -> SubscriberResult<bool> {
-        match *self {
-          Self::One => {
-            let _previous_count = FILTER1_CALLS.fetch_add(1, Ordering::SeqCst);
-          }
-          Self::Two => {
-            let _previous_count = FILTER2_CALLS.fetch_add(1, Ordering::SeqCst);
-          }
-        }
+        let filter_calls = match *self {
+          Self::One => &FILTER1_CALLS,
+          Self::Two => &FILTER2_CALLS,
+        };
+        let _previous_count = filter_calls.fetch_add(1, Ordering::SeqCst);
         Ok(true)
       }
 
@@ -185,14 +182,11 @@ mod tests {
 
     impl<S: Subscriber> layer::Filter<S> for Filter {
       fn enabled(&self, _metadata: &Metadata<'_>, _: &layer::Context<'_, S>) -> SubscriberResult<bool> {
-        match *self {
-          Self::One => {
-            let _previous_count = FILTER1_CALLS.fetch_add(1, Ordering::SeqCst);
-          }
-          Self::Two => {
-            let _previous_count = FILTER2_CALLS.fetch_add(1, Ordering::SeqCst);
-          }
-        }
+        let filter_calls = match *self {
+          Self::One => &FILTER1_CALLS,
+          Self::Two => &FILTER2_CALLS,
+        };
+        let _previous_count = filter_calls.fetch_add(1, Ordering::SeqCst);
         Ok(true)
       }
 

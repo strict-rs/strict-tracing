@@ -1,11 +1,9 @@
 //! Error wrappers and extension traits for carrying captured span traces.
 
 use std::error::Error;
+use std::fmt;
 use std::fmt::Debug;
 use std::fmt::Display;
-use std::fmt::{
-  self,
-};
 use std::marker::PhantomData;
 
 use crate::SpanTrace;

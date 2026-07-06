@@ -1,9 +1,7 @@
 //! socket helpers.
 
+use std::io;
 use std::io::IoSlice;
-use std::io::{
-  self,
-};
 use std::mem::MaybeUninit;
 use std::os::unix::ffi::OsStrExt as _;
 use std::os::unix::net::UnixDatagram;

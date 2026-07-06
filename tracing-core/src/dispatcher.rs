@@ -145,12 +145,10 @@ use crate::LevelFilter;
 use crate::Metadata;
 use crate::callsite;
 use crate::span;
+use crate::subscriber;
 use crate::subscriber::NoSubscriber;
 use crate::subscriber::Subscriber;
 use crate::subscriber::SubscriberResult;
-use crate::subscriber::{
-  self,
-};
 
 /// `Dispatch` trace data to a [`Subscriber`].
 #[derive(Clone)]
@@ -972,6 +970,8 @@ impl Drop for DefaultGuard {
 #[cfg(test)]
 mod test {
   #[cfg(feature = "std")]
+  use alloc::sync::Arc;
+  #[cfg(feature = "std")]
   use core::num::NonZeroU64;
   #[cfg(feature = "std")]
   use std::sync::atomic::AtomicUsize;
@@ -982,6 +982,8 @@ mod test {
   use strict_test_support::ensure;
   #[cfg(feature = "std")]
   use strict_test_support::ensure_eq;
+  #[cfg(feature = "std")]
+  use strict_test_support::ensure_ok;
 
   use super::*;
   #[cfg(feature = "std")]
@@ -1019,6 +1021,15 @@ mod test {
       name: "test",
       target: module_path!(),
       level: Level::DEBUG,
+      fields: &[],
+      callsite: &TEST_CALLSITE,
+      kind: Kind::EVENT
+  };
+  #[cfg(feature = "std")]
+  static DISABLED_META: Metadata<'static> = metadata! {
+      name: "disabled",
+      target: module_path!(),
+      level: Level::INFO,
       fields: &[],
       callsite: &TEST_CALLSITE,
       kind: Kind::EVENT
@@ -1131,6 +1142,226 @@ mod test {
   fn default_no_subscriber() -> Result<(), TestFailure> {
     let default_dispatcher = Dispatch::default();
     ensure(default_dispatcher.is::<NoSubscriber>(), "default dispatcher is NoSubscriber")
+  }
+
+  #[test]
+  fn weak_dispatch_upgrade_succeeds_while_strong_exists() -> Result<(), TestFailure> {
+    let strong = Dispatch::new(NoSubscriber::default());
+    let weak = strong.downgrade();
+
+    ensure(
+      weak.upgrade().is_some(),
+      "weak dispatch upgrades while the strong dispatch remains alive",
+    )
+  }
+
+  #[test]
+  fn weak_dispatch_upgrade_fails_after_strong_is_dropped() -> Result<(), TestFailure> {
+    let weak = {
+      let strong = Dispatch::new(NoSubscriber::default());
+      strong.downgrade()
+    };
+
+    ensure(
+      weak.upgrade().is_none(),
+      "weak dispatch does not upgrade after the strong dispatch is dropped",
+    )
+  }
+
+  #[cfg(feature = "std")]
+  #[derive(Default)]
+  struct DispatchCallCounts {
+    register_callsite:   AtomicUsize,
+    max_level_hint:      AtomicUsize,
+    new_span:            AtomicUsize,
+    record:              AtomicUsize,
+    record_follows_from: AtomicUsize,
+    enabled:             AtomicUsize,
+    event_enabled:       AtomicUsize,
+    event:               AtomicUsize,
+    enter:               AtomicUsize,
+    exit:                AtomicUsize,
+    clone_span:          AtomicUsize,
+    try_close:           AtomicUsize,
+    current_span:        AtomicUsize,
+  }
+
+  #[cfg(feature = "std")]
+  struct CountingSubscriber {
+    calls: Arc<DispatchCallCounts>,
+  }
+
+  #[cfg(feature = "std")]
+  impl Subscriber for CountingSubscriber {
+    fn register_callsite(&self, _: &'static Metadata<'static>) -> SubscriberResult<Interest> {
+      let _previous = self.calls.register_callsite.fetch_add(1, Ordering::Relaxed);
+      Ok(Interest::always())
+    }
+
+    fn max_level_hint(&self) -> Option<LevelFilter> {
+      let _previous = self.calls.max_level_hint.fetch_add(1, Ordering::Relaxed);
+      Some(LevelFilter::DEBUG)
+    }
+
+    fn enabled(&self, _: &Metadata<'_>) -> SubscriberResult<bool> {
+      let _previous = self.calls.enabled.fetch_add(1, Ordering::Relaxed);
+      Ok(true)
+    }
+
+    fn event_enabled(&self, event: &Event<'_>) -> SubscriberResult<bool> {
+      let _previous = self.calls.event_enabled.fetch_add(1, Ordering::Relaxed);
+      Ok(event.metadata().name() == "test")
+    }
+
+    fn new_span(&self, _: &span::Attributes<'_>) -> SubscriberResult<span::Id> {
+      let _previous = self.calls.new_span.fetch_add(1, Ordering::Relaxed);
+      Ok(span::Id::from_non_zero_u64(NonZeroU64::MIN))
+    }
+
+    fn record(&self, _: span::Id, _: &span::Record<'_>) -> SubscriberResult {
+      let _previous = self.calls.record.fetch_add(1, Ordering::Relaxed);
+      Ok(())
+    }
+
+    fn record_follows_from(&self, _: span::Id, _: span::Id) -> SubscriberResult {
+      let _previous = self.calls.record_follows_from.fetch_add(1, Ordering::Relaxed);
+      Ok(())
+    }
+
+    fn event(&self, _: &Event<'_>) -> SubscriberResult {
+      let _previous = self.calls.event.fetch_add(1, Ordering::Relaxed);
+      Ok(())
+    }
+
+    fn enter(&self, _: span::Id) -> SubscriberResult {
+      let _previous = self.calls.enter.fetch_add(1, Ordering::Relaxed);
+      Ok(())
+    }
+
+    fn exit(&self, _: span::Id) -> SubscriberResult {
+      let _previous = self.calls.exit.fetch_add(1, Ordering::Relaxed);
+      Ok(())
+    }
+
+    fn clone_span(&self, id: span::Id) -> SubscriberResult<span::Id> {
+      let _previous = self.calls.clone_span.fetch_add(1, Ordering::Relaxed);
+      Ok(id)
+    }
+
+    fn try_close(&self, _: span::Id) -> SubscriberResult<bool> {
+      let _previous = self.calls.try_close.fetch_add(1, Ordering::Relaxed);
+      Ok(true)
+    }
+
+    fn current_span(&self) -> SubscriberResult<span::Current> {
+      let _previous = self.calls.current_span.fetch_add(1, Ordering::Relaxed);
+      Ok(span::Current::none())
+    }
+  }
+
+  #[cfg(feature = "std")]
+  #[test]
+  fn dispatch_forwards_registration_and_span_creation_hooks() -> Result<(), TestFailure> {
+    let calls = Arc::new(DispatchCallCounts::default());
+    let dispatch = Dispatch::new(CountingSubscriber {
+      calls: Arc::clone(&calls)
+    });
+    let id = span::Id::from_non_zero_u64(NonZeroU64::MIN);
+    let values = TEST_META.fields().value_set(&[]);
+    let attrs = span::Attributes::new(&TEST_META, &values);
+
+    let interest = ensure_ok(dispatch.register_callsite(&TEST_META), "dispatch forwards callsite registration")?;
+    ensure(interest.is_always(), "forwarded callsite registration returns interest")?;
+    ensure(
+      dispatch.max_level_hint() == Some(LevelFilter::DEBUG),
+      "dispatch forwards max-level hints",
+    )?;
+    ensure(
+      ensure_ok(dispatch.enabled(&TEST_META), "dispatch forwards enabled checks")?,
+      "forwarded enabled check returns true",
+    )?;
+    let new_span_id = ensure_ok(dispatch.new_span(&attrs), "dispatch forwards new span")?;
+    ensure(new_span_id == id, "forwarded new span returns subscriber ID")?;
+
+    ensure_eq(
+      &calls.register_callsite.load(Ordering::Relaxed),
+      &1,
+      "callsite registration was forwarded once",
+    )?;
+    ensure_eq(
+      &calls.max_level_hint.load(Ordering::Relaxed),
+      &2,
+      "max-level hint is queried during registration and explicit forwarding",
+    )?;
+    ensure_eq(&calls.enabled.load(Ordering::Relaxed), &1, "enabled was forwarded once")?;
+    ensure_eq(&calls.new_span.load(Ordering::Relaxed), &1, "new span was forwarded once")
+  }
+
+  #[cfg(feature = "std")]
+  #[test]
+  fn dispatch_forwards_record_event_and_lifecycle_hooks() -> Result<(), TestFailure> {
+    let calls = Arc::new(DispatchCallCounts::default());
+    let dispatch = Dispatch::new(CountingSubscriber {
+      calls: Arc::clone(&calls)
+    });
+    let id = span::Id::from_non_zero_u64(NonZeroU64::MIN);
+    let values = TEST_META.fields().value_set(&[]);
+    let record = span::Record::new(&values);
+    let event = Event::new(&TEST_META, &values);
+
+    ensure_ok(dispatch.record(id, &record), "dispatch forwards record")?;
+    ensure_ok(dispatch.record_follows_from(id, id), "dispatch forwards follows-from")?;
+    ensure_ok(dispatch.event(&event), "dispatch forwards enabled events")?;
+    ensure_ok(dispatch.enter(id), "dispatch forwards enter")?;
+    ensure_ok(dispatch.exit(id), "dispatch forwards exit")?;
+    let cloned_id = ensure_ok(dispatch.clone_span(id), "dispatch forwards clone-span")?;
+    ensure(cloned_id == id, "forwarded clone-span returns subscriber ID")?;
+    ensure(
+      ensure_ok(dispatch.try_close(id), "dispatch forwards try-close")?,
+      "forwarded try-close returns subscriber close result",
+    )?;
+    let current = ensure_ok(dispatch.current_span(), "dispatch forwards current-span")?;
+    ensure(current.id().is_none(), "forwarded current-span returns subscriber current state")?;
+
+    ensure_eq(&calls.record.load(Ordering::Relaxed), &1, "record was forwarded once")?;
+    ensure_eq(
+      &calls.record_follows_from.load(Ordering::Relaxed),
+      &1,
+      "follows-from was forwarded once",
+    )?;
+    ensure_eq(
+      &calls.event_enabled.load(Ordering::Relaxed),
+      &1,
+      "event-enabled gate ran for the enabled event",
+    )?;
+    ensure_eq(&calls.event.load(Ordering::Relaxed), &1, "enabled event was forwarded once")?;
+    ensure_eq(&calls.enter.load(Ordering::Relaxed), &1, "enter was forwarded once")?;
+    ensure_eq(&calls.exit.load(Ordering::Relaxed), &1, "exit was forwarded once")?;
+    ensure_eq(&calls.clone_span.load(Ordering::Relaxed), &1, "clone-span was forwarded once")?;
+    ensure_eq(&calls.try_close.load(Ordering::Relaxed), &1, "try-close was forwarded once")?;
+    ensure_eq(&calls.current_span.load(Ordering::Relaxed), &1, "current-span was forwarded once")
+  }
+
+  #[cfg(feature = "std")]
+  #[test]
+  fn dispatch_event_checks_do_not_forward_disabled_events() -> Result<(), TestFailure> {
+    let calls = Arc::new(DispatchCallCounts::default());
+    let dispatch = Dispatch::new(CountingSubscriber {
+      calls: Arc::clone(&calls)
+    });
+    let disabled_values = DISABLED_META.fields().value_set(&[]);
+    let disabled_event = Event::new(&DISABLED_META, &disabled_values);
+
+    ensure_ok(
+      dispatch.event(&disabled_event),
+      "dispatch checks disabled events without forwarding them",
+    )?;
+    ensure_eq(
+      &calls.event_enabled.load(Ordering::Relaxed),
+      &1,
+      "event-enabled gate ran for the disabled event",
+    )?;
+    ensure_eq(&calls.event.load(Ordering::Relaxed), &0, "disabled event was not forwarded")
   }
 
   #[cfg(feature = "std")]

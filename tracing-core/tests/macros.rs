@@ -8,6 +8,7 @@ mod tests {
   use tracing_core::metadata::Kind;
   use tracing_core::metadata::Level;
   use tracing_core::metadata::Metadata;
+  use tracing_core::metadata::SourceLocation;
   use tracing_core::subscriber::Interest;
 
   #[test]
@@ -29,9 +30,7 @@ mod tests {
       "test_metadata",
       "test_target",
       Level::DEBUG,
-      None,
-      None,
-      None,
+      &SourceLocation::empty(),
       &FieldSet::new(&[], tracing_core::identify_callsite!(&CALLSITE)),
       Kind::SPAN,
     );

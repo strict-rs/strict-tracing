@@ -25,10 +25,10 @@ impl<S> Filter<S> for FilterEvent {
   fn event_enabled(&self, event: &Event<'_>, _cx: &Context<'_, S>) -> SubscriberResult<bool> {
     struct ShouldEnable(bool);
     impl Visit for ShouldEnable {
-      fn record_bool(&mut self, field: &Field, value: bool) {
-        if field.name() == "enable" {
-          self.0 = value;
-        }
+      fn record_bool(&mut self, field: &Field, field_value: bool) {
+        let is_enable_field = field.name() == "enable";
+        let recorded_enabled = is_enable_field.then_some(field_value);
+        self.0 = recorded_enabled.unwrap_or(self.0);
       }
 
       fn record_debug(&mut self, _field: &Field, _value: &dyn Debug) {}

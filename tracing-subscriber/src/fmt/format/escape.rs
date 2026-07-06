@@ -11,9 +11,12 @@ pub(super) struct EscapeGuard<T> {
 }
 
 impl<T> EscapeGuard<T> {
-    /// Returns a wrapper that formats `value` with optional ANSI sanitization.
-    pub(super) const fn new(value: T, sanitize: bool) -> Self {
-        Self { value, sanitize }
+    /// Returns a wrapper that formats `unsanitized` with optional ANSI sanitization.
+    pub(super) const fn new(unsanitized: T, sanitize: bool) -> Self {
+        Self {
+            value: unsanitized,
+            sanitize,
+        }
     }
 }
 

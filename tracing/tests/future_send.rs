@@ -6,10 +6,9 @@ mod tests {
   // - https://github.com/tokio-rs/tracing/issues/1487
   // - https://github.com/tokio-rs/tracing/issues/1793
 
+  use core::future;
   use core::future::Future;
-  use core::future::{
-    self,
-  };
+
   #[test]
   fn async_fn_is_send() {
     async fn some_async_fn() {

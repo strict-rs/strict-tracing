@@ -3,16 +3,8 @@
 
 #[cfg(test)]
 mod tests {
-  use core::num::NonZeroU64;
-  use std::ptr;
-  use std::sync::Arc;
-  use std::sync::atomic::AtomicBool;
-  use std::sync::atomic::AtomicPtr;
-  use std::sync::atomic::Ordering;
+  use std::thread;
   use std::thread::JoinHandle;
-  use std::thread::{
-    self,
-  };
   use std::time::Duration;
 
   use strict_test_support::TestFailure;
@@ -23,67 +15,16 @@ mod tests {
   use tracing_core::Kind;
   use tracing_core::Level;
   use tracing_core::Metadata;
-  use tracing_core::Subscriber;
-  use tracing_core::SubscriberResult;
   use tracing_core::callsite::Callsite as _;
   use tracing_core::callsite::DefaultCallsite;
   use tracing_core::callsite::Identifier;
   use tracing_core::dispatcher::set_default;
   use tracing_core::field::FieldSet;
   use tracing_core::field::Value;
-  use tracing_core::span;
-
-  struct TestSubscriber {
-    sleep:             Duration,
-    callsite:          AtomicPtr<()>,
-    callsite_mismatch: Arc<AtomicBool>,
-  }
-
-  impl Subscriber for TestSubscriber {
-    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> SubscriberResult<tracing_core::Interest> {
-      if !self.sleep.is_zero() {
-        thread::sleep(self.sleep);
-      }
-
-      let metadata_ptr = ptr::from_ref(metadata).cast::<()>().cast_mut();
-      self.callsite.store(metadata_ptr, Ordering::SeqCst);
-
-      Ok(tracing_core::Interest::always())
-    }
-
-    fn event(&self, event: &Event<'_>) -> SubscriberResult {
-      let stored_callsite = self.callsite.load(Ordering::SeqCst);
-      let event_callsite = ptr::from_ref(event.metadata()).cast::<()>().cast_mut();
-
-      // This signal is the actual test; the owning thread reports it as a `TestFailure`.
-      self
-        .callsite_mismatch
-        .store(stored_callsite != event_callsite, Ordering::SeqCst);
-      Ok(())
-    }
-
-    fn enabled(&self, _metadata: &Metadata<'_>) -> SubscriberResult<bool> {
-      Ok(true)
-    }
-    fn new_span(&self, _span: &span::Attributes<'_>) -> SubscriberResult<span::Id> {
-      Ok(span::Id::from_non_zero_u64(NonZeroU64::MIN))
-    }
-    fn record(&self, _span: span::Id, _values: &span::Record<'_>) -> SubscriberResult {
-      Ok(())
-    }
-    fn record_follows_from(&self, _span: span::Id, _follows: span::Id) -> SubscriberResult {
-      Ok(())
-    }
-    fn enter(&self, _span: span::Id) -> SubscriberResult {
-      Ok(())
-    }
-    fn exit(&self, _span: span::Id) -> SubscriberResult {
-      Ok(())
-    }
-  }
+  use tracing_core::metadata::SourceLocation;
+  use tracing_core::test_util::CallsiteTrackingSubscriber;
 
   fn subscriber_thread(index: usize, register_sleep_micros: u64) -> Result<JoinHandle<Result<(), TestFailure>>, TestFailure> {
-    let callsite_mismatch = Arc::new(AtomicBool::new(false));
     thread::Builder::new()
       .name(format!("subscriber-{index}"))
       .spawn(move || {
@@ -93,9 +34,7 @@ mod tests {
             "event ",
             "module::path",
             Level::INFO,
-            None,
-            None,
-            None,
+            &SourceLocation::empty(),
             &FieldSet::new(&["message"], Identifier(&CALLSITE)),
             Kind::EVENT,
           );
@@ -103,11 +42,8 @@ mod tests {
         };
 
         // We use a sleep to ensure the starting order of the 2 threads.
-        let subscriber = TestSubscriber {
-          sleep:             Duration::from_micros(register_sleep_micros),
-          callsite:          AtomicPtr::new(ptr::null_mut()),
-          callsite_mismatch: Arc::clone(&callsite_mismatch),
-        };
+        let subscriber = CallsiteTrackingSubscriber::new().with_register_delay(Duration::from_micros(register_sleep_micros));
+        let handle = subscriber.handle();
         let _dispatch_guard = set_default(&Dispatch::new(subscriber));
         let _interest = CALLSITE.interest();
 
@@ -124,7 +60,7 @@ mod tests {
         // immediately because that will influence the test).
         thread::sleep(Duration::from_millis(10));
         ensure(
-          !callsite_mismatch.load(Ordering::SeqCst),
+          !handle.saw_callsite_mismatch(),
           "event must be called after register_callsite records the callsite",
         )
       })

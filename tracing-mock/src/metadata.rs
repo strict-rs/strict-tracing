@@ -101,3 +101,81 @@ impl fmt::Display for ExpectedMetadata {
     Ok(())
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_ok;
+  use tracing_core::Interest;
+  use tracing_core::Level;
+  use tracing_core::Metadata;
+  use tracing_core::callsite::Callsite;
+  use tracing_core::metadata;
+  use tracing_core::metadata::Kind;
+
+  use super::ExpectedMetadata;
+
+  struct MetadataTestCallsite;
+
+  static METADATA_TEST_CALLSITE: MetadataTestCallsite = MetadataTestCallsite;
+  static METADATA_TEST: Metadata<'static> = metadata! {
+      name: "metadata_test",
+      target: "metadata_target",
+      level: Level::INFO,
+      fields: &[],
+      callsite: &METADATA_TEST_CALLSITE,
+      kind: Kind::EVENT
+  };
+
+  impl Callsite for MetadataTestCallsite {
+    fn set_interest(&self, _: Interest) {}
+
+    fn metadata(&self) -> &Metadata<'_> {
+      &METADATA_TEST
+    }
+  }
+
+  #[test]
+  fn metadata_expectations_accept_matching_metadata() -> Result<(), TestFailure> {
+    let expected = ExpectedMetadata {
+      name:   Some("metadata_test".to_owned()),
+      level:  Some(Level::INFO),
+      target: Some("metadata_target".to_owned()),
+    };
+
+    ensure_ok(
+      expected.check(&METADATA_TEST, "an event", "metadata-test"),
+      "matching metadata is accepted",
+    )
+  }
+
+  #[test]
+  fn metadata_expectations_reject_mismatching_name_level_and_target() -> Result<(), TestFailure> {
+    let wrong_name = ExpectedMetadata {
+      name: Some("other_name".to_owned()),
+      ..ExpectedMetadata::default()
+    };
+    let wrong_level = ExpectedMetadata {
+      level: Some(Level::ERROR),
+      ..ExpectedMetadata::default()
+    };
+    let wrong_target = ExpectedMetadata {
+      target: Some("other_target".to_owned()),
+      ..ExpectedMetadata::default()
+    };
+
+    ensure(
+      wrong_name.check(&METADATA_TEST, "an event", "metadata-test").is_err(),
+      "wrong name is rejected",
+    )?;
+    ensure(
+      wrong_level.check(&METADATA_TEST, "an event", "metadata-test").is_err(),
+      "wrong level is rejected",
+    )?;
+    ensure(
+      wrong_target.check(&METADATA_TEST, "an event", "metadata-test").is_err(),
+      "wrong target is rejected",
+    )
+  }
+}

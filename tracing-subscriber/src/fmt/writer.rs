@@ -9,7 +9,6 @@ use std::{
     fs::File,
     io::{self, Write},
     str,
-    sync::MutexGuard,
 };
 use tracing_core::Metadata;
 
@@ -20,9 +19,7 @@ use tracing_core::Metadata;
 ///
 /// This trait is already implemented for function pointers and
 /// immutably-borrowing closures that return an instance of [`io::Write`], such
-/// as [`io::stdout`] and [`io::stderr`]. Additionally, it is implemented for
-/// [`std::sync::Mutex`] when the type inside the mutex implements
-/// [`io::Write`].
+/// as [`io::stdout`] and [`io::stderr`].
 ///
 /// # Examples
 ///
@@ -71,16 +68,16 @@ use tracing_core::Metadata;
 /// ```
 ///
 /// A single instance of a type implementing [`io::Write`] may be used as a
-/// `MakeWriter` by wrapping it in a [`Mutex`]. For example, we could
+/// `MakeWriter` by wrapping it in an [`Arc`]. For example, we could
 /// write to a file like so:
 ///
 /// ```
-/// use std::{fs::File, sync::Mutex};
+/// use std::{fs::File, sync::Arc};
 ///
 /// # fn docs() -> Result<(), Box<dyn std::error::Error>> {
-/// let log_file = File::create("my_cool_trace.log")?;
+/// let log_file = Arc::new(File::create("my_cool_trace.log")?);
 /// let subscriber = tracing_subscriber::fmt()
-///     .with_writer(Mutex::new(log_file))
+///     .with_writer(Arc::clone(&log_file))
 ///     .finish();
 /// # drop(subscriber);
 /// # Ok(())
@@ -88,6 +85,7 @@ use tracing_core::Metadata;
 /// ```
 ///
 /// [`io::Write`]: std::io::Write
+/// [`Arc`]: std::sync::Arc
 /// [`fmt::Layer`]: crate::fmt::Layer
 /// [`fmt::Subscriber`]: crate::fmt::Subscriber
 /// [`Event`]: tracing_core::event::Event
@@ -532,6 +530,12 @@ pub struct TestWriter {
     use_stderr: bool,
 }
 
+/// Boxed writer returned by a type-erased writer factory.
+type BoxedDynWrite<'a> = Box<dyn Write + 'a>;
+
+/// Type-erased writer factory stored by [`BoxMakeWriter`].
+type BoxedMakeWriter = Box<dyn for<'a> MakeWriter<'a, Writer = BoxedDynWrite<'a>> + Send + Sync>;
+
 /// A writer that erases the specific [`io::Write`] and [`MakeWriter`] types being used.
 ///
 /// This is useful in cases where the concrete type of the writer cannot be known
@@ -560,7 +564,7 @@ pub struct TestWriter {
 /// [`io::Write`]: std::io::Write
 pub struct BoxMakeWriter {
     /// The erased writer factory.
-    inner: Box<dyn for<'a> MakeWriter<'a, Writer = Box<dyn Write + 'a>> + Send + Sync>,
+    inner: BoxedMakeWriter,
     /// The erased writer factory's type name.
     name: &'static str,
 }
@@ -571,16 +575,12 @@ pub struct BoxMakeWriter {
 /// return one of two writers.
 ///
 /// [writer]: std::io::Write
-#[expect(
-    clippy::min_ident_chars,
-    reason = "public API compatibility: EitherWriter variants are A and B"
-)]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum EitherWriter<A, B> {
-    /// A writer of type `A`.
-    A(A),
-    /// A writer of type `B`.
-    B(B),
+    /// The first writer type.
+    First(A),
+    /// The second writer type.
+    Second(B),
 }
 
 /// A [writer] which may or may not be enabled.
@@ -674,26 +674,10 @@ pub struct Tee<A, B> {
     second: B,
 }
 
-/// A type implementing [`io::Write`] for a [`MutexGuard`] where the type
-/// inside the [`Mutex`] implements [`io::Write`].
-///
-/// This is used by the [`MakeWriter`] implementation for [`Mutex`], because
-/// [`MutexGuard`] itself will not implement [`io::Write`] — instead, it
-/// _dereferences_ to a type implementing [`io::Write`]. Because [`MakeWriter`]
-/// requires the `Writer` type to implement [`io::Write`], it's necessary to add
-/// a newtype that forwards the trait implementation.
-///
-/// [`io::Write`]: std::io::Write
-/// [`MutexGuard`]: std::sync::MutexGuard
-/// [`Mutex`]: std::sync::Mutex
-#[derive(Debug)]
-pub struct MutexGuardWriter<'a, W>(MutexGuard<'a, W>);
-
 /// Implements [`std::io::Write`] for an [`Arc`]<W> where `&W: Write`.
 ///
 /// This is an implementation detail of the [`MakeWriter`] impl for [`Arc`].
 #[doc(hidden)]
-#[deprecated(since = "0.1.19", note = "unused implementation detail -- do not use")]
 #[derive(Clone, Debug)]
 pub struct ArcWriter<W>(Arc<W>);
 
@@ -836,60 +820,6 @@ where
     }
 }
 
-// === impl Mutex/MutexGuardWriter ===
-
-#[expect(
-    clippy::disallowed_types,
-    reason = "compatibility impl: MakeWriter has historically supported std::sync::Mutex"
-)]
-#[expect(
-    clippy::absolute_paths,
-    reason = "compatibility impl avoids importing the disallowed std::sync::Mutex type"
-)]
-impl<'a, W> MakeWriter<'a> for std::sync::Mutex<W>
-where
-    W: Write + 'a,
-{
-    type Writer = MutexGuardWriter<'a, W>;
-
-    fn make_writer(&'a self) -> Self::Writer {
-        match self.lock() {
-            Ok(guard) => MutexGuardWriter(guard),
-            Err(poisoned) => MutexGuardWriter(poisoned.into_inner()),
-        }
-    }
-}
-
-impl<W> Write for MutexGuardWriter<'_, W>
-where
-    W: Write,
-{
-    #[inline]
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.0.write(buf)
-    }
-
-    #[inline]
-    fn flush(&mut self) -> io::Result<()> {
-        self.0.flush()
-    }
-
-    #[inline]
-    fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
-        self.0.write_vectored(bufs)
-    }
-
-    #[inline]
-    fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
-        self.0.write_all(buf)
-    }
-
-    #[inline]
-    fn write_fmt(&mut self, fmt: fmt::Arguments<'_>) -> io::Result<()> {
-        self.0.write_fmt(fmt)
-    }
-}
-
 // === impl EitherWriter ===
 
 impl<A, B> Write for EitherWriter<A, B>
@@ -900,40 +830,40 @@ where
     #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         match *self {
-            Self::A(ref mut writer) => writer.write(buf),
-            Self::B(ref mut writer) => writer.write(buf),
+            Self::First(ref mut writer) => writer.write(buf),
+            Self::Second(ref mut writer) => writer.write(buf),
         }
     }
 
     #[inline]
     fn flush(&mut self) -> io::Result<()> {
         match *self {
-            Self::A(ref mut writer) => writer.flush(),
-            Self::B(ref mut writer) => writer.flush(),
+            Self::First(ref mut writer) => writer.flush(),
+            Self::Second(ref mut writer) => writer.flush(),
         }
     }
 
     #[inline]
     fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
         match *self {
-            Self::A(ref mut writer) => writer.write_vectored(bufs),
-            Self::B(ref mut writer) => writer.write_vectored(bufs),
+            Self::First(ref mut writer) => writer.write_vectored(bufs),
+            Self::Second(ref mut writer) => writer.write_vectored(bufs),
         }
     }
 
     #[inline]
     fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
         match *self {
-            Self::A(ref mut writer) => writer.write_all(buf),
-            Self::B(ref mut writer) => writer.write_all(buf),
+            Self::First(ref mut writer) => writer.write_all(buf),
+            Self::Second(ref mut writer) => writer.write_all(buf),
         }
     }
 
     #[inline]
     fn write_fmt(&mut self, fmt: fmt::Arguments<'_>) -> io::Result<()> {
         match *self {
-            Self::A(ref mut writer) => writer.write_fmt(fmt),
-            Self::B(ref mut writer) => writer.write_fmt(fmt),
+            Self::First(ref mut writer) => writer.write_fmt(fmt),
+            Self::Second(ref mut writer) => writer.write_fmt(fmt),
         }
     }
 }
@@ -949,7 +879,7 @@ impl<T> OptionalWriter<T> {
     #[inline]
     #[must_use]
     pub const fn none() -> Self {
-        Self::B(io::sink())
+        Self::Second(io::sink())
     }
 
     /// Returns an enabled writer of type `T`.
@@ -957,7 +887,7 @@ impl<T> OptionalWriter<T> {
     /// This is equivalent to returning [`Option::Some`].
     #[inline]
     pub const fn some(writer: T) -> Self {
-        Self::A(writer)
+        Self::First(writer)
     }
 }
 
@@ -1199,26 +1129,22 @@ where
     #[inline]
     fn make_writer(&'a self) -> Self::Writer {
         match self.inner.make_writer() {
-            EitherWriter::A(writer) => EitherWriter::A(writer),
-            EitherWriter::B(_) => EitherWriter::B(self.or_else.make_writer()),
+            EitherWriter::First(writer) => EitherWriter::First(writer),
+            EitherWriter::Second(_) => EitherWriter::Second(self.or_else.make_writer()),
         }
     }
 
     #[inline]
     fn make_writer_for(&'a self, meta: &Metadata<'_>) -> Self::Writer {
         match self.inner.make_writer_for(meta) {
-            EitherWriter::A(writer) => EitherWriter::A(writer),
-            EitherWriter::B(_) => EitherWriter::B(self.or_else.make_writer_for(meta)),
+            EitherWriter::First(writer) => EitherWriter::First(writer),
+            EitherWriter::Second(_) => EitherWriter::Second(self.or_else.make_writer_for(meta)),
         }
     }
 }
 
 // === impl ArcWriter ===
 
-#[expect(
-    deprecated,
-    reason = "compatibility impl preserves the deprecated ArcWriter API surface"
-)]
 impl<W> Write for ArcWriter<W>
 where
     for<'a> &'a W: Write,
@@ -1308,29 +1234,67 @@ mod test {
     use parking_lot::Mutex;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::{format, sync::Arc};
-    use strict_test_support::{TestFailure, ensure, ensure_some};
+    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_ok, ensure_some};
     use tracing::{debug, error, info, trace, warn, Level, subscriber};
-    use tracing_core::dispatcher::{self, Dispatch};
+    use tracing_core::callsite::Callsite;
+    use tracing_core::metadata::Kind;
+    use tracing_core::subscriber::Interest;
+
+    /// Shared byte buffer used by writer tests.
+    type SharedBuffer = Arc<Mutex<Vec<u8>>>;
+
+    /// Callsite used by writer metadata fixtures.
+    struct WriterTestCallsite;
+
+    /// Shared callsite for writer metadata fixtures.
+    static WRITER_CALLSITE: WriterTestCallsite = WriterTestCallsite;
+
+    impl Callsite for WriterTestCallsite {
+        fn set_interest(&self, _: Interest) {}
+
+        fn metadata(&self) -> &Metadata<'_> {
+            static META: Metadata<'static> = tracing_core::metadata! {
+                name: "writer_test",
+                target: "writer_target",
+                level: Level::INFO,
+                fields: &[],
+                callsite: &WRITER_CALLSITE,
+                kind: Kind::EVENT,
+            };
+            &META
+        }
+    }
+
+    /// Creates a shared byte buffer paired with a [`MockMakeWriter`] that appends to it.
+    fn writer_buffer() -> (SharedBuffer, MockMakeWriter) {
+        let buf = Arc::new(Mutex::new(Vec::new()));
+        let writer = MockMakeWriter::new(Arc::clone(&buf));
+        (buf, writer)
+    }
+
+    /// Installs a time-free fmt subscriber writing through `make_writer`, returning the default guard.
+    fn install_writer<W>(make_writer: W) -> subscriber::DefaultGuard
+    where
+        W: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
+    {
+        #[cfg(feature = "ansi")]
+        let format = Format::default().without_time().with_ansi(false);
+        #[cfg(not(feature = "ansi"))]
+        let format = Format::default().without_time();
+        let subscriber = Subscriber::builder()
+            .event_format(format)
+            .with_writer(make_writer)
+            .with_max_level(Level::TRACE)
+            .finish();
+        subscriber::set_default(subscriber)
+    }
 
     fn test_writer<T>(make_writer: T, msg: &str, buf: &Mutex<Vec<u8>>) -> Result<(), TestFailure>
     where
         T: for<'writer> MakeWriter<'writer> + Send + Sync + 'static,
     {
-        let subscriber = {
-            #[cfg(feature = "ansi")]
-            let f = Format::default().without_time().with_ansi(false);
-            #[cfg(not(feature = "ansi"))]
-            let f = Format::default().without_time();
-            Subscriber::builder()
-                .event_format(f)
-                .with_writer(make_writer)
-                .finish()
-        };
-        let dispatch = Dispatch::from(subscriber);
-
-        dispatcher::with_default(&dispatch, || {
-            error!("{}", msg);
-        });
+        let _guard = install_writer(make_writer);
+        error!("{}", msg);
 
         let expected = format!("ERROR {}: {}\n", module_path!(), msg);
         let actual = String::from_utf8_lossy(&buf.lock()).into_owned();
@@ -1376,33 +1340,11 @@ mod test {
     }
 
     #[test]
-    #[allow(
-        clippy::disallowed_types,
-        reason = "this test covers the MakeWriter implementation for std::sync::Mutex<W>"
-    )]
-    fn custom_writer_mutex() -> Result<(), TestFailure> {
-        use std::sync::Mutex as StdMutex;
-
-        let buf = Arc::new(Mutex::new(Vec::new()));
-        let writer = MockWriter::new(Arc::clone(&buf));
-        let make_writer = StdMutex::new(writer);
-        let msg = "my mutex writer error";
-        test_writer(make_writer, msg, &buf)
-    }
-
-    #[test]
     fn combinators_level_filters() -> Result<(), TestFailure> {
-        let info_buf = Arc::new(Mutex::new(Vec::new()));
-        let info = MockMakeWriter::new(Arc::clone(&info_buf));
-
-        let debug_buf = Arc::new(Mutex::new(Vec::new()));
-        let debug = MockMakeWriter::new(Arc::clone(&debug_buf));
-
-        let warn_buf = Arc::new(Mutex::new(Vec::new()));
-        let warn = MockMakeWriter::new(Arc::clone(&warn_buf));
-
-        let err_buf = Arc::new(Mutex::new(Vec::new()));
-        let err = MockMakeWriter::new(Arc::clone(&err_buf));
+        let (info_buf, info) = writer_buffer();
+        let (debug_buf, debug) = writer_buffer();
+        let (warn_buf, warn) = writer_buffer();
+        let (err_buf, err) = writer_buffer();
 
         let make_writer = info
             .with_max_level(Level::INFO)
@@ -1410,19 +1352,7 @@ mod test {
             .and(warn.with_max_level(Level::WARN))
             .and(err.with_max_level(Level::ERROR));
 
-        let subscriber = {
-            #[cfg(feature = "ansi")]
-            let f = Format::default().without_time().with_ansi(false);
-            #[cfg(not(feature = "ansi"))]
-            let f = Format::default().without_time();
-            Subscriber::builder()
-                .event_format(f)
-                .with_writer(make_writer)
-                .with_max_level(Level::TRACE)
-                .finish()
-        };
-
-        let _guard = subscriber::set_default(subscriber);
+        let _guard = install_writer(make_writer);
 
         trace!("trace");
         debug!("debug");
@@ -1449,11 +1379,8 @@ mod test {
 
     #[test]
     fn combinators_or_else() -> Result<(), TestFailure> {
-        let some_buf = Arc::new(Mutex::new(Vec::new()));
-        let some = MockMakeWriter::new(Arc::clone(&some_buf));
-
-        let or_else_buf = Arc::new(Mutex::new(Vec::new()));
-        let or_else = MockMakeWriter::new(Arc::clone(&or_else_buf));
+        let (some_buf, some) = writer_buffer();
+        let (or_else_buf, or_else) = writer_buffer();
 
         let return_some = AtomicBool::new(true);
         let optional_writer = move || {
@@ -1464,19 +1391,7 @@ mod test {
             }
         };
         let make_writer = optional_writer.or_else(or_else);
-        let subscriber = {
-            #[cfg(feature = "ansi")]
-            let f = Format::default().without_time().with_ansi(false);
-            #[cfg(not(feature = "ansi"))]
-            let f = Format::default().without_time();
-            Subscriber::builder()
-                .event_format(f)
-                .with_writer(make_writer)
-                .with_max_level(Level::TRACE)
-                .finish()
-        };
-
-        let _guard = subscriber::set_default(subscriber);
+        let _guard = install_writer(make_writer);
         info!("hello");
         info!("world");
         info!("goodbye");
@@ -1490,17 +1405,10 @@ mod test {
 
     #[test]
     fn combinators_or_else_chain() -> Result<(), TestFailure> {
-        let info_buf = Arc::new(Mutex::new(Vec::new()));
-        let info = MockMakeWriter::new(Arc::clone(&info_buf));
-
-        let debug_buf = Arc::new(Mutex::new(Vec::new()));
-        let debug = MockMakeWriter::new(Arc::clone(&debug_buf));
-
-        let warn_buf = Arc::new(Mutex::new(Vec::new()));
-        let warn = MockMakeWriter::new(Arc::clone(&warn_buf));
-
-        let err_buf = Arc::new(Mutex::new(Vec::new()));
-        let err = MockMakeWriter::new(Arc::clone(&err_buf));
+        let (info_buf, info) = writer_buffer();
+        let (debug_buf, debug) = writer_buffer();
+        let (warn_buf, warn) = writer_buffer();
+        let (err_buf, err) = writer_buffer();
 
         let make_writer = err.with_max_level(Level::ERROR).or_else(
             warn.with_max_level(Level::WARN).or_else(
@@ -1509,19 +1417,7 @@ mod test {
             ),
         );
 
-        let subscriber = {
-            #[cfg(feature = "ansi")]
-            let f = Format::default().without_time().with_ansi(false);
-            #[cfg(not(feature = "ansi"))]
-            let f = Format::default().without_time();
-            Subscriber::builder()
-                .event_format(f)
-                .with_writer(make_writer)
-                .with_max_level(Level::TRACE)
-                .finish()
-        };
-
-        let _guard = subscriber::set_default(subscriber);
+        let _guard = install_writer(make_writer);
 
         trace!("trace");
         debug!("debug");
@@ -1540,32 +1436,440 @@ mod test {
 
     #[test]
     fn combinators_and() -> Result<(), TestFailure> {
-        let first_buf = Arc::new(Mutex::new(Vec::new()));
-        let first = MockMakeWriter::new(Arc::clone(&first_buf));
-
-        let second_buf = Arc::new(Mutex::new(Vec::new()));
-        let second = MockMakeWriter::new(Arc::clone(&second_buf));
+        let (first_buf, first) = writer_buffer();
+        let (second_buf, second) = writer_buffer();
 
         let lines = &[(Level::INFO, "hello"), (Level::INFO, "world")];
 
         let make_writer = first.and(second);
-        let subscriber = {
-            #[cfg(feature = "ansi")]
-            let f = Format::default().without_time().with_ansi(false);
-            #[cfg(not(feature = "ansi"))]
-            let f = Format::default().without_time();
-            Subscriber::builder()
-                .event_format(f)
-                .with_writer(make_writer)
-                .with_max_level(Level::TRACE)
-                .finish()
-        };
-
-        let _guard = subscriber::set_default(subscriber);
+        let _guard = install_writer(make_writer);
         info!("hello");
         info!("world");
 
         has_lines(&first_buf, &lines[..])?;
         has_lines(&second_buf, &lines[..])
+    }
+
+    #[test]
+    fn optional_writer_forwards_enabled_writes_and_discards_disabled_writes(
+    ) -> Result<(), TestFailure> {
+        let mut some = OptionalWriter::some(Vec::new());
+        ensure_eq(
+            &ensure_ok(some.write(b"enabled"), "enabled optional writer writes")?,
+            &7_usize,
+            "enabled optional writer reports bytes written",
+        )?;
+        ensure_ok(some.flush(), "enabled optional writer flushes")?;
+        match some {
+            EitherWriter::First(bytes) => {
+                ensure(
+                    bytes == b"enabled".to_vec(),
+                    "enabled optional writer stores bytes",
+                )
+            }
+            EitherWriter::Second(_) => ensure(false, "enabled optional writer remains enabled"),
+        }?;
+
+        let mut none = OptionalWriter::<Vec<u8>>::none();
+        ensure_eq(
+            &ensure_ok(none.write(b"disabled"), "disabled optional writer accepts writes")?,
+            &8_usize,
+            "disabled optional writer reports accepted bytes",
+        )?;
+        ensure_ok(none.flush(), "disabled optional writer flushes")
+    }
+
+    #[test]
+    fn option_converts_into_optional_writer_polarities() -> Result<(), TestFailure> {
+        let some: OptionalWriter<Vec<u8>> = Some(b"present".to_vec()).into();
+        let none: OptionalWriter<Vec<u8>> = None.into();
+
+        match some {
+            EitherWriter::First(bytes) => {
+                ensure(bytes == b"present".to_vec(), "Some converts to enabled writer")
+            }
+            EitherWriter::Second(_) => ensure(false, "Some does not convert to sink"),
+        }?;
+
+        match none {
+            EitherWriter::First(_) => ensure(false, "None does not convert to enabled writer"),
+            EitherWriter::Second(_) => Ok(()),
+        }
+    }
+
+    #[test]
+    fn level_and_filter_combinators_enable_only_matching_metadata() -> Result<(), TestFailure> {
+        static INFO_META: Metadata<'static> = tracing_core::metadata! {
+            name: "writer_info",
+            target: "writer_target",
+            level: Level::INFO,
+            fields: &[],
+            callsite: &WRITER_CALLSITE,
+            kind: Kind::EVENT,
+        };
+        static TRACE_META: Metadata<'static> = tracing_core::metadata! {
+            name: "writer_trace",
+            target: "writer_target",
+            level: Level::TRACE,
+            fields: &[],
+            callsite: &WRITER_CALLSITE,
+            kind: Kind::EVENT,
+        };
+        static ERROR_META: Metadata<'static> = tracing_core::metadata! {
+            name: "writer_error",
+            target: "writer_target",
+            level: Level::ERROR,
+            fields: &[],
+            callsite: &WRITER_CALLSITE,
+            kind: Kind::EVENT,
+        };
+        static OTHER_META: Metadata<'static> = tracing_core::metadata! {
+            name: "writer_other",
+            target: "other_target",
+            level: Level::INFO,
+            fields: &[],
+            callsite: &WRITER_CALLSITE,
+            kind: Kind::EVENT,
+        };
+
+        let (max_buf, max_writer) = writer_buffer();
+        let max = max_writer.with_max_level(Level::INFO);
+        ensure(
+            matches!(max.make_writer_for(&INFO_META), OptionalWriter::First(_)),
+            "max-level writer enables boundary level",
+        )?;
+        ensure(
+            matches!(max.make_writer_for(&TRACE_META), OptionalWriter::Second(_)),
+            "max-level writer disables more verbose level",
+        )?;
+        ensure(
+            matches!(max.make_writer(), OptionalWriter::Second(_)),
+            "max-level writer disables unclassified writes",
+        )?;
+        drop(max_buf);
+
+        let (min_buf, min_writer) = writer_buffer();
+        let min = min_writer.with_min_level(Level::WARN);
+        ensure(
+            matches!(min.make_writer_for(&TRACE_META), OptionalWriter::First(_)),
+            "min-level writer enables more verbose level",
+        )?;
+        ensure(
+            matches!(min.make_writer_for(&INFO_META), OptionalWriter::First(_)),
+            "min-level writer enables levels above the minimum verbosity",
+        )?;
+        ensure(
+            matches!(min.make_writer_for(&ERROR_META), OptionalWriter::Second(_)),
+            "min-level writer disables less verbose levels",
+        )?;
+        ensure(
+            matches!(min.make_writer(), OptionalWriter::Second(_)),
+            "min-level writer disables unclassified writes",
+        )?;
+        drop(min_buf);
+
+        let (filter_buf, filter_writer) = writer_buffer();
+        let filtered = filter_writer.with_filter(|meta| meta.target() == "writer_target");
+        ensure(
+            matches!(filtered.make_writer_for(&INFO_META), OptionalWriter::First(_)),
+            "filtered writer enables matching metadata",
+        )?;
+        ensure(
+            matches!(filtered.make_writer_for(&OTHER_META), OptionalWriter::Second(_)),
+            "filtered writer disables nonmatching metadata",
+        )?;
+        ensure(
+            matches!(filtered.make_writer(), OptionalWriter::First(_)),
+            "filtered writer enables unclassified writes",
+        )?;
+        drop(filter_buf);
+
+        Ok(())
+    }
+
+    #[test]
+    fn tee_and_or_else_forward_write_methods_to_expected_branches() -> Result<(), TestFailure> {
+        static INFO_META: Metadata<'static> = tracing_core::metadata! {
+            name: "writer_info",
+            target: "writer_target",
+            level: Level::INFO,
+            fields: &[],
+            callsite: &WRITER_CALLSITE,
+            kind: Kind::EVENT,
+        };
+        static TRACE_META: Metadata<'static> = tracing_core::metadata! {
+            name: "writer_trace",
+            target: "writer_target",
+            level: Level::TRACE,
+            fields: &[],
+            callsite: &WRITER_CALLSITE,
+            kind: Kind::EVENT,
+        };
+
+        let mut tee = Tee::new(Vec::new(), Vec::new());
+        ensure_eq(
+            &ensure_ok(tee.write(b"tee"), "tee writes bytes")?,
+            &3_usize,
+            "tee reports the larger write count",
+        )?;
+        ensure_ok(tee.write_all(b"-all"), "tee forwards write_all")?;
+        ensure_ok(write!(tee, "-fmt"), "tee forwards write_fmt")?;
+        ensure_ok(tee.flush(), "tee forwards flush")?;
+        ensure(tee.first == b"tee-all-fmt".to_vec(), "tee writes first branch")?;
+        ensure(tee.second == b"tee-all-fmt".to_vec(), "tee writes second branch")?;
+
+        let (primary_buf, primary) = writer_buffer();
+        let (fallback_buf, fallback) = writer_buffer();
+        let or_else = primary.with_max_level(Level::INFO).or_else(fallback);
+
+        let mut primary_writer = or_else.make_writer_for(&INFO_META);
+        ensure_ok(
+            primary_writer.write_all(b"primary"),
+            "or-else writes primary branch",
+        )?;
+        let mut fallback_writer = or_else.make_writer_for(&TRACE_META);
+        ensure_ok(
+            fallback_writer.write_all(b"fallback"),
+            "or-else writes fallback branch",
+        )?;
+
+        ensure_eq(
+            &String::from_utf8_lossy(&primary_buf.lock()).into_owned(),
+            &String::from("primary"),
+            "or-else uses primary writer when enabled",
+        )?;
+        ensure_eq(
+            &String::from_utf8_lossy(&fallback_buf.lock()).into_owned(),
+            &String::from("fallback"),
+            "or-else uses fallback writer when primary is disabled",
+        )
+    }
+
+    #[test]
+    fn boxed_writer_forwards_type_erased_writes() -> Result<(), TestFailure> {
+        static INFO_META: Metadata<'static> = tracing_core::metadata! {
+            name: "writer_info",
+            target: "writer_target",
+            level: Level::INFO,
+            fields: &[],
+            callsite: &WRITER_CALLSITE,
+            kind: Kind::EVENT,
+        };
+
+        let (boxed_buf, boxed_writer) = writer_buffer();
+        let boxed = BoxMakeWriter::new(boxed_writer);
+        let mut writer = boxed.make_writer();
+        ensure_ok(writer.write_all(b"boxed"), "boxed writer forwards write_all")?;
+        ensure(
+            format!("{boxed:?}").contains("BoxMakeWriter"),
+            "boxed writer debug names the type-erased wrapper",
+        )?;
+        ensure_eq(
+            &String::from_utf8_lossy(&boxed_buf.lock()).into_owned(),
+            &String::from("boxed"),
+            "boxed writer stores forwarded bytes",
+        )?;
+
+        let (for_buf, for_writer) = writer_buffer();
+        let boxed_for = BoxMakeWriter::new(for_writer);
+        let mut writer_for = boxed_for.make_writer_for(&INFO_META);
+        ensure_ok(
+            writer_for.write_all(b"for"),
+            "boxed writer forwards metadata-specific write_all",
+        )?;
+        ensure_eq(
+            &String::from_utf8_lossy(&for_buf.lock()).into_owned(),
+            &String::from("for"),
+            "boxed writer stores metadata-specific bytes",
+        )
+    }
+
+    #[test]
+    fn tee_make_writer_constructs_default_and_metadata_specific_writer_pairs(
+    ) -> Result<(), TestFailure> {
+        let (first_buf, first) = writer_buffer();
+        let (second_buf, second) = writer_buffer();
+        let tee = first.and(second);
+
+        let mut default_writer = tee.make_writer();
+        ensure_ok(
+            default_writer.write_all(b"default"),
+            "tee default writer forwards write_all",
+        )?;
+        let mut metadata_writer = tee.make_writer_for(WRITER_CALLSITE.metadata());
+        ensure_ok(
+            metadata_writer.write_all(b"-metadata"),
+            "tee metadata writer forwards write_all",
+        )?;
+
+        ensure_eq(
+            &String::from_utf8_lossy(&first_buf.lock()).into_owned(),
+            &String::from("default-metadata"),
+            "tee writes default and metadata output to first writer",
+        )?;
+        ensure_eq(
+            &String::from_utf8_lossy(&second_buf.lock()).into_owned(),
+            &String::from("default-metadata"),
+            "tee writes default and metadata output to second writer",
+        )
+    }
+
+    #[test]
+    fn or_else_default_writer_uses_fallback_when_primary_is_unclassified(
+    ) -> Result<(), TestFailure> {
+        let (primary_buf, primary) = writer_buffer();
+        let (fallback_buf, fallback) = writer_buffer();
+        let or_else = primary.with_max_level(Level::INFO).or_else(fallback);
+
+        let mut writer = or_else.make_writer();
+        ensure_ok(
+            writer.write_all(b"fallback"),
+            "or-else default writer uses fallback branch",
+        )?;
+
+        ensure(
+            primary_buf.lock().is_empty(),
+            "disabled primary receives no unclassified bytes",
+        )?;
+        ensure_eq(
+            &String::from_utf8_lossy(&fallback_buf.lock()).into_owned(),
+            &String::from("fallback"),
+            "fallback receives unclassified bytes",
+        )
+    }
+
+    #[test]
+    fn either_writer_forwards_vectored_all_fmt_and_flush_to_both_variants(
+    ) -> Result<(), TestFailure> {
+        let mut first = EitherWriter::<Vec<u8>, Vec<u8>>::First(Vec::new());
+        ensure_eq(
+            &ensure_ok(
+                first.write_vectored(&[io::IoSlice::new(b"a"), io::IoSlice::new(b"b")]),
+                "first either writer forwards vectored writes",
+            )?,
+            &2_usize,
+            "first either writer reports vectored byte count",
+        )?;
+        ensure_ok(first.write_all(b"-all"), "first either writer forwards write_all")?;
+        ensure_ok(write!(first, "-fmt"), "first either writer forwards write_fmt")?;
+        ensure_ok(first.flush(), "first either writer flushes")?;
+        match first {
+            EitherWriter::First(bytes) => ensure(
+                bytes == b"ab-all-fmt".to_vec(),
+                "first either writer stores branch A bytes",
+            ),
+            EitherWriter::Second(_) => ensure(false, "first either writer remains branch A"),
+        }?;
+
+        let mut second = EitherWriter::<Vec<u8>, Vec<u8>>::Second(Vec::new());
+        ensure_eq(
+            &ensure_ok(
+                second.write_vectored(&[io::IoSlice::new(b"c"), io::IoSlice::new(b"d")]),
+                "second either writer forwards vectored writes",
+            )?,
+            &2_usize,
+            "second either writer reports vectored byte count",
+        )?;
+        ensure_ok(second.write_all(b"-all"), "second either writer forwards write_all")?;
+        ensure_ok(write!(second, "-fmt"), "second either writer forwards write_fmt")?;
+        ensure_ok(second.flush(), "second either writer flushes")?;
+        match second {
+            EitherWriter::First(_) => ensure(false, "second either writer remains branch B"),
+            EitherWriter::Second(bytes) => ensure(
+                bytes == b"cd-all-fmt".to_vec(),
+                "second either writer stores branch B bytes",
+            ),
+        }
+    }
+
+    #[test]
+    fn arc_make_writer_borrows_shared_writer_without_losing_state() -> Result<(), TestFailure> {
+        #[derive(Default)]
+        struct SharedWrite {
+            bytes: Mutex<Vec<u8>>,
+        }
+
+        impl Write for &SharedWrite {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                self.bytes.lock().write(buf)
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                self.bytes.lock().flush()
+            }
+
+            fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+                self.bytes.lock().write_vectored(bufs)
+            }
+
+            fn write_all(&mut self, buf: &[u8]) -> io::Result<()> {
+                self.bytes.lock().write_all(buf)
+            }
+
+            fn write_fmt(&mut self, args: fmt::Arguments<'_>) -> io::Result<()> {
+                self.bytes.lock().write_fmt(args)
+            }
+        }
+
+        let shared = Arc::new(SharedWrite::default());
+        let mut writer = shared.make_writer();
+        ensure_ok(writer.write_all(b"arc"), "arc writer forwards write_all")?;
+        ensure_eq(
+            &ensure_ok(
+                writer.write_vectored(&[io::IoSlice::new(b"-vec"), io::IoSlice::new(b"-tail")]),
+                "arc writer forwards vectored writes",
+            )?,
+            &9_usize,
+            "arc writer reports all vectored bytes",
+        )?;
+        ensure_ok(write!(writer, "-fmt"), "arc writer forwards write_fmt")?;
+        ensure_ok(writer.flush(), "arc writer flushes")?;
+
+        ensure_eq(
+            &String::from_utf8_lossy(&shared.bytes.lock()).into_owned(),
+            &String::from("arc-vec-tail-fmt"),
+            "arc writer preserves shared state across borrowed writer",
+        )
+    }
+
+    #[cfg(any(feature = "json", feature = "time"))]
+    #[test]
+    fn write_adaptor_forwards_utf8_and_reports_formatter_errors() -> Result<(), TestFailure> {
+        struct FailingFmt;
+
+        impl fmt::Write for FailingFmt {
+            fn write_str(&mut self, _s: &str) -> fmt::Result {
+                Err(fmt::Error)
+            }
+        }
+
+        let mut output = String::new();
+        {
+            let mut adaptor = WriteAdaptor::new(&mut output);
+            ensure_eq(
+                &ensure_ok(adaptor.write(b"utf8"), "write adaptor forwards utf8")?,
+                &4_usize,
+                "write adaptor reports UTF-8 byte count",
+            )?;
+            ensure_ok(adaptor.flush(), "write adaptor flushes")?;
+            ensure(
+                format!("{adaptor:?}").contains("WriteAdaptor"),
+                "write adaptor debug identifies the adapter",
+            )?;
+        };
+        ensure_eq(&output, &String::from("utf8"), "write adaptor appends text")?;
+
+        let mut invalid_adaptor = WriteAdaptor::new(&mut output);
+        ensure(
+            invalid_adaptor.write(&[0xff]).is_err(),
+            "write adaptor rejects invalid UTF-8 bytes",
+        )?;
+
+        let mut failing = FailingFmt;
+        let mut failing_adaptor = WriteAdaptor::new(&mut failing);
+        ensure(
+            failing_adaptor.write(b"text").is_err(),
+            "write adaptor maps fmt errors to io errors",
+        )
     }
 }

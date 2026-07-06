@@ -933,7 +933,7 @@
   html_favicon_url = "https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/favicon.ico",
   issue_tracker_base_url = "https://github.com/strict-rs/strict-tracing/issues/"
 )]
-#[cfg(feature = "std")]
+#[cfg(any(feature = "std", test))]
 extern crate std;
 
 #[cfg(feature = "attributes")]
@@ -943,11 +943,9 @@ pub use tracing_attributes::instrument;
 pub use tracing_core::Level;
 pub use tracing_core::Metadata;
 #[doc(hidden)]
-pub use tracing_core::callsite::Callsite;
+pub use tracing_core::callsite;
 #[doc(hidden)]
-pub use tracing_core::callsite::{
-  self,
-};
+pub use tracing_core::callsite::Callsite;
 pub use tracing_core::event;
 #[doc(hidden)]
 pub use tracing_core::metadata;
@@ -1030,6 +1028,13 @@ pub mod __macro_support {
     interest.is_always() || get_default(|default| default.enabled(meta).unwrap_or_default())
   }
 
+  /// Constructs a disabled macro span that retains callsite metadata.
+  ///
+  /// The returned span is used for statically or dynamically disabled callsites and retains
+  /// `meta` in every feature configuration, so disabled macro spans keep their callsite identity
+  /// for `Span`'s `PartialEq`/`Hash` contract and can still feed `log` records when that feature is
+  /// enabled.
+  ///
   /// /!\ WARNING: This is *not* a stable API! /!\
   ///
   /// This function, and all code contained in the `__macro_support` module, is
@@ -1038,24 +1043,9 @@ pub mod __macro_support {
   /// Breaking changes to this module may occur in small-numbered versions
   /// without warning.
   #[inline]
-  #[cfg(feature = "log")]
   #[must_use]
   pub const fn __disabled_span(meta: &'static Metadata<'static>) -> Span {
     Span::new_disabled(meta)
-  }
-
-  /// /!\ WARNING: This is *not* a stable API! /!\
-  ///
-  /// This function, and all code contained in the `__macro_support` module, is
-  /// a *private* API of `tracing`. It is exposed publicly because it is used
-  /// by the `tracing` macros, but it is not part of the stable versioned API.
-  /// Breaking changes to this module may occur in small-numbered versions
-  /// without warning.
-  #[inline]
-  #[cfg(not(feature = "log"))]
-  #[must_use]
-  pub const fn __disabled_span(_: &'static Metadata<'static>) -> Span {
-    Span::none()
   }
 
   /// /!\ WARNING: This is *not* a stable API! /!\
@@ -1081,6 +1071,36 @@ pub mod __macro_support {
     );
   }
 
+  /// Splits the next identifier byte off `input`, skipping any leading `r#`
+  /// raw-identifier markers.
+  ///
+  /// Returns `None` when `input` holds nothing but raw-identifier markers.
+  const fn next_ident_byte(mut input: &[u8]) -> Option<(u8, &[u8])> {
+    while let &[b'r', b'#', ref after_marker @ ..] = input {
+      input = after_marker;
+    }
+    match *input {
+      [first, ref rest @ ..] => Some((first, rest)),
+      [] => None,
+    }
+  }
+
+  /// Writes `byte` into the first slot of `output`, returning the remaining
+  /// slots, or `None` when `output` is already full.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "naming the buffer-write step keeps `FieldName::new` under the nesting ceiling and isolates the truncation decision"
+  )]
+  const fn write_byte(output: &mut [u8], byte: u8) -> Option<&mut [u8]> {
+    match *output {
+      [ref mut slot, ref mut rest @ ..] => {
+        *slot = byte;
+        Some(rest)
+      }
+      [] => None,
+    }
+  }
+
   /// Implementation detail used for constructing `FieldSet` names from raw
   /// identifiers. In `info!(..., r#type = "...")` the macro would end up
   /// constructing a name equivalent to `FieldName(*b"type")`.
@@ -1094,20 +1114,12 @@ pub mod __macro_support {
       let mut output = [0_u8; N];
       let mut output_remaining: &mut [u8] = &mut output;
 
-      while let &[first, ref rest @ ..] = input_remaining {
-        if let &[b'r', b'#', ref after_marker @ ..] = input_remaining {
-          input_remaining = after_marker;
-          continue;
-        }
-
+      while let Some((first, rest)) = next_ident_byte(input_remaining) {
         input_remaining = rest;
-        match *output_remaining {
-          [ref mut slot, ref mut output_rest @ ..] => {
-            *slot = first;
-            output_remaining = output_rest;
-          }
-          [] => return Self(output),
-        }
+        output_remaining = match write_byte(output_remaining, first) {
+          Some(remaining) => remaining,
+          None => return Self(output),
+        };
       }
 
       if output_remaining.is_empty() {
@@ -1133,16 +1145,12 @@ pub mod __macro_support {
       let mut input_remaining = input.as_bytes();
       let mut len = 0_usize;
 
-      while let &[_, ref rest @ ..] = input_remaining {
-        if let &[b'r', b'#', ref after_marker @ ..] = input_remaining {
-          input_remaining = after_marker;
-        } else {
-          input_remaining = rest;
-          len = match len.checked_add(1) {
-            Some(next) => next,
-            None => return 0,
-          };
-        }
+      while let Some((_, rest)) = next_ident_byte(input_remaining) {
+        input_remaining = rest;
+        len = match len.checked_add(1) {
+          Some(next) => next,
+          None => return 0,
+        };
       }
 
       len
@@ -1165,6 +1173,105 @@ pub mod __macro_support {
       kind: Kind::SPAN,
   };
   pub static FAKE_FIELD: Field = META.private_fake_field();
+
+  #[cfg(test)]
+  mod tests {
+    use strict_test_support::TestFailure;
+    use strict_test_support::ensure;
+    use strict_test_support::ensure_eq;
+    use strict_test_support::ensure_some;
+
+    use super::__disabled_span;
+    use super::FAKE_FIELD;
+    use super::FieldName;
+    use super::META;
+    use super::next_ident_byte;
+    use super::write_byte;
+
+    #[test]
+    fn disabled_macro_span_retains_metadata_and_is_not_null() -> Result<(), TestFailure> {
+      let span = __disabled_span(&META);
+      let second_span = __disabled_span(&META);
+      let metadata = ensure_some(span.metadata(), "disabled macro span keeps metadata")?;
+
+      ensure_eq(&metadata.name(), &META.name(), "disabled span metadata name is preserved")?;
+      ensure(span == second_span, "disabled macro spans from the same callsite compare equal")?;
+      ensure(span != crate::Span::none(), "disabled macro span is distinct from the null span")?;
+      ensure(!span.is_none(), "disabled macro span does not report as the null span")
+    }
+
+    #[test]
+    fn field_name_len_and_new_strip_raw_identifier_markers() -> Result<(), TestFailure> {
+      ensure_eq(
+        &FieldName::<0>::len("span.r#type.r#async"),
+        &15_usize,
+        "raw identifier markers do not contribute to field name length",
+      )?;
+      ensure_eq(&FieldName::<0>::len("plain"), &5_usize, "plain field name length is unchanged")?;
+
+      let field_name = FieldName::<15>::new("span.r#type.r#async");
+      ensure_eq(
+        &field_name.as_str(),
+        &"span.type.async",
+        "raw identifier markers are stripped from field names",
+      )?;
+      ensure(
+        std::format!("{field_name:?}") == "FieldName(\"span.type.async\")",
+        "field name debug output renders the normalized name",
+      )
+    }
+
+    #[test]
+    fn field_name_new_truncates_full_buffers_and_zeroes_oversized_buffers() -> Result<(), TestFailure> {
+      let truncated = FieldName::<4>::new("abcdef");
+      ensure_eq(&truncated.as_str(), &"abcd", "short buffers keep the leading normalized bytes")?;
+
+      let zeroed = FieldName::<6>::new("abc");
+      let expected_bytes = [0_u8; 6];
+      ensure(
+        zeroed.as_str().as_bytes() == expected_bytes.as_slice(),
+        "oversized field-name buffers are zero-filled rather than partially initialized",
+      )
+    }
+
+    #[test]
+    fn field_name_as_str_returns_empty_for_invalid_utf8() -> Result<(), TestFailure> {
+      let invalid = FieldName::<3>([b'a', 0xff, b'c']);
+      ensure_eq(&invalid.as_str(), &"", "invalid utf8 field name buffers render as empty strings")
+    }
+
+    #[test]
+    fn identifier_byte_helpers_skip_raw_markers_and_report_full_buffers() -> Result<(), TestFailure> {
+      let (first, identifier_rest) = ensure_some(next_ident_byte(b"r#r#type"), "identifier byte helper skips repeated raw markers")?;
+      ensure_eq(&first, &b't', "first normalized identifier byte is returned")?;
+      ensure(identifier_rest == b"ype", "remaining input follows the normalized byte")?;
+      ensure(
+        next_ident_byte(b"r#r#").is_none(),
+        "identifier byte helper returns none for marker-only input",
+      )?;
+
+      let mut output = [0_u8; 2];
+      let full_buffer_rejected = {
+        let output_rest = ensure_some(write_byte(&mut output, b'a'), "first byte writes into buffer")?;
+        let empty = ensure_some(write_byte(output_rest, b'b'), "second byte fills the buffer")?;
+        ensure(empty.is_empty(), "second write leaves no remaining output slots")?;
+        write_byte(empty, b'c').is_none()
+      };
+
+      ensure(full_buffer_rejected, "full buffers reject additional bytes")?;
+      ensure(output == *b"ab", "write helper stores bytes in order")
+    }
+
+    #[test]
+    fn fake_field_uses_callsite_but_is_not_a_real_field() -> Result<(), TestFailure> {
+      ensure(FAKE_FIELD.callsite() == META.callsite(), "fake field points at the fake callsite")?;
+      ensure_eq(&FAKE_FIELD.index(), &usize::MAX, "fake field uses the sentinel index")?;
+      ensure(
+        !META.fields().contains(&FAKE_FIELD),
+        "fake field is not contained in the metadata field set",
+      )
+    }
+  }
 }
 
 #[cfg(feature = "log")]
@@ -1187,47 +1294,6 @@ pub mod log {
   impl fmt::Display for LogValueSet<'_> {
     #[inline]
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-      struct LogVisitor<'a, 'b> {
-        f:        &'a mut fmt::Formatter<'b>,
-        is_first: bool,
-        result:   fmt::Result,
-      }
-
-      impl Visit for LogVisitor<'_, '_> {
-        fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-          let res = if self.is_first {
-            self.is_first = false;
-            if field.name() == "message" {
-              fmt::Debug::fmt(value, self.f)
-            } else {
-              self
-                .f
-                .write_str(field.name())
-                .and_then(|()| self.f.write_str("="))
-                .and_then(|()| fmt::Debug::fmt(value, self.f))
-            }
-          } else {
-            self
-              .f
-              .write_str(" ")
-              .and_then(|()| self.f.write_str(field.name()))
-              .and_then(|()| self.f.write_str("="))
-              .and_then(|()| fmt::Debug::fmt(value, self.f))
-          };
-          if let Err(err) = res {
-            self.result = self.result.and(Err(err));
-          }
-        }
-
-        fn record_str(&mut self, field: &Field, value: &str) {
-          if field.name() == "message" {
-            self.record_debug(field, &format_args!("{value}"));
-          } else {
-            self.record_debug(field, &value);
-          }
-        }
-      }
-
       let mut visit = LogVisitor {
         f,
         is_first: self.is_first,
@@ -1235,6 +1301,156 @@ pub mod log {
       };
       self.values.record(&mut visit);
       visit.result
+    }
+  }
+
+  /// [`Visit`] implementation rendering recorded fields as `name=value` pairs
+  /// into a formatter on behalf of [`LogValueSet`].
+  struct LogVisitor<'a, 'b> {
+    /// Destination formatter receiving the rendered fields.
+    f:        &'a mut fmt::Formatter<'b>,
+    /// Whether the next recorded field is the first one written.
+    is_first: bool,
+    /// The first formatter error encountered while rendering, if any.
+    result:   fmt::Result,
+  }
+
+  impl Visit for LogVisitor<'_, '_> {
+    fn record_debug(&mut self, field: &Field, field_value: &dyn fmt::Debug) {
+      let leading = self.is_first;
+      self.is_first = false;
+      let written = if leading && field.name() == "message" {
+        fmt::Debug::fmt(field_value, self.f)
+      } else if leading {
+        self
+          .f
+          .write_str(field.name())
+          .and_then(|()| self.f.write_str("="))
+          .and_then(|()| fmt::Debug::fmt(field_value, self.f))
+      } else {
+        self
+          .f
+          .write_str(" ")
+          .and_then(|()| self.f.write_str(field.name()))
+          .and_then(|()| self.f.write_str("="))
+          .and_then(|()| fmt::Debug::fmt(field_value, self.f))
+      };
+      if let Err(err) = written {
+        self.result = self.result.and(Err(err));
+      }
+    }
+
+    fn record_str(&mut self, field: &Field, field_value: &str) {
+      if field.name() == "message" {
+        self.record_debug(field, &format_args!("{field_value}"));
+      } else {
+        self.record_debug(field, &field_value);
+      }
+    }
+  }
+
+  #[cfg(test)]
+  mod tests {
+    use strict_test_support::TestFailure;
+    use strict_test_support::ensure_eq;
+    use strict_test_support::ensure_some;
+    use tracing_core::field::Field;
+    use tracing_core::field::Value;
+
+    use super::LogValueSet;
+    use crate::__macro_support::MacroCallsite;
+    use crate::Metadata;
+    use crate::metadata::Kind;
+
+    static LOG_CALLSITE: MacroCallsite = MacroCallsite::new(&LOG_META);
+    static LOG_META: Metadata<'static> = crate::metadata! {
+        name: "log_value_set",
+        target: module_path!(),
+        level: crate::Level::INFO,
+        fields: &["message", "answer", "label"],
+        callsite: &LOG_CALLSITE,
+        kind: Kind::EVENT,
+    };
+
+    fn log_fields() -> Result<(Field, Field, Field), TestFailure> {
+      let fields = LOG_META.fields();
+      let message = ensure_some(fields.field("message"), "message field exists")?;
+      let answer = ensure_some(fields.field("answer"), "answer field exists")?;
+      let label = ensure_some(fields.field("label"), "label field exists")?;
+
+      Ok((message, answer, label))
+    }
+
+    #[test]
+    fn log_value_set_formats_initial_message_without_field_name() -> Result<(), TestFailure> {
+      let fields = LOG_META.fields();
+      let (message, answer, label) = log_fields()?;
+      let message_value = "ready";
+      let answer_value = 7_i64;
+      let label_value = "tag";
+      let message_field_value: &dyn Value = &message_value;
+      let answer_field_value: &dyn Value = &answer_value;
+      let label_field_value: &dyn Value = &label_value;
+      let values = [
+        (&message, Some(message_field_value)),
+        (&answer, Some(answer_field_value)),
+        (&label, Some(label_field_value)),
+      ];
+      let value_set = fields.value_set(&values);
+      let rendered = std::format!("{}", LogValueSet {
+        values:   &value_set,
+        is_first: true,
+      });
+
+      ensure_eq(
+        &rendered.as_str(),
+        &"ready answer=7 label=\"tag\"",
+        "initial message field renders as log text followed by key-values",
+      )
+    }
+
+    #[test]
+    fn log_value_set_formats_initial_non_message_with_field_name() -> Result<(), TestFailure> {
+      let fields = LOG_META.fields();
+      let (_message, answer, label) = log_fields()?;
+      let answer_value = 7_i64;
+      let label_value = "tag";
+      let answer_field_value: &dyn Value = &answer_value;
+      let label_field_value: &dyn Value = &label_value;
+      let values = [(&label, Some(label_field_value)), (&answer, Some(answer_field_value))];
+      let value_set = fields.value_set(&values);
+      let rendered = std::format!("{}", LogValueSet {
+        values:   &value_set,
+        is_first: true,
+      });
+
+      ensure_eq(
+        &rendered.as_str(),
+        &"label=\"tag\" answer=7",
+        "initial non-message field renders with its field name",
+      )
+    }
+
+    #[test]
+    fn log_value_set_formats_non_initial_message_as_key_value() -> Result<(), TestFailure> {
+      let fields = LOG_META.fields();
+      let (message, answer, _label) = log_fields()?;
+      let message_value = "ready";
+      let answer_value = 7_i64;
+      let message_field_value: &dyn Value = &message_value;
+      let answer_field_value: &dyn Value = &answer_value;
+      let values = [(&message, Some(message_field_value)), (&answer, Some(answer_field_value))];
+      let value_set = fields.value_set(&values);
+      let rendered = std::format!("{}", LogValueSet {
+        values:   &value_set,
+        is_first: false,
+      });
+
+      ensure_eq(
+        &rendered.as_str(),
+        &" message=ready answer=7",
+        "non-initial message field renders as a key-value continuation",
+      )
     }
   }
 }

@@ -7,9 +7,6 @@ mod tests {
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use tracing::Level;
-  use tracing::{
-    self,
-  };
   use tracing_mock::expect;
   use tracing_mock::subscriber;
   use tracing_subscriber::filter::LevelFilter;

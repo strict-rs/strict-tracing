@@ -13,9 +13,7 @@ mod tests {
   use tracing_mock::expect;
   use tracing_mock::layer;
   use tracing_mock::layer::MockLayer;
-  use tracing_mock::subscriber::{
-    self,
-  };
+  use tracing_mock::subscriber;
   use tracing_subscriber::filter::DynFilterFn;
   use tracing_subscriber::layer::Context;
   use tracing_subscriber::prelude::*;

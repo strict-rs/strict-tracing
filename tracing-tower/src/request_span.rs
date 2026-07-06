@@ -1,9 +1,11 @@
 //! Middleware which instruments each request passing through a service with a new span.
 use std::marker::PhantomData;
+#[cfg(feature = "tower-make")]
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 
+#[cfg(feature = "tower-make")]
 use futures::future::Future;
 use tracing::Instrument as _;
 use tracing::instrument::Instrumented;
@@ -115,6 +117,10 @@ pub mod make {
     _p:       PhantomData<fn(R)>,
   }
 
+  /// Marker for make-service target and request types.
+  #[cfg(feature = "tower-layer")]
+  type MakeLayerMarker<T, R> = PhantomData<fn(T, R)>;
+
   #[cfg(feature = "tower-layer")]
   #[cfg_attr(docsrs, doc(cfg(feature = "tower-layer")))]
   #[derive(Debug)]
@@ -126,7 +132,7 @@ pub mod make {
     /// Function or span cloned into each produced request-instrumenting service.
     get_span: G,
     /// Preserve the target and request type parameters without storing either value.
-    _p:       PhantomData<fn(T, R)>,
+    _p:       MakeLayerMarker<T, R>,
   }
 
   pin_project! {

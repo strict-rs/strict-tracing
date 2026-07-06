@@ -27,6 +27,10 @@ rust-version.workspace = true
 [features]
 default = ["std", "valuable?/std"]
 std = ["dep:parking_lot"]
+# Off-by-default subscriber fixtures (the `test_util` module) for exercising the
+# crate in tests; requires `std` for thread parking and shared state. Enable only
+# from dev-dependencies.
+test-util = ["std"]
 # used to be an implicit feature from an optional dependency
 # FIXME: remove with the next breaking-change release
 once_cell = []
@@ -40,6 +44,9 @@ spin = { workspace = true }
 
 [dev-dependencies]
 strict-test-support = { workspace = true }
+# Self dev-dependency: enables the `test-util` feature for this crate's own
+# integration tests and doctests without turning it on for downstream builds.
+tracing-core = { workspace = true, features = ["test-util"] }
 
 [target.'cfg(tracing_unstable)'.dependencies]
 valuable = { workspace = true, optional = true }
@@ -51,6 +58,13 @@ rustdoc-args = ["--cfg", "docsrs", "--cfg", "tracing_unstable"]
 # it's necessary to _also_ pass `--cfg tracing_unstable` to rustc, or else
 # dependencies will not be enabled, and the docs build will fail.
 rustc-args = ["--cfg", "tracing_unstable"]
+
+# cargo-udeps runs with default features, where `std` is enabled; every `spin::`
+# use in this crate is gated `#[cfg(not(feature = "std"))]` (the no-std path:
+# `sync.rs` Mutex/MutexGuard, `lib.rs` Once, `dispatcher.rs` GLOBAL_DISPATCH),
+# so that run never compiles the spin code and reports `spin` as unused.
+[package.metadata.cargo-udeps.ignore]
+normal = ["spin"]
 
 [lints]
 workspace = true

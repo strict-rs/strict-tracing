@@ -93,12 +93,10 @@ use std::fmt;
 
 use tracing::callsite;
 use tracing::callsite::Callsite as _;
+use tracing::field;
 use tracing::field::Field;
 use tracing::field::Value;
 use tracing::field::Visit;
-use tracing::field::{
-  self,
-};
 use tracing::metadata::Kind;
 
 use crate::failure::ExpectationError;
@@ -224,9 +222,9 @@ impl ExpectedField {
   /// # }
   /// ```
   #[must_use]
-  pub fn with_value(self, value: &dyn Value) -> Self {
+  pub fn with_value(self, field_value: &dyn Value) -> Self {
     Self {
-      value: ExpectedValue::try_from_value(value).unwrap_or_else(|error| ExpectedValue::Invalid(error.to_string())),
+      value: ExpectedValue::try_from_value(field_value).unwrap_or_else(|error| ExpectedValue::Invalid(error.to_string())),
       ..self
     }
   }
@@ -513,8 +511,8 @@ impl ExpectedFields {
   }
 
   /// Compares an observed field value against the matching expectation.
-  fn compare(&mut self, name: &str, value: &dyn Value, ctx: &str, subscriber_name: &str) -> ExpectationResult {
-    let actual_value = ExpectedValue::try_from_value(value)?;
+  fn compare(&mut self, name: &str, field_value: &dyn Value, ctx: &str, subscriber_name: &str) -> ExpectationResult {
+    let actual_value = ExpectedValue::try_from_value(field_value)?;
     match self.fields.remove(name) {
       Some(ExpectedValue::Any) => {}
       Some(expected) => {
@@ -553,12 +551,12 @@ impl ExpectedFields {
 impl fmt::Display for ExpectedValue {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
     match *self {
-      Self::F64(value) => write!(f, "f64 = {value}"),
-      Self::I64(value) => write!(f, "i64 = {value}"),
-      Self::U64(value) => write!(f, "u64 = {value}"),
-      Self::Bool(value) => write!(f, "bool = {value}"),
-      Self::Str(ref value) => write!(f, "&str = \"{value}\""),
-      Self::Debug(ref value) => write!(f, "&fmt::Debug = \"{value}\""),
+      Self::F64(field_value) => write!(f, "f64 = {field_value}"),
+      Self::I64(field_value) => write!(f, "i64 = {field_value}"),
+      Self::U64(field_value) => write!(f, "u64 = {field_value}"),
+      Self::Bool(field_value) => write!(f, "bool = {field_value}"),
+      Self::Str(ref field_value) => write!(f, "&str = \"{field_value}\""),
+      Self::Debug(ref field_value) => write!(f, "&fmt::Debug = \"{field_value}\""),
       Self::Any => write!(f, "_ = _"),
       Self::Invalid(ref error) => write!(f, "<invalid expected value: {error}>"),
     }
@@ -578,28 +576,28 @@ pub(crate) struct CheckVisitor<'a> {
 }
 
 impl Visit for CheckVisitor<'_> {
-  fn record_f64(&mut self, field: &Field, value: f64) {
-    self.compare_field(field.name(), &value);
+  fn record_f64(&mut self, field: &Field, field_value: f64) {
+    self.compare_field(field.name(), &field_value);
   }
 
-  fn record_i64(&mut self, field: &Field, value: i64) {
-    self.compare_field(field.name(), &value);
+  fn record_i64(&mut self, field: &Field, field_value: i64) {
+    self.compare_field(field.name(), &field_value);
   }
 
-  fn record_u64(&mut self, field: &Field, value: u64) {
-    self.compare_field(field.name(), &value);
+  fn record_u64(&mut self, field: &Field, field_value: u64) {
+    self.compare_field(field.name(), &field_value);
   }
 
-  fn record_bool(&mut self, field: &Field, value: bool) {
-    self.compare_field(field.name(), &value);
+  fn record_bool(&mut self, field: &Field, field_value: bool) {
+    self.compare_field(field.name(), &field_value);
   }
 
-  fn record_str(&mut self, field: &Field, value: &str) {
-    self.compare_field(field.name(), &value);
+  fn record_str(&mut self, field: &Field, field_value: &str) {
+    self.compare_field(field.name(), &field_value);
   }
 
-  fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-    self.compare_field(field.name(), &field::debug(value));
+  fn record_debug(&mut self, field: &Field, field_value: &dyn fmt::Debug) {
+    self.compare_field(field.name(), &field::debug(field_value));
   }
 }
 
@@ -614,11 +612,11 @@ impl fmt::Display for RenderDebug<'_> {
 
 impl CheckVisitor<'_> {
   /// Compares a visited field unless an earlier field mismatch was recorded.
-  fn compare_field(&mut self, name: &str, value: &dyn Value) {
+  fn compare_field(&mut self, name: &str, field_value: &dyn Value) {
     if self.error.is_some() {
       return;
     }
-    let result = self.expect.compare(name, value, self.ctx, self.subscriber_name);
+    let result = self.expect.compare(name, field_value, self.ctx, self.subscriber_name);
     self.record_result(result);
   }
 
@@ -648,34 +646,34 @@ impl CheckVisitor<'_> {
 
 impl ExpectedValue {
   /// Converts a tracing field value into a comparable expectation value.
-  fn try_from_value(value: &dyn Value) -> ExpectationResult<Self> {
+  fn try_from_value(field_value: &dyn Value) -> ExpectationResult<Self> {
     struct MockValueBuilder {
       value: Option<ExpectedValue>,
     }
 
     impl Visit for MockValueBuilder {
-      fn record_f64(&mut self, _: &Field, value: f64) {
-        self.value = Some(ExpectedValue::F64(value));
+      fn record_f64(&mut self, _: &Field, field_value: f64) {
+        self.value = Some(ExpectedValue::F64(field_value));
       }
 
-      fn record_i64(&mut self, _: &Field, value: i64) {
-        self.value = Some(ExpectedValue::I64(value));
+      fn record_i64(&mut self, _: &Field, field_value: i64) {
+        self.value = Some(ExpectedValue::I64(field_value));
       }
 
-      fn record_u64(&mut self, _: &Field, value: u64) {
-        self.value = Some(ExpectedValue::U64(value));
+      fn record_u64(&mut self, _: &Field, field_value: u64) {
+        self.value = Some(ExpectedValue::U64(field_value));
       }
 
-      fn record_bool(&mut self, _: &Field, value: bool) {
-        self.value = Some(ExpectedValue::Bool(value));
+      fn record_bool(&mut self, _: &Field, field_value: bool) {
+        self.value = Some(ExpectedValue::Bool(field_value));
       }
 
-      fn record_str(&mut self, _: &Field, value: &str) {
-        self.value = Some(ExpectedValue::Str(value.to_owned()));
+      fn record_str(&mut self, _: &Field, field_value: &str) {
+        self.value = Some(ExpectedValue::Str(field_value.to_owned()));
       }
 
-      fn record_debug(&mut self, _: &Field, value: &dyn fmt::Debug) {
-        self.value = Some(ExpectedValue::Debug(RenderDebug(value).to_string()));
+      fn record_debug(&mut self, _: &Field, field_value: &dyn fmt::Debug) {
+        self.value = Some(ExpectedValue::Debug(RenderDebug(field_value).to_string()));
       }
     }
 
@@ -691,7 +689,7 @@ impl ExpectedValue {
     let mut builder = MockValueBuilder {
       value: None
     };
-    value.record(&fake_field, &mut builder);
+    field_value.record(&fake_field, &mut builder);
     builder
       .value
       .ok_or_else(|| ExpectationError::from_args(format_args!("tracing-mock value conversion finished before a value was recorded")))
@@ -704,7 +702,66 @@ impl fmt::Display for ExpectedFields {
     let entries = self
       .fields
       .iter()
-      .map(|(name, value)| (field::display(name), field::display(value)));
+      .map(|(name, field_value)| (field::display(name), field::display(field_value)));
     f.debug_map().entries(entries).finish()
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_ok;
+  use tracing::subscriber::with_default;
+
+  use crate::expect;
+  use crate::subscriber;
+
+  #[test]
+  fn expected_fields_accept_matching_values_and_extra_fields_by_default() -> Result<(), TestFailure> {
+    let event = expect::event().with_fields(expect::field("answer").with_value(&42_i64));
+    let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
+
+    with_default(subscriber, || {
+      tracing::info!(answer = 42_i64, extra = true);
+    });
+
+    ensure_ok(handle.finished(), "matching expected field accepts extra fields by default")
+  }
+
+  #[test]
+  fn expected_fields_reject_missing_fields() -> Result<(), TestFailure> {
+    let event = expect::event().with_fields(expect::field("answer").with_value(&42_i64));
+    let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
+
+    with_default(subscriber, || {
+      tracing::info!(other = 42_i64);
+    });
+
+    ensure(handle.finished().is_err(), "missing expected field is rejected")
+  }
+
+  #[test]
+  fn expected_fields_reject_wrong_values() -> Result<(), TestFailure> {
+    let event = expect::event().with_fields(expect::field("answer").with_value(&42_i64));
+    let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
+
+    with_default(subscriber, || {
+      tracing::info!(answer = 7_i64);
+    });
+
+    ensure(handle.finished().is_err(), "wrong expected field value is rejected")
+  }
+
+  #[test]
+  fn expected_fields_only_rejects_extra_fields() -> Result<(), TestFailure> {
+    let event = expect::event().with_fields(expect::field("answer").with_value(&42_i64).only());
+    let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
+
+    with_default(subscriber, || {
+      tracing::info!(answer = 42_i64, extra = true);
+    });
+
+    ensure(handle.finished().is_err(), "only rejects extra observed fields")
   }
 }

@@ -88,6 +88,29 @@ pub struct Metadata<'a> {
   kind: Kind,
 }
 
+/// Source code location where a span or event's callsite originated.
+///
+/// A `SourceLocation` groups the optional [module path], [file name], and [line number] describing
+/// a callsite so they can be passed to [`Metadata::new`] as a single argument. Every component is
+/// optional: [`SourceLocation::empty`] returns a location with all components unset, and the named
+/// `with_*` setters return an updated copy of the location with a single component replaced.
+///
+/// [module path]: Metadata::module_path
+/// [file name]: Metadata::file
+/// [line number]: Metadata::line
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct SourceLocation<'a> {
+  /// The path to the Rust module where the callsite occurred, or `None` if
+  /// the module path is unknown.
+  module_path: Option<&'a str>,
+  /// The name of the source code file where the callsite occurred, or `None`
+  /// if the file is unknown.
+  file:        Option<&'a str>,
+  /// The line number in the source code file where the callsite occurred, or
+  /// `None` if the line number is unknown.
+  line:        Option<u32>,
+}
+
 /// Indicates whether the callsite is a span or event.
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub struct Kind(u8);
@@ -275,11 +298,85 @@ pub struct ParseLevelFilterError(());
 /// Most verbose level currently enabled by registered dispatchers.
 static MAX_LEVEL: AtomicUsize = AtomicUsize::new(LevelFilter::OFF_USIZE);
 
+// ===== impl SourceLocation =====
+
+impl<'a> SourceLocation<'a> {
+  /// Returns a `SourceLocation` with no module path, file, or line recorded.
+  ///
+  /// Use the named `with_*` setters to populate individual components.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "public constructor invoked by the metadata! macro expansion and downstream callsites rather than in-crate call sites"
+  )]
+  #[must_use]
+  pub const fn empty() -> Self {
+    Self {
+      module_path: None,
+      file:        None,
+      line:        None,
+    }
+  }
+
+  /// Returns an updated copy of this location with the module path replaced
+  /// by `module_path`.
+  #[must_use]
+  pub const fn with_module_path(self, module_path: Option<&'a str>) -> Self {
+    Self {
+      module_path,
+      file: self.file,
+      line: self.line,
+    }
+  }
+
+  /// Returns an updated copy of this location with the source file replaced
+  /// by `file`.
+  #[must_use]
+  pub const fn with_file(self, file: Option<&'a str>) -> Self {
+    Self {
+      module_path: self.module_path,
+      file,
+      line: self.line,
+    }
+  }
+
+  /// Returns an updated copy of this location with the line number replaced
+  /// by `line`.
+  #[must_use]
+  pub const fn with_line(self, line: Option<u32>) -> Self {
+    Self {
+      module_path: self.module_path,
+      file: self.file,
+      line,
+    }
+  }
+
+  /// Returns the path to the Rust module where the callsite occurred, or
+  /// `None` if the module path is unknown.
+  #[must_use]
+  pub const fn module_path(&self) -> Option<&'a str> {
+    self.module_path
+  }
+
+  /// Returns the name of the source code file where the callsite occurred,
+  /// or `None` if the file is unknown.
+  #[must_use]
+  pub const fn file(&self) -> Option<&'a str> {
+    self.file
+  }
+
+  /// Returns the line number in the source code file where the callsite
+  /// occurred, or `None` if the line number is unknown.
+  #[must_use]
+  pub const fn line(&self) -> Option<u32> {
+    self.line
+  }
+}
+
 // ===== impl Metadata =====
 
 impl<'a> Metadata<'a> {
   /// Construct new metadata for a span or event, with a name, target, level, field
-  /// names, and optional source code location.
+  /// names, and a [`SourceLocation`] grouping the optional source code location.
   #[allow(
     clippy::single_call_fn,
     reason = "public metadata constructor is used by instrumentation macros and downstream callsites"
@@ -289,9 +386,7 @@ impl<'a> Metadata<'a> {
     name: &'static str,
     target: &'a str,
     level: Level,
-    file: Option<&'a str>,
-    line: Option<u32>,
-    module_path: Option<&'a str>,
+    location: &SourceLocation<'a>,
     fields: &field::FieldSet,
     kind: Kind,
   ) -> Self {
@@ -299,9 +394,9 @@ impl<'a> Metadata<'a> {
       name,
       target,
       level,
-      module_path,
-      file,
-      line,
+      module_path: location.module_path,
+      file: location.file,
+      line: location.line,
       fields: *fields,
       kind,
     }
@@ -746,6 +841,39 @@ impl LevelFilter {
     self.0
   }
 
+  /// Returns `true` if this filter enables spans and events at `level`.
+  ///
+  /// This is the named form of the `level <= filter` comparison idiom: a
+  /// filter enables every [`Level`] that is less verbose than or equal to the
+  /// filter itself (so a filter always enables its own level), and
+  /// [`LevelFilter::OFF`] enables no levels at all.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// use tracing_core::Level;
+  /// use tracing_core::LevelFilter;
+  ///
+  /// if !LevelFilter::INFO.enables(Level::INFO) {
+  ///   return Err("a filter enables its own level".into());
+  /// }
+  /// if !LevelFilter::INFO.enables(Level::WARN) {
+  ///   return Err("a filter enables less verbose levels".into());
+  /// }
+  /// if LevelFilter::INFO.enables(Level::DEBUG) {
+  ///   return Err("levels more verbose than the filter are disabled".into());
+  /// }
+  /// if LevelFilter::OFF.enables(Level::ERROR) {
+  ///   return Err("OFF enables nothing".into());
+  /// }
+  /// # Ok::<(), Box<dyn std::error::Error>>(())
+  /// ```
+  #[inline]
+  #[must_use]
+  pub const fn enables(self, level: Level) -> bool {
+    self.as_usize() <= level.as_usize()
+  }
+
   // These consts are necessary because `as` casts are not allowed as
   // match patterns.
   /// Encoded `TRACE` filter value.
@@ -783,8 +911,8 @@ impl LevelFilter {
     clippy::single_call_fn,
     reason = "pair atomic LevelFilter decoding with encoding and round-trip validation"
   )]
-  const fn decode(value: usize) -> Self {
-    match value {
+  const fn decode(bits: usize) -> Self {
+    match bits {
       Self::ERROR_USIZE => Self::ERROR,
       Self::WARN_USIZE => Self::WARN,
       Self::INFO_USIZE => Self::INFO,
@@ -821,11 +949,11 @@ impl LevelFilter {
     reason = "centralize max-level atomic encoding owned by LevelFilter"
   )]
   pub(crate) fn set_max(filter: Self) {
-    let val = filter.encode();
+    let bits = filter.encode();
 
     // using an AcqRel swap ensures an ordered relationship of writes to the
     // max level.
-    let _previous_max_level = MAX_LEVEL.swap(val, Ordering::AcqRel);
+    let _previous_max_level = MAX_LEVEL.swap(bits, Ordering::AcqRel);
   }
 }
 
@@ -1113,12 +1241,39 @@ impl PartialOrd<Level> for LevelFilter {
 
 #[cfg(test)]
 mod tests {
+  use alloc::format;
+  use alloc::string::String;
+
   use strict_test_support::TestFailure;
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
+  use strict_test_support::ensure_some;
 
   use super::*;
+  use crate::callsite::Callsite;
+  use crate::field::FieldSet;
+  use crate::subscriber::Interest;
+
+  struct MetadataTestCallsite;
+
+  static METADATA_TEST_CALLSITE: MetadataTestCallsite = MetadataTestCallsite;
+
+  impl Callsite for MetadataTestCallsite {
+    fn set_interest(&self, _: Interest) {}
+
+    fn metadata(&self) -> &Metadata<'_> {
+      static META: Metadata<'static> = Metadata::new(
+        "metadata_test",
+        "metadata_target",
+        Level::INFO,
+        &SourceLocation::empty(),
+        &FieldSet::new(&["answer"], crate::identify_callsite!(&METADATA_TEST_CALLSITE)),
+        Kind::EVENT,
+      );
+      &META
+    }
+  }
 
   #[test]
   fn level_from_str() -> Result<(), TestFailure> {
@@ -1168,5 +1323,308 @@ mod tests {
       ensure_eq(&filter, &LevelFilter::decode(expected), "level filter decodes")?;
     }
     Ok(())
+  }
+
+  #[test]
+  fn enables_matches_partial_ord_comparison() -> Result<(), TestFailure> {
+    let level_table = [Level::TRACE, Level::DEBUG, Level::INFO, Level::WARN, Level::ERROR];
+    let filter_table = [
+      LevelFilter::OFF,
+      LevelFilter::ERROR,
+      LevelFilter::WARN,
+      LevelFilter::INFO,
+      LevelFilter::DEBUG,
+      LevelFilter::TRACE,
+    ];
+    for &filter in &filter_table {
+      for &level in &level_table {
+        ensure_eq(
+          &filter.enables(level),
+          &(level <= filter),
+          "enables agrees with the level <= filter ordering",
+        )?;
+      }
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn off_filter_enables_no_level() -> Result<(), TestFailure> {
+    let level_table = [Level::TRACE, Level::DEBUG, Level::INFO, Level::WARN, Level::ERROR];
+    for &level in &level_table {
+      ensure(!LevelFilter::OFF.enables(level), "OFF enables no level")?;
+    }
+    Ok(())
+  }
+
+  #[test]
+  fn enables_honors_the_verbosity_cap() -> Result<(), TestFailure> {
+    ensure(LevelFilter::DEBUG.enables(Level::DEBUG), "a filter enables its own level")?;
+    ensure(LevelFilter::DEBUG.enables(Level::ERROR), "a filter enables less verbose levels")?;
+    ensure(
+      !LevelFilter::DEBUG.enables(Level::TRACE),
+      "levels more verbose than the filter are disabled",
+    )
+  }
+
+  #[test]
+  fn empty_source_location_has_no_components() -> Result<(), TestFailure> {
+    let location = SourceLocation::empty();
+    ensure(location.module_path().is_none(), "empty location has no module path")?;
+    ensure(location.file().is_none(), "empty location has no file")?;
+    ensure(location.line().is_none(), "empty location has no line")
+  }
+
+  #[test]
+  fn source_location_setters_round_trip() -> Result<(), TestFailure> {
+    let location = SourceLocation::empty()
+      .with_module_path(Some("tracing_core::metadata"))
+      .with_file(Some("src/metadata.rs"))
+      .with_line(Some(7));
+    let module_path = ensure_some(location.module_path(), "module path is recorded")?;
+    ensure_eq(&module_path, &"tracing_core::metadata", "module path round-trips")?;
+    let file = ensure_some(location.file(), "file is recorded")?;
+    ensure_eq(&file, &"src/metadata.rs", "file round-trips")?;
+    let line = ensure_some(location.line(), "line is recorded")?;
+    ensure_eq(&line, &7_u32, "line round-trips")
+  }
+
+  #[test]
+  fn source_location_setters_leave_other_components_untouched() -> Result<(), TestFailure> {
+    let located_file = SourceLocation::empty().with_file(Some("src/metadata.rs"));
+    ensure(located_file.module_path().is_none(), "with_file leaves the module path unset")?;
+    ensure(located_file.line().is_none(), "with_file leaves the line unset")?;
+    let recorded_file = ensure_some(located_file.file(), "with_file records the file")?;
+    ensure_eq(&recorded_file, &"src/metadata.rs", "with_file records the given file")?;
+
+    let cleared_line = located_file.with_line(Some(7)).with_line(None);
+    let kept_file = ensure_some(cleared_line.file(), "with_line(None) keeps the file")?;
+    ensure_eq(&kept_file, &"src/metadata.rs", "with_line(None) keeps the recorded file")?;
+    ensure(cleared_line.line().is_none(), "with_line(None) clears the line")
+  }
+
+  #[test]
+  fn metadata_new_preserves_flat_accessors() -> Result<(), TestFailure> {
+    let location = SourceLocation::empty()
+      .with_module_path(Some("metadata::tests"))
+      .with_file(Some("metadata.rs"))
+      .with_line(Some(42));
+    let fields = FieldSet::new(&["answer"], crate::identify_callsite!(&METADATA_TEST_CALLSITE));
+    let metadata = Metadata::new("metadata_new", "metadata_target", Level::WARN, &location, &fields, Kind::SPAN);
+
+    ensure_eq(&metadata.name(), &"metadata_new", "metadata name accessor")?;
+    ensure_eq(&metadata.target(), &"metadata_target", "metadata target accessor")?;
+    ensure_eq(metadata.level(), &Level::WARN, "metadata level accessor")?;
+    let module_path = ensure_some(metadata.module_path(), "metadata module path is present")?;
+    ensure_eq(&module_path, &"metadata::tests", "metadata module path accessor")?;
+    let file = ensure_some(metadata.file(), "metadata file is present")?;
+    ensure_eq(&file, &"metadata.rs", "metadata file accessor")?;
+    let line = ensure_some(metadata.line(), "metadata line is present")?;
+    ensure_eq(&line, &42_u32, "metadata line accessor")?;
+    ensure_eq(&metadata.fields().len(), &1_usize, "metadata field set accessor")?;
+    ensure(metadata.is_span(), "metadata kind marks spans")?;
+    ensure(!metadata.is_event(), "span metadata is not event metadata")
+  }
+
+  /// Builds metadata with a caller-selected location and kind.
+  fn metadata_with_location(location: &SourceLocation<'static>, kind: Kind) -> Metadata<'static> {
+    let fields = FieldSet::new(&["answer"], crate::identify_callsite!(&METADATA_TEST_CALLSITE));
+    Metadata::new("debug_metadata", "debug_target", Level::INFO, location, &fields, kind)
+  }
+
+  #[test]
+  fn metadata_debug_formats_each_location_shape() -> Result<(), TestFailure> {
+    let full = metadata_with_location(
+      &SourceLocation::empty()
+        .with_module_path(Some("debug::module"))
+        .with_file(Some("debug.rs"))
+        .with_line(Some(12)),
+      Kind::EVENT,
+    );
+    let file_only = metadata_with_location(&SourceLocation::empty().with_file(Some("debug.rs")), Kind::EVENT);
+    let line_only = metadata_with_location(&SourceLocation::empty().with_line(Some(12)), Kind::EVENT);
+    let no_location = metadata_with_location(&SourceLocation::empty(), Kind::EVENT);
+
+    let full_debug = format!("{full:?}");
+    ensure(full_debug.contains("debug_metadata"), "metadata debug includes name")?;
+    ensure(full_debug.contains("debug_target"), "metadata debug includes target")?;
+    ensure(full_debug.contains("debug::module"), "metadata debug includes module path")?;
+    ensure(full_debug.contains("debug.rs:12"), "metadata debug combines file and line")?;
+    ensure(full_debug.contains("answer"), "metadata debug includes fields")?;
+    ensure(full_debug.contains("Kind(EVENT)"), "metadata debug includes kind")?;
+
+    ensure(
+      format!("{file_only:?}").contains("file: debug.rs"),
+      "metadata debug includes file-only locations",
+    )?;
+    ensure(
+      format!("{line_only:?}").contains("line: 12"),
+      "metadata debug includes line-only locations",
+    )?;
+    ensure(
+      !format!("{no_location:?}").contains("location"),
+      "metadata debug omits absent locations",
+    )
+  }
+
+  #[test]
+  fn kind_flags_and_debug_output_cover_each_public_kind() -> Result<(), TestFailure> {
+    let event_hint = Kind::EVENT.hint();
+    let span_hint = Kind::SPAN.hint();
+
+    ensure(Kind::EVENT.is_event(), "event kind marks events")?;
+    ensure(!Kind::EVENT.is_span(), "event kind does not mark spans")?;
+    ensure(Kind::SPAN.is_span(), "span kind marks spans")?;
+    ensure(!Kind::SPAN.is_event(), "span kind does not mark events")?;
+    ensure(Kind::HINT.is_hint(), "hint kind marks hints")?;
+    ensure(!Kind::HINT.is_event(), "bare hint kind does not mark events")?;
+    ensure(event_hint.is_event(), "event hint preserves event bit")?;
+    ensure(event_hint.is_hint(), "event hint sets hint bit")?;
+    ensure(span_hint.is_span(), "span hint preserves span bit")?;
+    ensure(span_hint.is_hint(), "span hint sets hint bit")?;
+
+    ensure_eq(&format!("{:?}", Kind::EVENT), &String::from("Kind(EVENT)"), "event kind debug")?;
+    ensure_eq(&format!("{:?}", Kind::SPAN), &String::from("Kind(SPAN)"), "span kind debug")?;
+    ensure_eq(&format!("{event_hint:?}"), &String::from("Kind(EVENT | HINT)"), "event hint debug")?;
+    ensure_eq(&format!("{span_hint:?}"), &String::from("Kind(SPAN | HINT)"), "span hint debug")?;
+    ensure_eq(
+      &format!("{:?}", Kind(0)),
+      &String::from("Kind(0b0)"),
+      "empty kind debug falls back to bits",
+    )
+  }
+
+  #[test]
+  fn levels_parse_display_and_report_errors_stably() -> Result<(), TestFailure> {
+    let levels = [
+      (Level::ERROR, "ERROR", "error", "1"),
+      (Level::WARN, "WARN", "warn", "2"),
+      (Level::INFO, "INFO", "info", "3"),
+      (Level::DEBUG, "DEBUG", "debug", "4"),
+      (Level::TRACE, "TRACE", "trace", "5"),
+    ];
+
+    for &(level, display, name, number) in &levels {
+      ensure_eq(&level.as_str(), &display, "level as_str matches display")?;
+      ensure_eq(&format!("{level}"), &String::from(display), "level Display output")?;
+      ensure_eq(
+        &ensure_ok(name.parse::<Level>(), "lowercase level parses")?,
+        &level,
+        "name parses to level",
+      )?;
+      ensure_eq(
+        &ensure_ok(display.parse::<Level>(), "uppercase level parses")?,
+        &level,
+        "uppercase name parses to level",
+      )?;
+      ensure_eq(
+        &ensure_ok(number.parse::<Level>(), "numeric level parses")?,
+        &level,
+        "number parses to level",
+      )?;
+    }
+
+    let Err(invalid_level) = "verbose".parse::<Level>() else {
+      return ensure(false, "invalid level strings are rejected");
+    };
+    ensure_eq(
+      &format!("{invalid_level}"),
+      &String::from("error parsing level: expected one of \"error\", \"warn\", \"info\", \"debug\", \"trace\", or a number 1-5"),
+      "level parse error display",
+    )?;
+    ensure("6".parse::<Level>().is_err(), "out-of-range numeric levels are rejected")
+  }
+
+  #[test]
+  fn level_filters_parse_display_debug_and_report_errors_stably() -> Result<(), TestFailure> {
+    let filters = [
+      (LevelFilter::OFF, "off", "LevelFilter::OFF", "0"),
+      (LevelFilter::ERROR, "error", "LevelFilter::ERROR", "1"),
+      (LevelFilter::WARN, "warn", "LevelFilter::WARN", "2"),
+      (LevelFilter::INFO, "info", "LevelFilter::INFO", "3"),
+      (LevelFilter::DEBUG, "debug", "LevelFilter::DEBUG", "4"),
+      (LevelFilter::TRACE, "trace", "LevelFilter::TRACE", "5"),
+    ];
+
+    for &(filter, display, debug, number) in &filters {
+      ensure_eq(&format!("{filter}"), &String::from(display), "filter Display output")?;
+      ensure_eq(&format!("{filter:?}"), &String::from(debug), "filter Debug output")?;
+      ensure_eq(
+        &ensure_ok(display.parse::<LevelFilter>(), "filter name parses")?,
+        &filter,
+        "display name parses to filter",
+      )?;
+      ensure_eq(
+        &ensure_ok(number.parse::<LevelFilter>(), "numeric filter parses")?,
+        &filter,
+        "number parses to filter",
+      )?;
+    }
+
+    ensure_eq(
+      &ensure_ok("".parse::<LevelFilter>(), "empty filter parses")?,
+      &LevelFilter::ERROR,
+      "empty filter string maps to ERROR",
+    )?;
+    let Err(invalid_filter) = "verbose".parse::<LevelFilter>() else {
+      return ensure(false, "invalid filter strings are rejected");
+    };
+    ensure_eq(
+      &format!("{invalid_filter}"),
+      &String::from(
+        "error parsing level filter: expected one of \"off\", \"error\", \"warn\", \"info\", \"debug\", \"trace\", or a number 0-5",
+      ),
+      "filter parse error display",
+    )?;
+    ensure("6".parse::<LevelFilter>().is_err(), "out-of-range numeric filters are rejected")
+  }
+
+  #[test]
+  fn level_and_filter_ordering_preserves_verbosity_semantics() -> Result<(), TestFailure> {
+    ensure(Level::TRACE > Level::DEBUG, "TRACE is more verbose than DEBUG")?;
+    ensure(Level::ERROR < Level::WARN, "ERROR is less verbose than WARN")?;
+    ensure(Level::INFO <= Level::INFO, "levels compare equal to themselves")?;
+    ensure(
+      Level::TRACE.cmp(&Level::DEBUG) == cmp::Ordering::Greater,
+      "level Ord uses verbosity",
+    )?;
+    ensure(
+      Level::WARN.partial_cmp(&Level::ERROR) == Some(cmp::Ordering::Greater),
+      "level PartialOrd uses verbosity",
+    )?;
+
+    ensure(Level::INFO <= LevelFilter::INFO, "level compares equal to matching filter")?;
+    ensure(Level::TRACE > LevelFilter::DEBUG, "level is greater than less-verbose filter")?;
+    ensure(Level::ERROR < LevelFilter::WARN, "level is less than more-verbose filter")?;
+    ensure(
+      Level::DEBUG.partial_cmp(&LevelFilter::INFO) == Some(cmp::Ordering::Greater),
+      "level-to-filter PartialOrd uses verbosity",
+    )?;
+
+    ensure(
+      LevelFilter::TRACE > LevelFilter::DEBUG,
+      "TRACE filter is more verbose than DEBUG filter",
+    )?;
+    ensure(
+      LevelFilter::ERROR < LevelFilter::WARN,
+      "ERROR filter is less verbose than WARN filter",
+    )?;
+    ensure(LevelFilter::OFF < LevelFilter::TRACE, "OFF is less verbose than concrete filters")?;
+    ensure(
+      LevelFilter::WARN.cmp(&LevelFilter::ERROR) == cmp::Ordering::Greater,
+      "filter Ord uses verbosity",
+    )?;
+    ensure(
+      LevelFilter::DEBUG.partial_cmp(&LevelFilter::INFO) == Some(cmp::Ordering::Greater),
+      "filter PartialOrd uses verbosity",
+    )?;
+
+    ensure(LevelFilter::INFO >= Level::INFO, "filter compares equal to matching level")?;
+    ensure(LevelFilter::TRACE > Level::DEBUG, "filter is greater than less-verbose level")?;
+    ensure(LevelFilter::ERROR < Level::WARN, "filter is less than more-verbose level")?;
+    ensure(
+      LevelFilter::DEBUG.partial_cmp(&Level::INFO) == Some(cmp::Ordering::Greater),
+      "filter-to-level PartialOrd uses verbosity",
+    )
   }
 }

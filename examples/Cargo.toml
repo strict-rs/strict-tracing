@@ -16,7 +16,6 @@ tracing-error = { workspace = true }
 tracing-flame = { workspace = true }
 tracing-tower = { workspace = true }
 tracing-subscriber = { workspace = true, default-features = true, features = ["json", "env-filter"] }
-tracing-futures = { workspace = true, default-features = true, features = ["futures-01"] }
 tracing-attributes = { workspace = true }
 tracing-serde = { workspace = true }
 tracing-appender = { workspace = true }
@@ -43,8 +42,7 @@ nu-ansi-term = { workspace = true }
 humantime = { workspace = true }
 log = { workspace = true }
 
-# inferno example
-inferno = { workspace = true }
+# per-layer-filter and fmt-multiple-writers examples
 tempfile = { workspace = true }
 
 # fmt examples

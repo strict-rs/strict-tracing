@@ -27,10 +27,16 @@ tracing-core = { workspace = true, default-features = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }
+strict-test-support = { workspace = true }
 
 [target.'cfg(tracing_unstable)'.dependencies]
 valuable_crate = { workspace = true, optional = true }
 valuable-serde = { workspace = true, optional = true }
+
+# cargo-udeps does not analyze doctests: `serde_json` is exercised only by the
+# `src/lib.rs` module doc example, so it is reported as an unused dev-dependency.
+[package.metadata.cargo-udeps.ignore]
+development = ["serde_json"]
 
 [badges]
 maintenance = { status = "experimental" }

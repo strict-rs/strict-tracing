@@ -486,10 +486,170 @@ where
 fn format_datetime(
     now: OffsetDateTime,
     destination: &mut Writer<'_>,
-    formatter: &impl Formattable,
+    formatter: &(impl Formattable + ?Sized),
 ) -> fmt::Result {
     let mut writer = WriteAdaptor::new(destination);
     now.format_into(&mut writer, formatter)
         .map_err(|_error| fmt::Error)
         .map(|_| ())
+}
+
+#[cfg(test)]
+#[cfg(feature = "time")]
+mod tests {
+    use std::fmt;
+    use std::format;
+    use std::string::String;
+    use std::vec::Vec;
+
+    use strict_test_support::TestFailure;
+    use strict_test_support::ensure;
+    use strict_test_support::ensure_contains;
+    use strict_test_support::ensure_eq;
+    use strict_test_support::ensure_ok;
+    use time::format_description::BorrowedFormatItem;
+    use time::macros::format_description;
+
+    use super::*;
+
+    #[derive(Debug)]
+    struct FailingWriter;
+
+    impl fmt::Write for FailingWriter {
+        fn write_str(&mut self, _: &str) -> fmt::Result {
+            Err(fmt::Error)
+        }
+    }
+
+    fn render_time(timer: &impl FormatTime) -> Result<String, TestFailure> {
+        let mut output = String::new();
+        let mut writer = Writer::new(&mut output);
+        ensure(
+            timer.format_time(&mut writer).is_ok(),
+            "timer should format into the writer",
+        )?;
+        Ok(output)
+    }
+
+    fn offset(hours: i8, minutes: i8) -> Result<UtcOffset, TestFailure> {
+        ensure_ok(
+            UtcOffset::from_hms(hours, minutes, 0),
+            "UTC offset should be valid",
+        )
+    }
+
+    #[test]
+    fn utc_time_rfc3339_writes_timestamp() -> Result<(), TestFailure> {
+        let output = render_time(&UtcTime::rfc_3339())?;
+        let second_output = render_time(&UtcTime::rfc_3339())?;
+
+        ensure_contains(&output, "T", "RFC3339 UTC timestamp includes date-time separator")?;
+        ensure_contains(&output, "Z", "RFC3339 UTC timestamp includes UTC suffix")?;
+        ensure_contains(
+            &second_output,
+            "T",
+            "reconstructed RFC3339 UTC formatter writes timestamp",
+        )
+    }
+
+    #[test]
+    fn utc_time_custom_format_writes_expected_shape() -> Result<(), TestFailure> {
+        let format = format_description!("[hour]:[minute]:[second]");
+        let output = render_time(&UtcTime::new(format))?;
+
+        ensure_eq(&output.len(), &8_usize, "custom UTC format length")?;
+        ensure_contains(&output, ":", "custom UTC format contains separators")
+    }
+
+    #[test]
+    fn offset_time_applies_fixed_offset() -> Result<(), TestFailure> {
+        let timer = OffsetTime::new(offset(5, 30)?, well_known::Rfc3339);
+        let output = render_time(&timer)?;
+
+        ensure_contains(&output, "+05:30", "fixed offset is rendered in RFC3339 output")
+    }
+
+    #[test]
+    fn offset_time_custom_format_writes_expected_shape() -> Result<(), TestFailure> {
+        let format = format_description!("[offset_hour sign:mandatory]:[offset_minute]");
+        let timer = OffsetTime::new(offset(-4, -30)?, format);
+        let output = render_time(&timer)?;
+
+        ensure_eq(&output, &String::from("-04:30"), "custom offset format uses fixed offset")
+    }
+
+    #[test]
+    fn format_datetime_writes_fixed_offset_timestamp() -> Result<(), TestFailure> {
+        let format = format_description!(
+            "[year]-[month]-[day] [hour]:[minute] [offset_hour sign:mandatory]:[offset_minute]"
+        );
+        let timestamp = OffsetDateTime::UNIX_EPOCH.to_offset(offset(2, 0)?);
+        let mut output = String::new();
+        let mut writer = Writer::new(&mut output);
+
+        ensure(
+            format_datetime(timestamp, &mut writer, format).is_ok(),
+            "format_datetime should write deterministic timestamp",
+        )?;
+        ensure_eq(
+            &output,
+            &String::from("1970-01-01 02:00 +02:00"),
+            "fixed timestamp output",
+        )
+    }
+
+    #[test]
+    fn format_datetime_returns_error_when_writer_fails() -> Result<(), TestFailure> {
+        let format = format_description!("[hour]");
+        let timestamp = OffsetDateTime::UNIX_EPOCH;
+        let mut output = FailingWriter;
+        let mut writer = Writer::new(&mut output);
+
+        ensure(
+            format_datetime(timestamp, &mut writer, format).is_err(),
+            "format_datetime returns fmt error from failing writer",
+        )
+    }
+
+    #[test]
+    fn default_utc_time_uses_default_formatter() -> Result<(), TestFailure> {
+        let timer = UtcTime::<Vec<BorrowedFormatItem<'static>>>::default();
+        let output = render_time(&timer)?;
+
+        ensure_eq(&output, &String::new(), "default UTC formatter uses F::default")
+    }
+
+    #[test]
+    #[cfg(feature = "local-time")]
+    fn local_time_new_constructs_formatter() -> Result<(), TestFailure> {
+        let timer = LocalTime::new(format_description!("[hour]:[minute]"));
+        let output = render_time(&timer)?;
+
+        ensure_eq(&output.len(), &5_usize, "local time custom format length")?;
+        ensure_contains(&output, ":", "local time custom format contains separator")
+    }
+
+    #[test]
+    #[cfg(feature = "local-time")]
+    fn local_rfc3339_returns_current_offset_or_indeterminate_offset_without_panicking(
+    ) -> Result<(), TestFailure> {
+        let first = OffsetTime::local_rfc_3339();
+        let second = OffsetTime::local_rfc_3339();
+        ensure_eq(
+            &first.is_ok(),
+            &second.is_ok(),
+            "local offset availability is stable across adjacent calls",
+        )?;
+
+        match first {
+            Ok(timer) => {
+                let output = render_time(&timer)?;
+                ensure_contains(&output, "T", "local offset timer writes RFC3339 timestamp")
+            }
+            Err(error) => ensure(
+                !format!("{error}").is_empty(),
+                "indeterminate local offset reports a displayable error",
+            ),
+        }
+    }
 }

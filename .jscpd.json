@@ -24,5 +24,8 @@
   "absolute": true,
   "minLines": 8,
   "minTokens": 50,
-  "no-tips": true
+  "no-tips": true,
+  "ignorePattern": [
+    "(?m)^\\s*use\\s+[^;]+;"
+  ]
 }

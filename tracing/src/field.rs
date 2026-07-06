@@ -1,116 +1,21 @@
 //! `Span` and `Event` key-value data.
 //!
-//! Spans and events may be annotated with key-value data, referred to as _fields_.
-//! These fields consist of a mapping from a key (corresponding to
-//! a `&str` but represented internally as an array index) to a [`Value`].
+//! Spans and events may be annotated with key-value data, referred to as _fields_. This module
+//! re-exports the field vocabulary defined by [`tracing_core::field`]: the [`Value`] trait
+//! implemented by recordable types, the [`Visit`] trait implemented by subscribers to receive
+//! typed values, the [`Field`] key type, and helpers such as [`display()`], [`debug()`], and
+//! [`Empty`].
 //!
-//! # `Value`s and `Subscriber`s
+//! On top of that shared model, this module defines the [`AsField`] trait, which lets a span
+//! field be looked up either by a previously resolved [`Field`] key (constant-time access) or
+//! by its string name (an iterative search).
 //!
-//! `Subscriber`s consume `Value`s as fields attached to [span]s or [`Event`]s.
-//! The set of field keys on a given span or event is defined on its [`Metadata`].
-//! When a span is created, it provides [`Attributes`] to the `Subscriber`'s
-//! [`new_span`] method, containing any fields whose values were provided when
-//! the span was created; and may call the `Subscriber`'s [`record`] method
-//! with additional [`Record`]s if values are added for more of its fields.
-//! Similarly, the [`Event`] type passed to the subscriber's [`event`] method
-//! will contain any fields attached to each event.
+//! See the [`tracing_core::field`] documentation for the full data model, including how values
+//! are recorded and the experimental [`valuable`] integration. The `valuable()` conversion
+//! function and the optional `Visit::record_value` method it feeds are available only with the
+//! unstable `valuable` feature.
 //!
-//! `tracing` represents values as either one of a set of Rust primitives
-//! (`i64`, `u64`, `f64`, `bool`, and `&str`) or using a `fmt::Display` or
-//! `fmt::Debug` implementation. `Subscriber`s are provided these primitive
-//! value types as `dyn Value` trait objects.
-//!
-//! These trait objects can be formatted using `fmt::Debug`, but may also be
-//! recorded as typed data by calling the [`Value::record`] method on these
-//! trait objects with a _visitor_ implementing the [`Visit`] trait. This trait
-//! represents the behavior used to record values of various types. For example,
-//! an implementation of `Visit` might record integers by incrementing counters
-//! for their field names rather than printing them.
-//!
-//!
-//! # Using `valuable`
-//!
-//! `tracing`'s [`Value`] trait is intentionally minimalist: it supports only a small
-//! number of Rust primitives as typed values, and only permits recording
-//! user-defined types with their [`fmt::Debug`] or [`fmt::Display`]
-//! implementations. However, there are some cases where it may be useful to record
-//! nested values (such as arrays, `Vec`s, or `HashMap`s containing values), or
-//! user-defined `struct` and `enum` types without having to format them as
-//! unstructured text.
-//!
-//! To address `Value`'s limitations, `tracing` offers experimental support for
-//! the [`valuable`] crate, which provides object-safe inspection of structured
-//! values. User-defined types can implement the [`valuable::Valuable`] trait,
-//! and be recorded as a `tracing` field by calling their [`as_value`] method.
-//! If the [`Subscriber`] also supports the `valuable` crate, it can
-//! then visit those types fields as structured values using `valuable`.
-//!
-//! <pre class="ignore" style="white-space:normal;font:inherit;">
-//!     <strong>Note</strong>: <code>valuable</code> support is an
-//!     <a href = "../index.html#unstable-features">unstable feature</a>. See
-//!     the documentation on unstable features for details on how to enable it.
-//! </pre>
-//!
-//! For example:
-//! ```ignore
-//! // Derive `Valuable` for our types:
-//! use valuable::Valuable;
-//!
-//! #[derive(Clone, Debug, Valuable)]
-//! struct User {
-//!     name: String,
-//!     age: u32,
-//!     address: Address,
-//! }
-//!
-//! #[derive(Clone, Debug, Valuable)]
-//! struct Address {
-//!     country: String,
-//!     city: String,
-//!     street: String,
-//! }
-//!
-//! let user = User {
-//!     name: "Arwen Undomiel".to_string(),
-//!     age: 3000,
-//!     address: Address {
-//!         country: "Middle Earth".to_string(),
-//!         city: "Rivendell".to_string(),
-//!         street: "leafy lane".to_string(),
-//!     },
-//! };
-//!
-//! // Recording `user` as a `valuable::Value` will allow the `tracing` subscriber
-//! // to traverse its fields as a nested, typed structure:
-//! tracing::info!(current_user = user.as_value());
-//! ```
-//!
-//! Alternatively, the [`valuable()`] function may be used to convert a type
-//! implementing [`Valuable`] into a `tracing` field value.
-//!
-//! When the `valuable` feature is enabled, the [`Visit`] trait will include an
-//! optional [`record_value`] method. `Visit` implementations that wish to
-//! record `valuable` values can implement this method with custom behavior.
-//! If a visitor does not implement `record_value`, the [`valuable::Value`] will
-//! be forwarded to the visitor's [`record_debug`] method.
-//!
-//! [`fmt::Debug`]: std::fmt::Debug
-//! [`fmt::Display`]: std::fmt::Debug
 //! [`valuable`]: https://crates.io/crates/valuable
-//! [`valuable::Valuable`]: https://docs.rs/valuable/latest/valuable/trait.Valuable.html
-//! [`as_value`]: https://docs.rs/valuable/latest/valuable/trait.Valuable.html#tymethod.as_value
-//! [`valuable::Value`]: https://docs.rs/valuable/latest/valuable/enum.Value.html
-//! [`Subscriber`]: crate::Subscriber
-//! [`record_value`]: Visit::record_value
-//! [`record_debug`]: Visit::record_debug
-//! [span]: mod@crate::span
-//! [`Event`]: crate::event::Event
-//! [`Metadata`]: crate::Metadata
-//! [`Attributes`]: crate::span::Attributes
-//! [`Record`]: crate::span::Record
-//! [`new_span`]: crate::Subscriber::new_span
-//! [`record`]: crate::Subscriber::record
-//! [`event`]: crate::Subscriber::event
 pub use tracing_core::field::*;
 
 use crate::Metadata;
@@ -161,3 +66,63 @@ impl AsField for str {
 impl Sealed for Field {}
 impl Sealed for &Field {}
 impl Sealed for str {}
+
+#[cfg(test)]
+mod tests {
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_eq;
+  use strict_test_support::ensure_some;
+
+  use super::AsField as _;
+  use crate::__macro_support::MacroCallsite;
+  use crate::Level;
+  use crate::Metadata;
+  use crate::metadata::Kind;
+
+  static FIRST_CALLSITE: MacroCallsite = MacroCallsite::new(&FIRST_METADATA);
+  static FIRST_METADATA: Metadata<'static> = crate::metadata! {
+      name: "first",
+      target: module_path!(),
+      level: Level::INFO,
+      fields: &["alpha", "beta"],
+      callsite: &FIRST_CALLSITE,
+      kind: Kind::SPAN,
+  };
+
+  static SECOND_CALLSITE: MacroCallsite = MacroCallsite::new(&SECOND_METADATA);
+  static SECOND_METADATA: Metadata<'static> = crate::metadata! {
+      name: "second",
+      target: module_path!(),
+      level: Level::INFO,
+      fields: &["alpha", "gamma"],
+      callsite: &SECOND_CALLSITE,
+      kind: Kind::SPAN,
+  };
+
+  #[test]
+  fn string_keys_find_matching_fields_and_reject_missing_fields() -> Result<(), TestFailure> {
+    let alpha = ensure_some("alpha".as_field(&FIRST_METADATA), "string key finds matching field")?;
+    let beta = ensure_some("beta".as_field(&FIRST_METADATA), "string key finds second matching field")?;
+
+    ensure_eq(&alpha.name(), &"alpha", "string lookup returns the requested field")?;
+    ensure_eq(&beta.name(), &"beta", "string lookup returns the second requested field")?;
+    ensure("gamma".as_field(&FIRST_METADATA).is_none(), "string lookup rejects missing fields")
+  }
+
+  #[test]
+  fn resolved_fields_match_only_their_original_callsite() -> Result<(), TestFailure> {
+    let alpha = ensure_some("alpha".as_field(&FIRST_METADATA), "alpha field exists")?;
+    let alpha_ref = &alpha;
+    let same = ensure_some(alpha.as_field(&FIRST_METADATA), "field key matches its original metadata")?;
+    let by_ref = ensure_some(alpha_ref.as_field(&FIRST_METADATA), "field reference matches its original metadata")?;
+
+    ensure_eq(&same, &alpha, "field key returns itself for matching metadata")?;
+    ensure_eq(&by_ref, &alpha, "field reference returns the copied field for matching metadata")?;
+    ensure(alpha.as_field(&SECOND_METADATA).is_none(), "field key rejects a different callsite")?;
+    ensure(
+      alpha_ref.as_field(&SECOND_METADATA).is_none(),
+      "field reference rejects a different callsite",
+    )
+  }
+}

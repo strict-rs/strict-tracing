@@ -15,20 +15,12 @@ mod tests {
     let _foo_enter = foo_span.enter();
     let bar_span = tracing::info_span!("bar");
     let _bar_enter = bar_span.enter();
-    ensure_ok(
-      tokio::spawn(
-        async {
-          async {
-            let _current_span = tracing::Span::current();
-          }
-          .instrument(tracing::info_span!("hi"))
-          .await;
-        }
-        .with_subscriber(tracing_subscriber::registry()),
-      )
-      .await,
-      "future with subscriber completes",
-    )?;
+    let observed_current = async {
+      let _current_span = tracing::Span::current();
+    }
+    .instrument(tracing::info_span!("hi"))
+    .with_subscriber(tracing_subscriber::registry());
+    ensure_ok(tokio::spawn(observed_current).await, "future with subscriber completes")?;
     Ok(())
   }
 }

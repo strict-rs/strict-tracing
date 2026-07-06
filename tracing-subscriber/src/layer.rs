@@ -1537,7 +1537,7 @@ feature! {
         /// maximum level will **only** be reflected after the callsite [`Interest`]
         /// cache is rebuilt, by calling the
         /// [`tracing_core::callsite::rebuild_interest_cache`][rebuild] function.
-        /// Therefore, if the `Filter will change the value returned by this
+        /// Therefore, if the `Filter` will change the value returned by this
         /// method, it is responsible for ensuring that
         /// [`rebuild_interest_cache`][rebuild] is called after the value of the max
         /// level changes.

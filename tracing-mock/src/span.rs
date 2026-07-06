@@ -1136,3 +1136,180 @@ impl fmt::Display for SetActualSpanIdError {
 }
 
 impl error::Error for SetActualSpanIdError {}
+
+#[cfg(test)]
+mod tests {
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_contains;
+  use strict_test_support::ensure_eq;
+  use strict_test_support::ensure_ok;
+  use strict_test_support::ensure_some;
+  use tracing::subscriber::with_default;
+  use tracing_core::span::Id;
+
+  use super::ActualSpan;
+  use super::ExpectedSpan;
+  use crate::ancestry::ExpectedAncestry;
+  use crate::expect;
+  use crate::subscriber;
+
+  #[test]
+  fn span_metadata_and_id_accept_matching_lifecycle() -> Result<(), TestFailure> {
+    let span_id = expect::id();
+    let expected_span = expect::span()
+      .named("matched_span")
+      .at_level(tracing::Level::INFO)
+      .with_target("matched_span_target")
+      .with_id(span_id);
+    let (subscriber, handle) = subscriber::mock()
+      .new_span(&expected_span)
+      .enter(&expected_span)
+      .exit(&expected_span)
+      .close_span(&expected_span)
+      .only()
+      .run_with_handle();
+
+    with_default(subscriber, || {
+      let span = tracing::info_span!(target: "matched_span_target", "matched_span");
+      let _guard = span.enter();
+    });
+
+    ensure_ok(handle.finished(), "span metadata and ID expectations match the lifecycle")
+  }
+
+  #[test]
+  fn span_metadata_mismatch_is_reported_by_finished() -> Result<(), TestFailure> {
+    let expected_span = expect::span().named("matched_span").with_target("expected_target");
+    let (subscriber, handle) = subscriber::mock().new_span(expected_span).run_with_handle();
+
+    with_default(subscriber, || {
+      let _span = tracing::info_span!(target: "actual_target", "matched_span");
+    });
+
+    ensure(handle.finished().is_err(), "span target mismatch is reported")
+  }
+
+  #[test]
+  fn new_span_fields_and_explicit_parent_match() -> Result<(), TestFailure> {
+    let parent = expect::span().named("parent_span");
+    let child = expect::span()
+      .named("child_span")
+      .with_fields(expect::field("child_field").with_value(&"set"))
+      .with_ancestry(ExpectedAncestry::HasExplicitParent(expect::span().named("parent_span")));
+    let (subscriber, handle) = subscriber::mock().new_span(&parent).new_span(child).only().run_with_handle();
+
+    with_default(subscriber, || {
+      let parent_span = tracing::info_span!("parent_span");
+      let parent_id = ensure_some(parent_span.id(), "parent span has an ID")?;
+      let _child_span = tracing::info_span!(parent: parent_id, "child_span", child_field = "set");
+      Ok::<(), TestFailure>(())
+    })?;
+
+    ensure_ok(handle.finished(), "new span fields and explicit parent match")
+  }
+
+  #[test]
+  fn expected_id_rejects_reassignment() -> Result<(), TestFailure> {
+    let span_id = expect::id();
+
+    ensure_ok(span_id.set(1), "first span ID assignment succeeds")?;
+
+    ensure(span_id.set(2).is_err(), "second span ID assignment is rejected")
+  }
+
+  #[test]
+  fn expected_span_accessors_and_formatting_reflect_configured_metadata() -> Result<(), TestFailure> {
+    let span_id = expect::id();
+    let expected_span = expect::span()
+      .named("formatted_span")
+      .at_level(tracing::Level::WARN)
+      .with_target("formatted_target")
+      .with_id(span_id);
+
+    ensure(expected_span.id().is_some(), "configured span ID is exposed")?;
+    let name = ensure_some(expected_span.name(), "configured span name is present")?;
+    ensure_eq(&name, &"formatted_span", "configured span name is exposed")?;
+    let level = ensure_some(expected_span.level(), "configured span level is present")?;
+    ensure_eq(&level, &tracing::Level::WARN, "configured span level is exposed")?;
+    let target = ensure_some(expected_span.target(), "configured span target is present")?;
+    ensure_eq(&target, &"formatted_target", "configured span target is exposed")?;
+
+    let debug = format!("{expected_span:?}");
+    ensure_contains(&debug, "MockSpan", "debug output names the expected span type")?;
+    ensure_contains(&debug, "formatted_span", "debug output includes the span name")?;
+    ensure_contains(&debug, "Level(Warn)", "debug output includes the level")?;
+    ensure_contains(&debug, "formatted_target", "debug output includes the target")?;
+
+    let display = format!("{expected_span}");
+    ensure_contains(&display, "a span", "display output describes a named span")?;
+    ensure_contains(&display, "formatted_span", "display output includes the span name")?;
+    ensure_contains(&display, "Level(Warn)", "display output includes the level")?;
+    ensure_contains(&display, "formatted_target", "display output includes the target")
+  }
+
+  #[test]
+  fn expected_span_rejects_unknown_metadata_only_when_metadata_is_expected() -> Result<(), TestFailure> {
+    let actual_id = ensure_some(Id::try_from_u64(7), "nonzero span ID is valid")?;
+    let actual = ActualSpan::new(actual_id, None);
+
+    ensure_ok(
+      ExpectedSpan::default().check(&actual, "entering", "span-tests"),
+      "unconstrained span accepts an unknown metadata ID",
+    )?;
+
+    let error = expect::span().named("needs_metadata").check(&actual, "entering", "span-tests");
+
+    ensure(error.is_err(), "metadata expectations reject unknown span metadata")
+  }
+
+  #[test]
+  fn new_span_formatting_reflects_fields_and_ancestry() -> Result<(), TestFailure> {
+    let new_span = expect::span()
+      .named("formatted_new_span")
+      .at_level(tracing::Level::INFO)
+      .with_target("new_span_target")
+      .with_fields(expect::field("answer").with_value(&42_i64))
+      .with_ancestry(ExpectedAncestry::IsContextualRoot);
+
+    let display = format!("{new_span}");
+    ensure_contains(&display, "a new span", "new-span display names the expectation type")?;
+    ensure_contains(&display, "formatted_new_span", "new-span display includes the span name")?;
+    ensure_contains(&display, "answer", "new-span display includes expected fields")?;
+
+    let debug = format!("{new_span:?}");
+    ensure_contains(&debug, "NewSpan", "new-span debug names the expectation type")?;
+    ensure_contains(&debug, "formatted_new_span", "new-span debug includes the span name")?;
+    ensure_contains(&debug, "new_span_target", "new-span debug includes the target")?;
+    ensure_contains(&debug, "parent", "new-span debug includes ancestry expectations")?;
+    ensure_contains(&debug, "fields", "new-span debug includes field expectations")
+  }
+
+  #[test]
+  fn expected_id_reports_unset_mismatched_and_duplicate_assignments() -> Result<(), TestFailure> {
+    let expected_id = expect::id();
+    let first_actual = ensure_some(Id::try_from_u64(1), "first nonzero span ID is valid")?;
+    let second_actual = ensure_some(Id::try_from_u64(2), "second nonzero span ID is valid")?;
+
+    let unset = expected_id.check(first_actual, format_args!("checking"), "span-tests");
+    ensure(unset.is_err(), "unset expected IDs reject direct checking")?;
+
+    ensure_ok(expected_id.set(1), "initial expected ID assignment succeeds")?;
+    ensure_ok(
+      expected_id.check(first_actual, format_args!("checking"), "span-tests"),
+      "matching expected ID succeeds",
+    )?;
+
+    let mismatch = expected_id.check(second_actual, format_args!("checking"), "span-tests");
+    ensure(mismatch.is_err(), "mismatched expected ID is rejected")?;
+
+    let reassignment = ensure_some(expected_id.set(2).err(), "duplicate assignment returns the span ID error")?;
+    let display = reassignment.to_string();
+    ensure_contains(&display, "Could not set", "duplicate assignment display describes the failure")?;
+    ensure_contains(&display, "1", "duplicate assignment display includes the previous ID")?;
+    ensure_contains(&display, "2", "duplicate assignment display includes the rejected ID")?;
+
+    let debug = format!("{expected_id:?}");
+    ensure_contains(&debug, "ExpectedId", "debug output names the expected ID type")
+  }
+}

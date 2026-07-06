@@ -29,10 +29,10 @@ where
       cx.waker().wake_by_ref();
       Poll::Pending
     } else {
-      let Some(value) = this.result.take() else {
+      let Some(outcome) = this.result.take() else {
         return Poll::Pending;
       };
-      Poll::Ready(value)
+      Poll::Ready(outcome)
     }
   }
 }

@@ -5,13 +5,11 @@ use tracing_core::subscriber::Subscriber;
 
 #[cfg(all(feature = "registry", feature = "std"))]
 use crate::filter::FilterId;
+use crate::registry;
 use crate::registry::LookupSpan;
 #[cfg(all(feature = "registry", feature = "std"))]
 use crate::registry::Registry;
 use crate::registry::SpanRef;
-use crate::registry::{
-  self,
-};
 /// Represents information about the current context provided to [`Layer`]s by the
 /// wrapped [`Subscriber`].
 ///
@@ -334,19 +332,13 @@ where
   /// current context, starting with the specified span and ending with the
   /// root of the trace tree.
   ///
-  /// <pre class="ignore" style="white-space:normal;font:inherit;">
-  /// <strong>Note</strong>: This returns the spans in reverse order (from leaf to root). Use
-  /// <a href="../registry/struct.Scope.html#method.root_to_leaf"><code>Scope::root_to_leaf</code></
-  /// a> in case root-to-leaf ordering is desired.
-  /// </pre>
+  /// **Note**: This returns the spans in reverse order (from leaf to root). Use
+  /// [`Scope::root_to_leaf`](crate::registry::Scope::root_to_leaf) in case
+  /// root-to-leaf ordering is desired.
   ///
-  /// <pre class="ignore" style="white-space:normal;font:inherit;">
-  ///     <strong>Note</strong>: This requires the wrapped subscriber to
-  ///     implement the <a href="../registry/trait.LookupSpan.html"><code>
-  ///     LookupSpan</code></a> trait. See the documentation on
-  ///     <a href="./struct.Context.html"><code>Context</code>'s
-  ///     declaration</a> for details.
-  /// </pre>
+  /// **Note**: This requires the wrapped subscriber to implement the
+  /// [`LookupSpan`](crate::registry::LookupSpan) trait. See the documentation on
+  /// [`Context`]'s declaration for details.
   ///
   /// [stored data]: crate::registry::SpanRef
   #[must_use]
@@ -361,20 +353,14 @@ where
   /// current context, starting with the parent span of the specified event,
   /// and ending with the root of the trace tree and ending with the current span.
   ///
-  /// <pre class="ignore" style="white-space:normal;font:inherit;">
-  /// <strong>Note</strong>: Compared to <a href="#method.scope"><code>scope</code></a> this
+  /// **Note**: Compared to <a href="#method.scope"><code>scope</code></a> this
   /// returns the spans in reverse order (from leaf to root). Use
-  /// <a href="../registry/struct.Scope.html#method.root_to_leaf"><code>Scope::root_to_leaf</code></
-  /// a> in case root-to-leaf ordering is desired.
-  /// </pre>
+  /// [`Scope::root_to_leaf`](crate::registry::Scope::root_to_leaf) in case
+  /// root-to-leaf ordering is desired.
   ///
-  /// <pre class="ignore" style="white-space:normal;font:inherit;">
-  ///     <strong>Note</strong>: This requires the wrapped subscriber to
-  ///     implement the <a href="../registry/trait.LookupSpan.html"><code>
-  ///     LookupSpan</code></a> trait. See the documentation on
-  ///     <a href="./struct.Context.html"><code>Context</code>'s
-  ///     declaration</a> for details.
-  /// </pre>
+  /// **Note**: This requires the wrapped subscriber to implement the
+  /// [`LookupSpan`](crate::registry::LookupSpan) trait. See the documentation on
+  /// [`Context`]'s declaration for details.
   ///
   /// [stored data]: crate::registry::SpanRef
   #[must_use]

@@ -1,16 +1,14 @@
 # AGENTS.md
 
-`tracing-attributes` is the proc-macro crate (`proc-macro = true`) implementing the `#[instrument]` attribute, re-exported by `tracing` behind its `attributes` feature. Workspace-wide build/test/feature/commit conventions live in the root `AGENTS.md`.
+`tracing-attributes` is the proc-macro facade crate (`proc-macro = true`) exposing the `#[instrument]` attribute, re-exported by `tracing` behind its `attributes` feature. All parsing and expansion logic lives in the sibling `tracing-attributes-internal` crate; this crate is a thin delegating shim. Workspace-wide build/test/feature/commit conventions live in the root `AGENTS.md`.
 
 ## Architecture
 
-Three modules, one public entry point:
+Facade/internal split, prescribed by the workspace lint policy: rustc lets a `proc-macro = true` crate export only `#[proc_macro]` items, so internal modules here can be neither genuinely `pub` (`unreachable_pub`) nor `pub(crate)` (`clippy::redundant_pub_crate`). The logic therefore lives in the normal library crate `tracing-attributes-internal` as a genuinely public module tree, and this crate keeps a single file:
 
-- `lib.rs` — the `#[proc_macro_attribute] instrument` entry. It runs a two-pass strategy: `instrument_precise` parses the item as a full `syn::ItemFn` (rejecting `const fn` with a `compile_error!`, and detecting async-trait patterns), and on any parse error falls back to `instrument_speculative`, which parses a `MaybeItemFn` — a relaxed `ItemFn` whose body is kept as a raw `TokenStream` (so it can wrap functions whose bodies don't fully parse, e.g. unstable syntax). Both paths funnel into `expand::gen_function`.
-- `attr.rs` — argument parsing. `InstrumentArgs` (the `Parse` impl driving the whole `#[instrument(...)]` arg list) collects `name`/`target`/`parent`/`follows_from`/`level`/`skip`/`skip_all`/`fields`/`err`/`ret`. Custom keywords live in `mod kw`. Supporting types: `Level` (string `"info"`, numeric `1`–`5`, or a `Path` like `Level::DEBUG`), `EventArgs` + `FormatMode` (`Debug`/`Display`) for `err(...)`/`ret(...)`, and `Fields`/`Field`/`FieldName`/`FieldKind` for the `fields(...)` DSL.
-- `expand.rs` — codegen. `gen_function` → `gen_block` emit the span-creating wrapper; `AsyncInfo::from_fn` / `gen_async` rewrite async-trait-style bodies (`async-trait <= 0.1.43`'s inner `async fn` + `Box::pin`, and `>= 0.1.44`'s `Box::pin(async move {...})`) so the *inner future* is instrumented rather than the allocating wrapper. Several generated fragments deliberately include narrow `#[allow(clippy::...)]` attributes because the macro must compile under downstream lint settings.
+- `lib.rs` — the published crate docs plus the `#[proc_macro_attribute] instrument` entry point, delegating as `tracing_attributes_internal::instrument(args.into(), item_tokens.into()).into()`. The `proc_macro` ↔ `proc_macro2` `TokenStream` conversions come from proc-macro2's `From` impls (reachable through the internal crate), so the shim's only dependency is `tracing-attributes-internal` — do not reintroduce direct `proc-macro2`/`syn`/`quote` dependencies here; unused ones fail the deadcode gate.
 
-Non-obvious: unrecognized `#[instrument]` args are not hard errors. `InstrumentArgs::warnings()` accumulates them and emits a fake `#[deprecated]` const so they surface as warnings (backwards-compat hack until `proc_macro::Diagnostic` stabilizes).
+See `tracing-attributes-internal/AGENTS.md` for the parsing/expansion internals (the `entry`/`attr`/`expand` modules, the two-pass parse strategy, and the `fields(...)` DSL). The external contract — macro name, signature, and rustdoc — is owned by this crate and must stay byte-compatible when the internals move.
 
 ## Features
 
@@ -18,7 +16,7 @@ Non-obvious: unrecognized `#[instrument]` args are not hard errors. `InstrumentA
 
 ## Testing & benches
 
-- Behavioral tests live in `tests/` and assert exact span/event/field output via `tracing-mock` (workspace dev-dep), with `tracing-test` supplying `PollN`/`block_on_future` for the async cases: `async_fn`, `err`, `ret`, `fields`, `levels`, `parents`, `follows_from`, `names`, `targets`, `destructuring`, `dead_code`, `instrument`. Run one with plain cargo: `cargo test -p tracing-attributes --test instrument`.
+- Behavioral tests live in `tests/` and assert exact span/event/field output via `tracing-mock` (workspace dev-dep), with `tracing-test` supplying `PollN`/`block_on_future` for the async cases: `async_fn`, `err`, `ret`, `fields`, `levels`, `parents`, `follows_from`, `names`, `targets`, `destructuring`, `dead_code`, `instrument`. Run one with plain cargo: `cargo test -p tracing-attributes --test instrument`. They exercise the macro surface, so they stay in this crate; the argument-parsing unit tests (duplicate-guard dual-polarity cases) live in `tracing-attributes-internal` next to the code they cover.
 - UI / compile-fail tests: `tests/ui.rs` drives `trybuild` over `tests/ui/pass/*.rs` and `tests/ui/fail/*.rs` (current fail fixtures: `async_instrument`, `const_instrument`, `unused_instrumented_fn`; pass: `type_shadowing`). Both test fns are gated `#[rustversion::stable]`, so they are skipped on beta/nightly — `.stderr` fixtures are stable-pinned by design. Editing any `tests/ui/**/*.stderr` requires the forked `strict-trybuild` git dep to resolve (see root `AGENTS.md`).
 - No benches in this crate.
 

@@ -5,6 +5,8 @@
 mod tests {
   use strict_test_support::TestFailure;
   use strict_test_support::ensure_ok;
+  use tracing::Level;
+  use tracing::level_filters::STATIC_MAX_LEVEL;
   use tracing::subscriber::set_default;
   use tracing::subscriber::set_global_default;
   use tracing_mock::expect;
@@ -15,13 +17,18 @@ mod tests {
     // Reproduces https://github.com/tokio-rs/tracing/issues/2050
 
     let (scoped, scoped_handle) = subscriber::mock()
-      .event(expect::event().with_fields(expect::msg("before global")))
-      .event(expect::event().with_fields(expect::msg("before drop")))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
+        builder
+          .event(expect::event().with_fields(expect::msg("before global")))
+          .event(expect::event().with_fields(expect::msg("before drop")))
+      })
       .only()
       .run_with_handle();
 
     let (global, global_handle) = subscriber::mock()
-      .event(expect::event().with_fields(expect::msg("after drop")))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
+        builder.event(expect::event().with_fields(expect::msg("after drop")))
+      })
       .only()
       .run_with_handle();
 

@@ -51,7 +51,8 @@
 //! ```
 //!
 //! Rolling file appender constructors return a `Result` because initialization
-//! opens the initial log file and can fail. Use [`RollingFileAppender::builder`]
+//! opens the initial log file and can fail. Use
+//! [`RollingFileAppender::builder`](rolling::RollingFileAppender::builder)
 //! and [`rolling::Builder::build`] when you need additional appender options
 //! such as filename suffixes, latest-log symlinks, or log-file retention.
 //!

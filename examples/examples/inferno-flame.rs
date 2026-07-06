@@ -1,90 +1,88 @@
-//! Example binary for tracing workspace checks.
+//! Demonstrates capturing a flamegraph-ready profile of `tracing` spans with `tracing-flame`.
+//!
+//! A `tracing_flame::FlameLayer` records span enter/exit timings as folded stack samples while a
+//! `tracing_subscriber::fmt` layer mirrors events to the console. The example runs a workload of
+//! nested spans, flushes the samples through the layer's `FlushGuard`, and reports the finished
+//! file's path.
+//!
+//! The folded stack file is written to the path passed as the first CLI argument, defaulting to
+//! `tracing-flame.folded` in the current directory:
+//!
+//! ```text
+//! cargo run -p tracing-examples --example inferno-flame [OUTPUT_PATH]
+//! ```
+//!
+//! Rendering the folded samples into an SVG is a separate step performed by inferno's standalone
+//! CLI (installed with `cargo install inferno`):
+//!
+//! ```text
+//! inferno-flamegraph < tracing-flame.folded > flamegraph.svg
+//! ```
 
 use std::env;
 use std::error::Error;
 use std::fs::File;
-use std::io::BufReader;
 use std::io::BufWriter;
-use std::io::Write as _;
-use std::io::stdout;
 use std::path::Path;
 use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::Duration;
 
-use inferno::flamegraph::Options;
-use inferno::flamegraph::{
-  self,
-};
-use tempfile::Builder as TempDirBuilder;
 use tracing::Level;
+use tracing::info;
 use tracing::span;
 use tracing::subscriber::set_global_default;
 use tracing_flame::FlameLayer;
-use tracing_subscriber::prelude::*;
-use tracing_subscriber::registry::Registry;
+use tracing_flame::FlushGuard;
+use tracing_subscriber::fmt;
+use tracing_subscriber::layer::SubscriberExt as _;
+use tracing_subscriber::registry;
 
-/// Folded stack output file consumed by `inferno`.
-const FLAME_FOLDED_FILE: &str = "flame.folded";
+/// Default folded stack output file, consumed by the external `inferno-flamegraph` CLI.
+const FLAME_FOLDED_FILE: &str = "tracing-flame.folded";
 
-/// Install a global subscriber that writes folded stack samples.
+/// Flush guard returned by the flame layer in this example.
+type ExampleFlushGuard = FlushGuard<BufWriter<File>>;
+
+/// Fallible result type used by this example.
+type ExampleResult<T> = Result<T, Box<dyn Error>>;
+
+/// Install a global subscriber that streams folded stack samples to `path` and events to stdout.
 #[allow(
   clippy::single_call_fn,
   reason = "keeps flame-layer setup separate from the simulated workload"
 )]
-fn setup_global_subscriber(dir: &Path) -> Result<impl Drop + use<>, Box<dyn Error>> {
-  let (flame_layer, guard) = FlameLayer::with_file(dir.join(FLAME_FOLDED_FILE))?;
+fn setup_global_subscriber(path: &Path) -> ExampleResult<ExampleFlushGuard> {
+  let (flame_layer, guard) = FlameLayer::with_file(path)?;
 
-  let subscriber = Registry::default().with(flame_layer);
+  let subscriber = registry().with(fmt::layer()).with(flame_layer);
 
   set_global_default(subscriber)?;
 
   Ok(guard)
 }
 
-/// Render the folded samples into an SVG flamegraph.
+/// Return the requested folded-output path or the default path in the current directory.
 #[allow(
   clippy::single_call_fn,
-  reason = "keeps inferno rendering separate from folded-sample generation"
+  reason = "keeps CLI output-path selection separate from subscriber setup"
 )]
-fn make_flamegraph(tmpdir: &Path, output_path: &Path) -> Result<(), Box<dyn Error>> {
-  let mut output = stdout().lock();
-  let displayed_path = output_path.display();
-  writeln!(output, "outputting flamegraph to {displayed_path}")?;
-  let folded_file = File::open(tmpdir.join(FLAME_FOLDED_FILE))?;
-  let reader = BufReader::new(folded_file);
-
-  let output_file = File::create(output_path)?;
-  let writer = BufWriter::new(output_file);
-
-  let mut options = Options::default();
-  flamegraph::from_reader(&mut options, reader, writer)?;
-  Ok(())
-}
-
-/// Return the requested SVG path or the default path in the current directory.
-#[allow(
-  clippy::single_call_fn,
-  reason = "keeps CLI output-path selection separate from flamegraph rendering"
-)]
-fn output_path() -> Result<PathBuf, Box<dyn Error>> {
-  let path = env::args().nth(1).map_or_else(
-    || -> Result<PathBuf, Box<dyn Error>> {
+fn folded_path() -> ExampleResult<PathBuf> {
+  env::args().nth(1).map_or_else(
+    || -> ExampleResult<PathBuf> {
       let mut path = env::current_dir()?;
-      path.push("tracing-flame-inferno.svg");
+      path.push(FLAME_FOLDED_FILE);
       Ok(path)
     },
-    |arg| -> Result<PathBuf, Box<dyn Error>> { Ok(PathBuf::from(arg)) },
-  )?;
-  Ok(path)
+    |arg| -> ExampleResult<PathBuf> { Ok(PathBuf::from(arg)) },
+  )
 }
 
-/// Run the `inferno` flamegraph example.
+/// Run the `tracing-flame` folded stack example.
 fn main() -> Result<(), Box<dyn Error>> {
-  let output_path = output_path()?;
+  let folded_path = folded_path()?;
   // setup the flame layer
-  let tmp_dir = TempDirBuilder::new().prefix("flamegraphs").tempdir()?;
-  let guard = setup_global_subscriber(tmp_dir.path())?;
+  let guard = setup_global_subscriber(folded_path.as_path())?;
 
   // do a bunch of span entering and exiting to simulate a program running
   span!(Level::ERROR, "outer").in_scope(|| {
@@ -99,9 +97,13 @@ fn main() -> Result<(), Box<dyn Error>> {
   });
   sleep(Duration::from_millis(500));
 
-  // drop the guard to make sure the layer flushes its output then read the
-  // output to create the flamegraph
-  drop(guard);
-  make_flamegraph(tmp_dir.path(), output_path.as_path())?;
+  // flush the buffered samples through the guard so the folded file is complete,
+  // then report the follow-up rendering step
+  guard.flush()?;
+  info!(folded_file = %folded_path.display(), "wrote folded stack samples");
+  info!(
+    "render an SVG with: inferno-flamegraph < {} > flamegraph.svg",
+    folded_path.display()
+  );
   Ok(())
 }

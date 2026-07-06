@@ -40,5 +40,12 @@ strict-test-support = { workspace = true, features = ["trybuild"] }
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
 
+# `tokio-stream` has no direct `tokio_stream` reference in this crate: it exists
+# only as a minimal-versions pin so `tokio-test` resolves above its otherwise
+# acceptable 0.1.0 (see the dependency comment above), so cargo-machete reports
+# it as unused.
+[package.metadata.cargo-machete]
+ignored = ["tokio-stream"]
+
 [lints]
 workspace = true

@@ -637,6 +637,50 @@ mod tests {
         vec::Vec,
     };
     use strict_test_support::{TestFailure, ensure, ensure_ok};
+    use tracing_core::callsite::Callsite;
+    use tracing_core::metadata::Kind;
+    use tracing_core::subscriber::NoSubscriber;
+
+    /// Callsite shared by target filter metadata fixtures.
+    struct TargetsTestCallsite;
+
+    /// Static callsite used by target filter metadata fixtures.
+    static TARGETS_TEST_CALLSITE: TargetsTestCallsite = TargetsTestCallsite;
+
+    static TARGET_INFO_META: Metadata<'static> = tracing_core::metadata! {
+        name: "targets_info",
+        target: "app::module",
+        level: Level::INFO,
+        fields: &[],
+        callsite: &TARGETS_TEST_CALLSITE,
+        kind: Kind::EVENT,
+    };
+
+    static TARGET_TRACE_META: Metadata<'static> = tracing_core::metadata! {
+        name: "targets_trace",
+        target: "app::module",
+        level: Level::TRACE,
+        fields: &[],
+        callsite: &TARGETS_TEST_CALLSITE,
+        kind: Kind::EVENT,
+    };
+
+    static OTHER_INFO_META: Metadata<'static> = tracing_core::metadata! {
+        name: "targets_other",
+        target: "other::module",
+        level: Level::INFO,
+        fields: &[],
+        callsite: &TARGETS_TEST_CALLSITE,
+        kind: Kind::EVENT,
+    };
+
+    impl Callsite for TargetsTestCallsite {
+        fn set_interest(&self, _: Interest) {}
+
+        fn metadata(&self) -> &Metadata<'_> {
+            &TARGET_INFO_META
+        }
+    }
 
     struct TargetExpectation {
         target: &'static str,
@@ -825,6 +869,131 @@ mod tests {
                 ],
             "owned targets iterator yields sorted target levels",
         )
+    }
+
+    #[test]
+    fn targets_builders_iterators_and_would_enable_preserve_static_contracts() -> Result<(), TestFailure> {
+        let empty = Targets::new();
+        ensure(
+            empty.to_string().is_empty(),
+            "empty targets display as an empty directive list",
+        )?;
+        ensure(
+            !empty.would_enable("app::module", Level::ERROR),
+            "empty targets enable no target-level pair",
+        )?;
+
+        let built = Targets::new().with_targets(vec![
+            ("app", LevelFilter::INFO),
+            ("app::module", LevelFilter::DEBUG),
+        ]);
+        ensure(
+            built.would_enable("app::module::child", Level::DEBUG),
+            "more-specific target enables its configured level",
+        )?;
+        ensure(
+            !built.would_enable("app::module::child", Level::TRACE),
+            "more-specific target rejects levels above its configured level",
+        )?;
+        ensure(
+            built.would_enable("app::other", Level::INFO),
+            "less-specific target enables unmatched child modules",
+        )?;
+
+        let collected =
+            Targets::from_iter(vec![(String::from("collected"), LevelFilter::WARN)]);
+        let mut borrowed = collected.iter().collect::<Vec<_>>();
+        borrowed.sort();
+        ensure(
+            borrowed == vec![("collected", LevelFilter::WARN)],
+            "from-iterator targets are visible through borrowed iteration",
+        )?;
+
+        let mut owned = collected.into_iter().collect::<Vec<_>>();
+        owned.sort();
+        ensure(
+            owned == vec![(String::from("collected"), LevelFilter::WARN)],
+            "from-iterator targets are visible through owned iteration",
+        )
+    }
+
+    #[test]
+    fn targets_layer_and_filter_hooks_return_static_interests() -> Result<(), TestFailure> {
+        let filter = Targets::new().with_target("app", Level::INFO);
+        let context = layer::Context::<NoSubscriber>::none();
+
+        ensure(
+            ensure_ok(
+                layer::Layer::<NoSubscriber>::enabled(&filter, &TARGET_INFO_META, context.clone()),
+                "layer enabled returns",
+            )?,
+            "layer enables matching metadata",
+        )?;
+        ensure(
+            !ensure_ok(
+                layer::Layer::<NoSubscriber>::enabled(&filter, &TARGET_TRACE_META, context.clone()),
+                "layer disabled returns",
+            )?,
+            "layer rejects levels above the configured target level",
+        )?;
+        ensure(
+            !ensure_ok(
+                layer::Layer::<NoSubscriber>::enabled(&filter, &OTHER_INFO_META, context.clone()),
+                "layer nonmatching target returns",
+            )?,
+            "layer rejects nonmatching targets",
+        )?;
+        ensure(
+            ensure_ok(
+                layer::Layer::<NoSubscriber>::register_callsite(&filter, &TARGET_INFO_META),
+                "layer matching callsite interest",
+            )?
+            .is_always(),
+            "layer reports always interest for matching callsites",
+        )?;
+        ensure(
+            ensure_ok(
+                layer::Layer::<NoSubscriber>::register_callsite(&filter, &TARGET_TRACE_META),
+                "layer rejected callsite interest",
+            )?
+            .is_never(),
+            "layer reports never interest for rejected callsites",
+        )?;
+        ensure(
+            ensure_ok(
+                layer::Layer::<NoSubscriber>::max_level_hint(&filter),
+                "layer max-level hint",
+            )? == Some(LevelFilter::INFO),
+            "layer max-level hint tracks the most verbose configured target",
+        )?;
+
+        #[cfg(feature = "registry")]
+        {
+            ensure(
+                ensure_ok(
+                    layer::Filter::<NoSubscriber>::enabled(&filter, &TARGET_INFO_META, &context),
+                    "filter enabled returns",
+                )?,
+                "per-layer filter enables matching metadata",
+            )?;
+            ensure(
+                ensure_ok(
+                    layer::Filter::<NoSubscriber>::callsite_enabled(&filter, &TARGET_TRACE_META),
+                    "filter rejected callsite interest",
+                )?
+                .is_never(),
+                "per-layer filter reports never interest for rejected callsites",
+            )?;
+            ensure(
+                ensure_ok(
+                    layer::Filter::<NoSubscriber>::max_level_hint(&filter),
+                    "filter max-level hint",
+                )? == Some(LevelFilter::INFO),
+                "per-layer filter max-level hint matches layer hint",
+            )?;
+        };
+
+        Ok(())
     }
 
     #[test]

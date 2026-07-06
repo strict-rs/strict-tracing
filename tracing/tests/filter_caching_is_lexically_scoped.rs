@@ -20,6 +20,7 @@ mod tests {
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
   use tracing::Level;
+  use tracing::level_filters::STATIC_MAX_LEVEL;
   use tracing::span;
   use tracing::subscriber::set_global_default;
   use tracing_mock::*;
@@ -52,24 +53,54 @@ mod tests {
     // test will work even with no-std.
     ensure_ok(set_global_default(subscriber), "global subscriber should install")?;
 
+    // Under a `max_level_*` cap that statically disables TRACE, the spans are
+    // compiled out before the subscriber's filter can run, so the evaluation
+    // count stays at zero instead of climbing to one and then two.
+    let expected_once = usize::from(STATIC_MAX_LEVEL.enables(Level::TRACE));
+    let expected_twice = expected_once.saturating_mul(2);
+
     // Call the function once. The filter should be re-evaluated.
     ensure(my_great_function(), "first emily call enters span")?;
-    ensure_eq(&count.load(Ordering::Relaxed), &1, "first emily call evaluates filter once")?;
+    ensure_eq(
+      &count.load(Ordering::Relaxed),
+      &expected_once,
+      "first emily call evaluates filter once",
+    )?;
 
     // Call the function again. The cached result should be used.
     ensure(my_great_function(), "second emily call enters span")?;
-    ensure_eq(&count.load(Ordering::Relaxed), &1, "second emily call reuses cached filter")?;
+    ensure_eq(
+      &count.load(Ordering::Relaxed),
+      &expected_once,
+      "second emily call reuses cached filter",
+    )?;
 
     ensure(my_other_function(), "first frank call enters span")?;
-    ensure_eq(&count.load(Ordering::Relaxed), &2, "first frank call evaluates its filter")?;
+    ensure_eq(
+      &count.load(Ordering::Relaxed),
+      &expected_twice,
+      "first frank call evaluates its filter",
+    )?;
 
     ensure(my_great_function(), "third emily call enters span")?;
-    ensure_eq(&count.load(Ordering::Relaxed), &2, "third emily call reuses cached filter")?;
+    ensure_eq(
+      &count.load(Ordering::Relaxed),
+      &expected_twice,
+      "third emily call reuses cached filter",
+    )?;
 
     ensure(my_other_function(), "second frank call enters span")?;
-    ensure_eq(&count.load(Ordering::Relaxed), &2, "second frank call reuses cached filter")?;
+    ensure_eq(
+      &count.load(Ordering::Relaxed),
+      &expected_twice,
+      "second frank call reuses cached filter",
+    )?;
 
     ensure(my_great_function(), "fourth emily call enters span")?;
-    ensure_eq(&count.load(Ordering::Relaxed), &2, "fourth emily call reuses cached filter")
+    ensure_eq(
+      &count.load(Ordering::Relaxed),
+      &expected_twice,
+      "fourth emily call reuses cached filter",
+    )
   }
 }

@@ -191,6 +191,12 @@ use tracing::Dispatch;
 use tracing::Metadata;
 use tracing::span;
 
+/// Visitor invoked for each span in a captured trace.
+type SpanTraceVisitor<'a> = dyn FnMut(&'static Metadata<'static>, &str) -> bool + 'a;
+
+/// Type-erased callback used to walk span context for a captured span.
+type WithContextCallback = fn(&Dispatch, span::Id, visitor: &mut SpanTraceVisitor<'_>);
+
 /// Type-erased callback for walking span context after a `SpanTrace` capture.
 ///
 /// This function remembers the types of the subscriber and the formatter, so
@@ -198,7 +204,7 @@ use tracing::span;
 /// types at the callsite.
 pub(crate) struct WithContext(
   /// Invokes the subscriber-specific context walker for a captured span.
-  fn(&Dispatch, span::Id, visitor: &mut dyn FnMut(&'static Metadata<'static>, &str) -> bool),
+  WithContextCallback,
 );
 
 impl fmt::Debug for WithContext {
@@ -213,7 +219,7 @@ impl WithContext {
     clippy::single_call_fn,
     reason = "constructor keeps the type-erased callback field private across sibling modules"
   )]
-  pub(crate) const fn new(callback: fn(&Dispatch, span::Id, visitor: &mut dyn FnMut(&'static Metadata<'static>, &str) -> bool)) -> Self {
+  pub(crate) const fn new(callback: WithContextCallback) -> Self {
     Self(callback)
   }
 
@@ -259,4 +265,113 @@ pub mod prelude {
   pub use crate::ExtractSpanTrace as _;
   pub use crate::InstrumentError as _;
   pub use crate::InstrumentResult as _;
+}
+
+#[cfg(test)]
+mod tests {
+  use std::format;
+  use std::num::NonZeroU64;
+  use std::string::String;
+  use std::vec::Vec;
+
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_contains;
+  use strict_test_support::ensure_eq;
+  use strict_test_support::ensure_some;
+  use tracing::Dispatch;
+  use tracing::Level;
+  use tracing::Metadata;
+  use tracing::callsite::Callsite;
+  use tracing::callsite::Identifier;
+  use tracing::field::FieldSet;
+  use tracing::metadata::Kind;
+  use tracing::metadata::SourceLocation;
+  use tracing::span;
+  use tracing::subscriber::Interest;
+  use tracing::subscriber::NoSubscriber;
+
+  use super::*;
+
+  struct ContextCallsite;
+
+  static CONTEXT_CALLSITE: ContextCallsite = ContextCallsite;
+  static CONTEXT_METADATA: Metadata<'static> = Metadata::new(
+    "context_span",
+    "context_target",
+    Level::INFO,
+    &SourceLocation::empty(),
+    &FieldSet::new(&["answer"], Identifier(&CONTEXT_CALLSITE)),
+    Kind::SPAN,
+  );
+
+  impl Callsite for ContextCallsite {
+    fn set_interest(&self, _: Interest) {}
+
+    fn metadata(&self) -> &Metadata<'_> {
+      &CONTEXT_METADATA
+    }
+  }
+
+  fn context_span_id() -> span::Id {
+    span::Id::from_non_zero_u64(NonZeroU64::MIN)
+  }
+
+  fn visit_context_for_test(_dispatch: &Dispatch, id: span::Id, visitor: &mut SpanTraceVisitor<'_>) {
+    if id != context_span_id() {
+      return;
+    }
+
+    if visitor(&CONTEXT_METADATA, "answer=42") {
+      let _continued = visitor(&CONTEXT_METADATA, "second=true");
+    }
+  }
+
+  #[test]
+  fn with_context_debug_names_erased_bridge() -> Result<(), TestFailure> {
+    let bridge = WithContext::new(visit_context_for_test);
+    let debugged = format!("{bridge:?}");
+    ensure_contains(&debugged, "WithContext", "debug output should name the erased context bridge")
+  }
+
+  #[test]
+  fn with_context_visits_metadata_and_honors_early_stop() -> Result<(), TestFailure> {
+    let bridge = WithContext::new(visit_context_for_test);
+    let dispatch = Dispatch::new(NoSubscriber::new());
+    let context_id = context_span_id();
+    let mut visits = Vec::new();
+    bridge.with_context(&dispatch, context_id, |metadata, fields| {
+      visits.push((String::from(metadata.name()), String::from(fields)));
+      true
+    });
+
+    ensure_eq(&visits.len(), &2_usize, "continuing visitor should receive both callback entries")?;
+    let first = ensure_some(visits.first(), "first bridge visit should be present")?;
+    ensure_eq(&first.0, &String::from("context_span"), "bridge visitor should receive metadata")?;
+    ensure_eq(
+      &first.1,
+      &String::from("answer=42"),
+      "bridge visitor should receive formatted fields",
+    )?;
+    let second = ensure_some(visits.get(1), "second bridge visit should be present")?;
+    ensure_eq(
+      &second.1,
+      &String::from("second=true"),
+      "bridge should continue while the visitor returns true",
+    )?;
+
+    let mut stopped = Vec::new();
+    bridge.with_context(&dispatch, context_id, |metadata, fields| {
+      stopped.push((String::from(metadata.name()), String::from(fields)));
+      false
+    });
+    ensure_eq(&stopped.len(), &1_usize, "false from the visitor should stop callback iteration")?;
+
+    let mut ignored = Vec::new();
+    bridge.with_context(&dispatch, span::Id::from_non_zero_u64(NonZeroU64::MAX), |metadata, fields| {
+      ignored.push((String::from(metadata.name()), String::from(fields)));
+      true
+    });
+    ensure(ignored.is_empty(), "callback should not visit metadata for another span ID")
+  }
 }

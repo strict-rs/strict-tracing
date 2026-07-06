@@ -933,9 +933,9 @@ impl<F, T> Format<F, T> {
 
                 // If getting the timestamp failed, don't bail --- only bail on
                 // formatting errors.
-                if self.timer.format_time(writer).is_err() {
-                    writer.write_str("<unknown time>")?;
-                }
+                self.timer
+                    .format_time(writer)
+                    .or_else(|_| writer.write_str("<unknown time>"))?;
 
                 write!(writer, "{} ", style.suffix())?;
                 return Ok(());
@@ -1047,6 +1047,45 @@ fn write_thread_context(display: FormatDisplay, writer: &mut Writer<'_>) -> fmt:
     Ok(())
 }
 
+/// Returns a level formatter configured for the current writer.
+#[cfg(feature = "ansi")]
+const fn fmt_level<'a>(level: &'a Level, writer: &Writer<'_>) -> FmtLevel<'a> {
+    FmtLevel {
+        level,
+        ansi: writer.has_ansi_escapes(),
+    }
+}
+
+/// Returns a level formatter configured for the current writer.
+#[cfg(not(feature = "ansi"))]
+const fn fmt_level<'a>(level: &'a Level, _writer: &Writer<'_>) -> FmtLevel<'a> {
+    FmtLevel { level }
+}
+
+/// Returns dimmed styling configured for the current writer.
+#[cfg(feature = "ansi")]
+fn dimmed_style(writer: &Writer<'_>) -> Style {
+    writer.dimmed()
+}
+
+/// Returns dimmed styling configured for the current writer.
+#[cfg(not(feature = "ansi"))]
+const fn dimmed_style(_writer: &Writer<'_>) -> Style {
+    Style::new()
+}
+
+/// Returns italic styling configured for the current writer.
+#[cfg(feature = "ansi")]
+fn italic_style(writer: &Writer<'_>) -> Style {
+    writer.italic()
+}
+
+/// Returns italic styling configured for the current writer.
+#[cfg(not(feature = "ansi"))]
+const fn italic_style(_writer: &Writer<'_>) -> Style {
+    Style::new()
+}
+
 impl<S, N, T> FormatEvent<S, N> for Format<Full, T>
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
@@ -1079,43 +1118,19 @@ where
         self.format_timestamp(&mut writer)?;
 
         if self.display.level() {
-            let fmt_level = {
-                #[cfg(feature = "ansi")]
-                {
-                    FmtLevel::new(meta.level(), writer.has_ansi_escapes())
-                }
-                #[cfg(not(feature = "ansi"))]
-                {
-                    FmtLevel::new(meta.level())
-                }
-            };
+            let fmt_level = fmt_level(meta.level(), &writer);
             write!(writer, "{fmt_level} ")?;
         }
 
         write_thread_context(self.display, &mut writer)?;
 
-        let dimmed = {
-            #[cfg(feature = "ansi")]
-            {
-                writer.dimmed()
-            }
-            #[cfg(not(feature = "ansi"))]
-            {
-                Style::new()
-            }
-        };
+        let dimmed = dimmed_style(&writer);
 
         if let Some(scope) = ctx.event_scope() {
-            let bold = {
-                #[cfg(feature = "ansi")]
-                {
-                    writer.bold()
-                }
-                #[cfg(not(feature = "ansi"))]
-                {
-                    Style::new()
-                }
-            };
+            #[cfg(feature = "ansi")]
+            let bold = writer.bold();
+            #[cfg(not(feature = "ansi"))]
+            let bold = Style::new();
 
             let mut seen = false;
 
@@ -1123,14 +1138,18 @@ where
                 write!(writer, "{}", bold.paint(span.metadata().name()))?;
                 seen = true;
 
-                {
-                    let ext = span.extensions();
-                    if let Some(fields) = ext.get::<FormattedFields<N>>()
-                        && !fields.is_empty()
-                    {
-                        write!(writer, "{}{}{}", bold.paint("{"), fields, bold.paint("}"))?;
-                    }
-                }
+                let ext = span.extensions();
+                match ext.get::<FormattedFields<N>>() {
+                    Some(fields) if !fields.is_empty() => write!(
+                        writer,
+                        "{}{}{}",
+                        bold.paint("{"),
+                        fields,
+                        bold.paint("}")
+                    ),
+                    Some(_) | None => Ok(()),
+                }?;
+                drop(ext);
                 write!(writer, "{}", dimmed.paint(":"))?;
             }
 
@@ -1213,16 +1232,7 @@ where
         self.format_timestamp(&mut writer)?;
 
         if self.display.level() {
-            let fmt_level = {
-                #[cfg(feature = "ansi")]
-                {
-                    FmtLevel::new(meta.level(), writer.has_ansi_escapes())
-                }
-                #[cfg(not(feature = "ansi"))]
-                {
-                    FmtLevel::new(meta.level())
-                }
-            };
+            let fmt_level = fmt_level(meta.level(), &writer);
             write!(writer, "{fmt_level} ")?;
         }
 
@@ -1240,16 +1250,7 @@ where
         };
         write!(writer, "{fmt_ctx}")?;
 
-        let dimmed = {
-            #[cfg(feature = "ansi")]
-            {
-                writer.dimmed()
-            }
-            #[cfg(not(feature = "ansi"))]
-            {
-                Style::new()
-            }
-        };
+        let dimmed = dimmed_style(&writer);
 
         let mut needs_space = self.display.target();
         if needs_space {
@@ -1404,46 +1405,28 @@ impl<'a> DefaultVisitor<'a> {
 }
 
 impl Visit for DefaultVisitor<'_> {
-    fn record_str(&mut self, field: &Field, value: &str) {
+    fn record_str(&mut self, field: &Field, field_value: &str) {
         if self.result.is_err() {
             return;
         }
 
         if field.name() == "message" {
-            self.record_debug(field, &format_args!("{value}"));
+            self.record_debug(field, &format_args!("{field_value}"));
         } else {
-            self.record_debug(field, &value);
+            self.record_debug(field, &field_value);
         }
     }
 
-    fn record_error(&mut self, field: &Field, value: &(dyn Error + 'static)) {
+    fn record_error(&mut self, field: &Field, field_value: &(dyn Error + 'static)) {
         let sanitize = self.writer.sanitizes_ansi_escapes();
-        if let Some(source) = value.source() {
-            let italic = {
-                #[cfg(feature = "ansi")]
-                {
-                    self.writer.italic()
-                }
-                #[cfg(not(feature = "ansi"))]
-                {
-                    Style::new()
-                }
-            };
-            let dimmed = {
-                #[cfg(feature = "ansi")]
-                {
-                    self.writer.dimmed()
-                }
-                #[cfg(not(feature = "ansi"))]
-                {
-                    Style::new()
-                }
-            };
+        if let Some(source) = field_value.source() {
+            let italic = italic_style(&self.writer);
+            let dimmed = dimmed_style(&self.writer);
             self.record_debug(
                 field,
                 &format_args!(
                     "{} {}{}{}{}",
-                    EscapeGuard::new(format_args!("{value}"), sanitize),
+                    EscapeGuard::new(format_args!("{field_value}"), sanitize),
                     italic.paint(field.name()),
                     italic.paint(".sources"),
                     dimmed.paint("="),
@@ -1451,11 +1434,11 @@ impl Visit for DefaultVisitor<'_> {
                 ),
             );
         } else {
-            self.record_debug(field, &EscapeGuard::new(format_args!("{value}"), sanitize));
+            self.record_debug(field, &EscapeGuard::new(format_args!("{field_value}"), sanitize));
         }
     }
 
-    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
+    fn record_debug(&mut self, field: &Field, field_value: &dyn Debug) {
         if self.result.is_err() {
             return;
         }
@@ -1476,29 +1459,11 @@ impl Visit for DefaultVisitor<'_> {
             write!(
                 self.writer,
                 "{}",
-                EscapeGuard::new(DebugValue(value), self.writer.sanitizes_ansi_escapes())
+                EscapeGuard::new(DebugValue(field_value), self.writer.sanitizes_ansi_escapes())
             )
         } else {
-            let italic = {
-                #[cfg(feature = "ansi")]
-                {
-                    self.writer.italic()
-                }
-                #[cfg(not(feature = "ansi"))]
-                {
-                    Style::new()
-                }
-            };
-            let dimmed = {
-                #[cfg(feature = "ansi")]
-                {
-                    self.writer.dimmed()
-                }
-                #[cfg(not(feature = "ansi"))]
-                {
-                    Style::new()
-                }
-            };
+            let italic = italic_style(&self.writer);
+            let dimmed = dimmed_style(&self.writer);
 
             if let Some(raw_name) = name.strip_prefix("r#") {
                 write!(
@@ -1506,7 +1471,7 @@ impl Visit for DefaultVisitor<'_> {
                     "{}{}{}",
                     italic.paint(raw_name),
                     dimmed.paint("="),
-                    DebugValue(value)
+                    DebugValue(field_value)
                 )
             } else {
                 write!(
@@ -1514,7 +1479,7 @@ impl Visit for DefaultVisitor<'_> {
                     "{}{}{}",
                     italic.paint(name),
                     dimmed.paint("="),
-                    DebugValue(value)
+                    DebugValue(field_value)
                 )
             }
         };
@@ -1782,20 +1747,6 @@ struct FmtLevel<'a> {
     ansi: bool,
 }
 
-impl<'a> FmtLevel<'a> {
-    #[cfg(feature = "ansi")]
-    /// Returns a level formatter with explicit ANSI support.
-    pub(super) const fn new(level: &'a Level, ansi: bool) -> Self {
-        Self { level, ansi }
-    }
-
-    /// Returns a level formatter.
-    #[cfg(not(feature = "ansi"))]
-    pub(super) const fn new(level: &'a Level) -> Self {
-        Self { level }
-    }
-}
-
 /// Trace-level display text.
 const TRACE_STR: &str = "TRACE";
 /// Debug-level display text.
@@ -1864,9 +1815,9 @@ impl<'a, F> Visit for FieldFnVisitor<'a, F>
 where
     F: Fn(&mut Writer<'a>, &Field, &dyn Debug) -> fmt::Result,
 {
-    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
+    fn record_debug(&mut self, field: &Field, field_value: &dyn Debug) {
         if self.result.is_ok() {
-            self.result = (self.f)(&mut self.writer, field, value);
+            self.result = (self.f)(&mut self.writer, field, field_value);
         }
     }
 }
@@ -1967,15 +1918,12 @@ impl_fmt_span_bit_assign_op!(BitXorAssign, bitxor_assign, ^);
 
 impl Debug for FmtSpan {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut wrote_flag = false;
+        let mut separator = "";
         let mut write_flags = |flag, flag_str| -> fmt::Result {
             if self.contains(flag) {
-                if wrote_flag {
-                    f.write_str(" | ")?;
-                }
-
+                f.write_str(separator)?;
                 f.write_str(flag_str)?;
-                wrote_flag = true;
+                separator = " | ";
             }
 
             Ok(())
@@ -2105,8 +2053,8 @@ fn write_fixed_duration(
     let half_unit = nanos_per_unit.checked_div(2).ok_or(fmt::Error)?;
     let scaled = nanos
         .checked_mul(scale)
-        .and_then(|value| value.checked_add(half_unit))
-        .and_then(|value| value.checked_div(nanos_per_unit))
+        .and_then(|scaled_nanos| scaled_nanos.checked_add(half_unit))
+        .and_then(|scaled_nanos| scaled_nanos.checked_div(nanos_per_unit))
         .ok_or(fmt::Error)?;
 
     if precision == 0 {
@@ -2135,6 +2083,7 @@ pub(super) mod test {
     use tracing::{
         self,
         dispatcher::{set_default, Dispatch},
+        field::Empty,
         subscriber::with_default,
     };
 
@@ -2142,12 +2091,27 @@ pub(super) mod test {
 
     use regex::Regex;
     use std::path::Path;
-    use strict_test_support::{TestFailure, ensure, ensure_eq, ensure_ok, ensure_some};
+    use strict_test_support::{
+        TestFailure, ensure, ensure_contains, ensure_eq, ensure_ok, ensure_some,
+    };
 
     pub(in crate::fmt) struct MockTime;
     impl FormatTime for MockTime {
         fn format_time(&self, writer: &mut Writer<'_>) -> FmtResult {
             write!(writer, "fake time")
+        }
+    }
+
+    type TestEventFormatter = fn(
+        &FmtContext<'_, crate::Registry, DefaultFields>,
+        Writer<'_>,
+        &Event<'_>,
+    ) -> fmt::Result;
+
+    struct FailingTime;
+    impl FormatTime for FailingTime {
+        fn format_time(&self, _writer: &mut Writer<'_>) -> FmtResult {
+            Err(fmt::Error)
         }
     }
 
@@ -2175,6 +2139,347 @@ pub(super) mod test {
         assert_info_hello(subscriber, &make_writer, "hello\n")
     }
 
+    #[test]
+    fn writer_forwards_fmt_writes_and_reports_configuration() -> Result<(), TestFailure> {
+        let mut output = String::new();
+        let writer_result = {
+            let mut writer = Writer::new(&mut output).with_ansi_sanitization(false);
+
+            ensure(
+                !writer.has_ansi_escapes(),
+                "new writers do not enable ANSI escapes by default",
+            )?;
+            ensure(
+                !writer.sanitizes_ansi_escapes(),
+                "writer exposes disabled ANSI sanitization",
+            )?;
+            ensure_ok(
+                write!(writer.by_ref(), "alpha"),
+                "by-ref writer forwards formatted writes",
+            )?;
+            ensure_ok(writer.write_char(':'), "writer forwards character writes")?;
+            ensure_ok(
+                writer.write_fmt(format_args!("{}", "beta")),
+                "writer forwards fmt arguments",
+            )?;
+
+            let debug = format!("{writer:?}");
+            ensure_contains(&debug, "Writer", "writer debug names the adapter")?;
+            ensure_contains(&debug, "is_ansi: false", "writer debug reports ANSI support")?;
+            ensure_contains(
+                &debug,
+                "ansi_sanitization: false",
+                "writer debug reports sanitization state",
+            )?;
+            Ok::<(), TestFailure>(())
+        };
+        writer_result?;
+
+        ensure_eq(&output.as_str(), &"alpha:beta", "writer forwards all writes to the inner buffer")
+    }
+
+    #[test]
+    fn format_display_flags_toggle_each_output_axis() -> Result<(), TestFailure> {
+        let defaults = FormatDisplay::default();
+        ensure(defaults.timestamp(), "default display includes timestamps")?;
+        ensure(defaults.target(), "default display includes targets")?;
+        ensure(defaults.level(), "default display includes levels")?;
+        ensure(!defaults.thread_id(), "default display omits thread IDs")?;
+        ensure(!defaults.thread_name(), "default display omits thread names")?;
+        ensure(!defaults.filename(), "default display omits source files")?;
+        ensure(!defaults.line_number(), "default display omits source line numbers")?;
+
+        let customized = defaults
+            .with_timestamp(false)
+            .with_target(false)
+            .with_level(false)
+            .with_thread_id(true)
+            .with_thread_name(true)
+            .with_filename(true)
+            .with_line_number(true);
+
+        ensure(!customized.timestamp(), "timestamp flag can be disabled")?;
+        ensure(!customized.target(), "target flag can be disabled")?;
+        ensure(!customized.level(), "level flag can be disabled")?;
+        ensure(customized.thread_id(), "thread ID flag can be enabled")?;
+        ensure(customized.thread_name(), "thread name flag can be enabled")?;
+        ensure(customized.filename(), "source file flag can be enabled")?;
+        ensure(customized.line_number(), "line number flag can be enabled")
+    }
+
+    #[test]
+    fn format_builders_preserve_kind_and_toggle_display_options() -> Result<(), TestFailure> {
+        let configured = format()
+            .without_time()
+            .with_target(false)
+            .with_level(false)
+            .with_thread_ids(true)
+            .with_thread_names(true)
+            .with_source_location(true);
+
+        ensure(!configured.display.timestamp(), "without_time disables timestamps")?;
+        ensure(!configured.display.target(), "with_target disables targets")?;
+        ensure(!configured.display.level(), "with_level disables levels")?;
+        ensure(configured.display.thread_id(), "with_thread_ids enables thread IDs")?;
+        ensure(configured.display.thread_name(), "with_thread_names enables thread names")?;
+        ensure(configured.display.filename(), "with_source_location enables file display")?;
+        ensure(
+            configured.display.line_number(),
+            "with_source_location enables line-number display",
+        )?;
+
+        let hidden_location = configured.with_source_location(false);
+        ensure(!hidden_location.display.filename(), "with_source_location disables file display")?;
+        ensure(
+            !hidden_location.display.line_number(),
+            "with_source_location disables line-number display",
+        )
+    }
+
+    #[cfg(feature = "json")]
+    #[test]
+    fn json_format_builder_toggles_structured_output_options() -> Result<(), TestFailure> {
+        let configured = format()
+            .json()
+            .flatten_event(true)
+            .with_current_span(false)
+            .with_span_list(false);
+
+        ensure(configured.kind.flattens_event(), "flatten_event enables root event fields")?;
+        ensure(
+            !configured.kind.displays_current_span(),
+            "with_current_span disables current-span output",
+        )?;
+        ensure(
+            !configured.kind.displays_span_list(),
+            "with_span_list disables span-list output",
+        )
+    }
+
+    #[test]
+    fn timestamp_formatting_falls_back_and_respects_disabled_timestamps() -> Result<(), TestFailure> {
+        let enabled = Format {
+            kind: Full,
+            timer: FailingTime,
+            ansi: None,
+            display: FormatDisplay::default(),
+        };
+        let mut enabled_output = String::new();
+        let enabled_result = {
+            let mut enabled_writer = Writer::new(&mut enabled_output);
+            ensure_ok(
+                enabled.format_timestamp(&mut enabled_writer),
+                "failing timers fall back to unknown time",
+            )?;
+            Ok::<(), TestFailure>(())
+        };
+        enabled_result?;
+        ensure_eq(
+            &enabled_output.as_str(),
+            &"<unknown time> ",
+            "failing timestamp writes fallback text",
+        )?;
+
+        let disabled = Format {
+            kind: Full,
+            timer: FailingTime,
+            ansi: None,
+            display: FormatDisplay::default().with_timestamp(false),
+        };
+        let mut disabled_output = String::new();
+        let disabled_result = {
+            let mut disabled_writer = Writer::new(&mut disabled_output);
+            ensure_ok(
+                disabled.format_timestamp(&mut disabled_writer),
+                "disabled timestamps skip failing timers",
+            )?;
+            Ok::<(), TestFailure>(())
+        };
+        disabled_result?;
+
+        ensure_eq(&disabled_output.as_str(), &"", "disabled timestamps write no prefix")
+    }
+
+    #[test]
+    fn field_function_formatter_forwards_each_recorded_field() -> Result<(), TestFailure> {
+        let make_writer = MockMakeWriter::default();
+        let field_formatter = debug_fn(|writer: &mut Writer<'_>, field: &Field, value: &dyn Debug| {
+            write!(writer, "{}={};", field.name(), DebugValue(value))
+        });
+        let subscriber = Subscriber::builder()
+            .fmt_fields(field_formatter)
+            .with_writer(make_writer.clone())
+            .without_time()
+            .with_level(false)
+            .with_target(false)
+            .finish();
+
+        with_default(subscriber, || {
+            tracing::info!(answer = 42_i64, enabled = true, "field fn event");
+        });
+
+        let output = make_writer.get_string();
+        ensure_contains(&output, "message=field fn event;", "field function receives message fields")?;
+        ensure_contains(&output, "answer=42;", "field function receives numeric fields")?;
+        ensure_contains(&output, "enabled=true;", "field function receives boolean fields")
+    }
+
+    #[test]
+    fn field_function_formatter_controls_rendered_values() -> Result<(), TestFailure> {
+        let make_writer = MockMakeWriter::default();
+        let field_formatter = debug_fn(|writer: &mut Writer<'_>, field: &Field, _value: &dyn Debug| {
+            write!(writer, "{}=<redacted>;", field.name())
+        });
+        let subscriber = Subscriber::builder()
+            .fmt_fields(field_formatter)
+            .with_writer(make_writer.clone())
+            .without_time()
+            .with_level(false)
+            .with_target(false)
+            .finish();
+
+        with_default(subscriber, || {
+            tracing::info!(secret = "token", "redacted event");
+        });
+
+        let output = make_writer.get_string();
+        ensure_contains(&output, "message=<redacted>;", "field function controls message rendering")?;
+        ensure_contains(&output, "secret=<redacted>;", "field function controls field rendering")?;
+        ensure(!output.contains("token"), "field function can suppress raw field values")
+    }
+
+    #[test]
+    fn function_pointer_event_formatter_forwards_context_and_event() -> Result<(), TestFailure> {
+        let make_writer = MockMakeWriter::default();
+        let formatter: TestEventFormatter = |ctx, mut writer, event| {
+            write!(writer, "fn {} ", event.metadata().level())?;
+            ctx.format_fields(writer.by_ref(), event)?;
+            writeln!(writer)
+        };
+        let subscriber = Subscriber::builder()
+            .event_format(formatter)
+            .with_writer(make_writer.clone())
+            .finish();
+
+        with_default(subscriber, || {
+            tracing::info!("pointer formatter");
+        });
+
+        let output = make_writer.get_string();
+        ensure_eq(
+            &output.as_str(),
+            &"fn INFO pointer formatter\n",
+            "function pointer event formatter receives event metadata and context fields",
+        )
+    }
+
+    #[test]
+    fn default_fields_add_recorded_span_fields_to_existing_output() -> Result<(), TestFailure> {
+        let make_writer = MockMakeWriter::default();
+        let subscriber = Subscriber::builder()
+            .with_writer(make_writer.clone())
+            .without_time()
+            .with_level(false)
+            .with_target(false)
+            .with_ansi(false)
+            .finish();
+
+        with_default(subscriber, || {
+            let span = tracing::info_span!("recorded", first = 1, second = Empty);
+            let _recorded_span = span.record("second", 2);
+            let _entered_span = span.enter();
+            tracing::info!("inside recorded span");
+        });
+
+        let output = make_writer.get_string();
+        ensure_contains(
+            &output,
+            "recorded{first=1 second=2}: inside recorded span",
+            "recorded span fields are appended to previously formatted fields",
+        )
+    }
+
+    #[test]
+    fn default_fields_render_error_sources_and_raw_field_names() -> Result<(), TestFailure> {
+        #[derive(Debug)]
+        struct InnerError;
+
+        impl Display for InnerError {
+            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("inner failure")
+            }
+        }
+
+        impl Error for InnerError {}
+
+        #[derive(Debug)]
+        struct OuterError {
+            source: InnerError,
+        }
+
+        impl Display for OuterError {
+            fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+                formatter.write_str("outer failure")
+            }
+        }
+
+        impl Error for OuterError {
+            fn source(&self) -> Option<&(dyn Error + 'static)> {
+                Some(&self.source)
+            }
+        }
+
+        let make_writer = MockMakeWriter::default();
+        let subscriber = Subscriber::builder()
+            .with_writer(make_writer.clone())
+            .without_time()
+            .with_level(false)
+            .with_target(false)
+            .with_ansi(false)
+            .finish();
+        let error = OuterError { source: InnerError };
+        let error_ref: &(dyn Error + 'static) = &error;
+
+        with_default(subscriber, || {
+            tracing::error!(error = error_ref, r#type = "config", "operation failed");
+        });
+
+        let output = make_writer.get_string();
+        ensure_contains(&output, "operation failed", "default fields render message text")?;
+        ensure_contains(&output, "error=outer failure", "default fields render error display")?;
+        ensure_contains(
+            &output,
+            "error.sources=[inner failure]",
+            "default fields render error source chains",
+        )?;
+        ensure_contains(
+            &output,
+            "type=\"config\"",
+            "default fields strip raw identifier prefixes",
+        )
+    }
+
+    #[test]
+    fn thread_name_display_aligns_to_longest_observed_name() -> Result<(), TestFailure> {
+        let mut short = String::new();
+        ensure_ok(
+            write!(&mut short, "{}", FmtThreadName::new("fmt")),
+            "short thread name formats",
+        )?;
+        let mut long = String::new();
+        ensure_ok(
+            write!(&mut long, "{}", FmtThreadName::new("fmt-worker")),
+            "long thread name formats",
+        )?;
+
+        ensure(short.ends_with("fmt"), "short thread names keep their suffix")?;
+        ensure_eq(
+            &long.as_str(),
+            &"fmt-worker",
+            "longest observed thread name is not padded",
+        )
+    }
+
     fn test_ansi<T>(
         is_ansi: bool,
         expected: &str,
@@ -2189,7 +2494,7 @@ pub(super) mod test {
             .with_writer(make_writer.clone())
             .with_ansi(is_ansi)
             .with_timer(MockTime);
-        run_test(subscriber, &make_writer, expected)
+        assert_info_hello(subscriber, &make_writer, expected)
     }
 
     #[cfg(not(feature = "ansi"))]
@@ -2203,7 +2508,7 @@ pub(super) mod test {
     {
         let make_writer = MockMakeWriter::default();
         let subscriber = builder.with_writer(make_writer.clone()).with_timer(MockTime);
-        run_test(subscriber, &make_writer, expected)
+        assert_info_hello(subscriber, &make_writer, expected)
     }
 
     fn test_without_level<T>(
@@ -2220,7 +2525,7 @@ pub(super) mod test {
             .with_level(false)
             .with_ansi(false)
             .with_timer(MockTime);
-        run_test(subscriber, &make_writer, expected)
+        assert_info_hello(subscriber, &make_writer, expected)
     }
 
     #[test]
@@ -2301,8 +2606,8 @@ pub(super) mod test {
         assert_info_hello_ignore_numeric(subscriber, &make_writer, expected)
     }
 
-    #[test]
-    fn pretty_default() -> Result<(), TestFailure> {
+    /// Renders the default pretty formatter and checks the `INFO`/source-location layout.
+    fn ensure_pretty_default_output() -> Result<(), TestFailure> {
         let make_writer = MockMakeWriter::default();
         let subscriber = Subscriber::builder()
             .pretty()
@@ -2315,6 +2620,11 @@ pub(super) mod test {
         );
 
         assert_info_hello_ignore_numeric(subscriber, &make_writer, &expected)
+    }
+
+    #[test]
+    fn pretty_default() -> Result<(), TestFailure> {
+        ensure_pretty_default_output()
     }
 
     fn assert_info_hello(
@@ -2418,17 +2728,6 @@ pub(super) mod test {
                 "overridden parent output in scope matches",
             )
         })
-    }
-
-    fn run_test(
-        subscriber: impl Into<Dispatch>,
-        buf: &MockMakeWriter,
-        expected: &str,
-    ) -> Result<(), TestFailure> {
-        let _default = set_default(&subscriber.into());
-        tracing::info!("hello");
-        let result = buf.get_string();
-        ensure_eq(&result.as_str(), &expected, "formatted event output matches")
     }
 
     mod default {
@@ -2542,18 +2841,7 @@ pub(super) mod test {
 
         #[test]
         fn pretty_default() -> Result<(), TestFailure> {
-            let make_writer = MockMakeWriter::default();
-            let subscriber = Subscriber::builder()
-                .pretty()
-                .with_writer(make_writer.clone())
-                .with_ansi(false)
-                .with_timer(MockTime);
-            let expected = format!(
-                "  fake time  INFO tracing_subscriber::fmt::format::test: hello\n    at {}:NUMERIC\n\n",
-                file!()
-            );
-
-            assert_info_hello_ignore_numeric(subscriber, &make_writer, &expected)
+            ensure_pretty_default_output()
         }
     }
 

@@ -10,6 +10,7 @@ mod tests {
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use tracing::Level;
+  use tracing::level_filters::STATIC_MAX_LEVEL;
   use tracing::subscriber::set_global_default;
   use tracing_mock::*;
 
@@ -31,9 +32,15 @@ mod tests {
         saw_over_hint_filter.store(meta.level() > &Level::INFO, Ordering::Relaxed);
         true
       })
-      .event(expect::event().at_level(Level::INFO))
-      .event(expect::event().at_level(Level::WARN))
-      .event(expect::event().at_level(Level::ERROR))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
+        builder.event(expect::event().at_level(Level::INFO))
+      })
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::WARN), |builder| {
+        builder.event(expect::event().at_level(Level::WARN))
+      })
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::ERROR), |builder| {
+        builder.event(expect::event().at_level(Level::ERROR))
+      })
       .only()
       .run_with_handle();
 

@@ -4,10 +4,8 @@ use strict_test_support::ensure_ok;
 use tracing::Subscriber;
 use tracing::subscriber::set_default;
 use tracing_subscriber::Layer as _;
+use tracing_subscriber::filter;
 use tracing_subscriber::filter::LevelFilter;
-use tracing_subscriber::filter::{
-  self,
-};
 use tracing_subscriber::prelude::*;
 
 use super::*;

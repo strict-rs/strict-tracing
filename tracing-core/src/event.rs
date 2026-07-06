@@ -32,6 +32,10 @@ pub struct Event<'a> {
 impl<'a> Event<'a> {
   /// Constructs a new `Event` with the specified metadata and set of values,
   /// and observes it with the current subscriber.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "public event dispatch helper remains the manual instrumentation entry point"
+  )]
   pub fn dispatch(metadata: &'static Metadata<'static>, fields: &'a field::ValueSet<'_>) {
     let event = Self::new(metadata, fields);
     get_default(|current| {

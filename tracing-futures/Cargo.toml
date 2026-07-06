@@ -20,25 +20,15 @@ rust-version.workspace = true
 
 [features]
 default = ["std-future", "std"]
-futures-01 = ["futures_01", "std"]
 futures-03 = ["std-future", "futures", "futures-task", "std"]
 std-future = ["pin-project-lite"]
-tokio = ["tokio_01", "tokio-executor"]
-tokio-executor = ["dep:tokio-executor"]
 std = ["tracing/std"]
 
 [dependencies]
-futures_01 = { workspace = true, optional = true }
 futures = { workspace = true, optional = true, default-features = true }
 futures-task = { workspace = true, optional = true }
 pin-project-lite = { workspace = true, optional = true }
 tracing = { workspace = true }
-tokio-executor = { workspace = true, optional = true }
-tokio_01 = { workspace = true, optional = true }
-
-# Fix minimal-versions
-tokio-threadpool = { workspace = true, optional = true }
-mio = { workspace = true, optional = true }
 
 [dev-dependencies]
 futures = { workspace = true, default-features = true }

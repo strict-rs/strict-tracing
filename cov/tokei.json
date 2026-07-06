@@ -18,10 +18,10 @@
     ]
   },
   "Just": {
-    "blanks": 98,
+    "blanks": 49,
     "children": {},
-    "code": 158,
-    "comments": 194,
+    "code": 79,
+    "comments": 97,
     "inaccurate": false,
     "reports": [
       {
@@ -32,20 +32,11 @@
           "code": 79,
           "comments": 97
         }
-      },
-      {
-        "name": "./template-baselines/justfile",
-        "stats": {
-          "blanks": 49,
-          "blobs": {},
-          "code": 79,
-          "comments": 97
-        }
       }
     ]
   },
   "Markdown": {
-    "blanks": 2256,
+    "blanks": 2253,
     "children": {
       "BASH": [
         {
@@ -260,7 +251,7 @@
       ]
     },
     "code": 0,
-    "comments": 5365,
+    "comments": 5324,
     "inaccurate": false,
     "reports": [
       {
@@ -269,7 +260,7 @@
           "blanks": 52,
           "blobs": {},
           "code": 0,
-          "comments": 125
+          "comments": 126
         }
       },
       {
@@ -352,7 +343,7 @@
           "blanks": 3,
           "blobs": {},
           "code": 0,
-          "comments": 81
+          "comments": 80
         }
       },
       {
@@ -405,12 +396,30 @@
         }
       },
       {
+        "name": "./tracing-attributes-internal/AGENTS.md",
+        "stats": {
+          "blanks": 9,
+          "blobs": {},
+          "code": 0,
+          "comments": 15
+        }
+      },
+      {
+        "name": "./tracing-attributes-internal/CLAUDE.md",
+        "stats": {
+          "blanks": 0,
+          "blobs": {},
+          "code": 0,
+          "comments": 1
+        }
+      },
+      {
         "name": "./tracing-attributes/AGENTS.md",
         "stats": {
           "blanks": 11,
           "blobs": {},
           "code": 0,
-          "comments": 19
+          "comments": 17
         }
       },
       {
@@ -466,7 +475,7 @@
           "blanks": 10,
           "blobs": {},
           "code": 0,
-          "comments": 23
+          "comments": 24
         }
       },
       {
@@ -586,7 +595,7 @@
           "blanks": 7,
           "blobs": {},
           "code": 0,
-          "comments": 18
+          "comments": 13
         }
       },
       {
@@ -969,10 +978,10 @@
       {
         "name": "./xtask/AGENTS.md",
         "stats": {
-          "blanks": 52,
+          "blanks": 40,
           "blobs": {},
           "code": 0,
-          "comments": 102
+          "comments": 51
         }
       },
       {
@@ -1031,7 +1040,7 @@
     ]
   },
   "Rust": {
-    "blanks": 7212,
+    "blanks": 9012,
     "children": {
       "Markdown": [
         {
@@ -1112,7 +1121,7 @@
             "blanks": 8,
             "blobs": {},
             "code": 0,
-            "comments": 18
+            "comments": 15
           }
         },
         {
@@ -1242,10 +1251,10 @@
         {
           "name": "./examples/examples/inferno-flame.rs",
           "stats": {
-            "blanks": 0,
+            "blanks": 5,
             "blobs": {},
             "code": 0,
-            "comments": 6
+            "comments": 21
           }
         },
         {
@@ -1434,7 +1443,7 @@
             "blanks": 0,
             "blobs": {},
             "code": 0,
-            "comments": 5
+            "comments": 6
           }
         },
         {
@@ -1456,7 +1465,7 @@
               }
             },
             "code": 0,
-            "comments": 93
+            "comments": 94
           }
         },
         {
@@ -1478,7 +1487,7 @@
         {
           "name": "./tracing-appender/src/rolling.rs",
           "stats": {
-            "blanks": 74,
+            "blanks": 75,
             "blobs": {
               "Rust": {
                 "blanks": 14,
@@ -1488,7 +1497,7 @@
               }
             },
             "code": 0,
-            "comments": 243
+            "comments": 255
           }
         },
         {
@@ -1519,21 +1528,39 @@
           }
         },
         {
-          "name": "./tracing-attributes/src/attr.rs",
+          "name": "./tracing-attributes-internal/src/attr.rs",
           "stats": {
-            "blanks": 1,
+            "blanks": 5,
             "blobs": {},
             "code": 0,
-            "comments": 60
+            "comments": 89
           }
         },
         {
-          "name": "./tracing-attributes/src/expand.rs",
+          "name": "./tracing-attributes-internal/src/entry.rs",
           "stats": {
-            "blanks": 6,
+            "blanks": 2,
             "blobs": {},
             "code": 0,
-            "comments": 59
+            "comments": 33
+          }
+        },
+        {
+          "name": "./tracing-attributes-internal/src/expand.rs",
+          "stats": {
+            "blanks": 8,
+            "blobs": {},
+            "code": 0,
+            "comments": 73
+          }
+        },
+        {
+          "name": "./tracing-attributes-internal/src/lib.rs",
+          "stats": {
+            "blanks": 2,
+            "blobs": {},
+            "code": 0,
+            "comments": 9
           }
         },
         {
@@ -1549,7 +1576,7 @@
               }
             },
             "code": 0,
-            "comments": 464
+            "comments": 441
           }
         },
         {
@@ -1576,7 +1603,7 @@
             "blanks": 0,
             "blobs": {},
             "code": 0,
-            "comments": 1
+            "comments": 3
           }
         },
         {
@@ -1727,13 +1754,13 @@
             "blanks": 54,
             "blobs": {},
             "code": 0,
-            "comments": 294
+            "comments": 296
           }
         },
         {
           "name": "./tracing-core/src/lib.rs",
           "stats": {
-            "blanks": 40,
+            "blanks": 41,
             "blobs": {
               "Rust": {
                 "blanks": 3,
@@ -1755,16 +1782,16 @@
               }
             },
             "code": 0,
-            "comments": 95
+            "comments": 97
           }
         },
         {
           "name": "./tracing-core/src/metadata.rs",
           "stats": {
-            "blanks": 55,
+            "blanks": 62,
             "blobs": {},
             "code": 0,
-            "comments": 303
+            "comments": 355
           }
         },
         {
@@ -1773,13 +1800,13 @@
             "blanks": 14,
             "blobs": {},
             "code": 0,
-            "comments": 96
+            "comments": 105
           }
         },
         {
           "name": "./tracing-core/src/subscriber.rs",
           "stats": {
-            "blanks": 103,
+            "blanks": 105,
             "blobs": {
               "Rust": {
                 "blanks": 3,
@@ -1802,12 +1829,28 @@
           }
         },
         {
-          "name": "./tracing-core/tests/common/mod.rs",
+          "name": "./tracing-core/src/test_util.rs",
+          "stats": {
+            "blanks": 35,
+            "blobs": {
+              "Rust": {
+                "blanks": 22,
+                "blobs": {},
+                "code": 145,
+                "comments": 0
+              }
+            },
+            "code": 0,
+            "comments": 119
+          }
+        },
+        {
+          "name": "./tracing-core/tests/core_contracts.rs",
           "stats": {
             "blanks": 0,
             "blobs": {},
             "code": 0,
-            "comments": 2
+            "comments": 25
           }
         },
         {
@@ -1868,7 +1911,7 @@
               }
             },
             "code": 0,
-            "comments": 81
+            "comments": 84
           }
         },
         {
@@ -1909,7 +1952,16 @@
               }
             },
             "code": 0,
-            "comments": 79
+            "comments": 81
+          }
+        },
+        {
+          "name": "./tracing-error/tests/span_trace.rs",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 0,
+            "comments": 1
           }
         },
         {
@@ -1934,7 +1986,7 @@
               }
             },
             "code": 0,
-            "comments": 167
+            "comments": 169
           }
         },
         {
@@ -1956,21 +2008,21 @@
           }
         },
         {
+          "name": "./tracing-flame/tests/configuration.rs",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 0,
+            "comments": 1
+          }
+        },
+        {
           "name": "./tracing-futures/src/executor.rs",
           "stats": {
             "blanks": 0,
             "blobs": {},
             "code": 0,
-            "comments": 3
-          }
-        },
-        {
-          "name": "./tracing-futures/src/executor/futures_01.rs",
-          "stats": {
-            "blanks": 44,
-            "blobs": {},
-            "code": 0,
-            "comments": 115
+            "comments": 2
           }
         },
         {
@@ -2001,7 +2053,7 @@
               }
             },
             "code": 0,
-            "comments": 122
+            "comments": 111
           }
         },
         {
@@ -2026,7 +2078,7 @@
               }
             },
             "code": 0,
-            "comments": 205
+            "comments": 210
           }
         },
         {
@@ -2062,7 +2114,7 @@
             "blanks": 0,
             "blobs": {},
             "code": 0,
-            "comments": 17
+            "comments": 16
           }
         },
         {
@@ -2071,7 +2123,7 @@
             "blanks": 11,
             "blobs": {},
             "code": 0,
-            "comments": 50
+            "comments": 54
           }
         },
         {
@@ -2103,7 +2155,7 @@
               }
             },
             "code": 0,
-            "comments": 100
+            "comments": 105
           }
         },
         {
@@ -2112,7 +2164,7 @@
             "blanks": 0,
             "blobs": {},
             "code": 0,
-            "comments": 13
+            "comments": 15
           }
         },
         {
@@ -2190,10 +2242,10 @@
         {
           "name": "./tracing-mock/src/layer.rs",
           "stats": {
-            "blanks": 167,
+            "blanks": 176,
             "blobs": {},
             "code": 0,
-            "comments": 649
+            "comments": 704
           }
         },
         {
@@ -2226,10 +2278,10 @@
         {
           "name": "./tracing-mock/src/subscriber.rs",
           "stats": {
-            "blanks": 207,
+            "blanks": 215,
             "blobs": {},
             "code": 0,
-            "comments": 825
+            "comments": 873
           }
         },
         {
@@ -2302,7 +2354,16 @@
               }
             },
             "code": 0,
-            "comments": 115
+            "comments": 116
+          }
+        },
+        {
+          "name": "./tracing-serde/tests/serialization.rs",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 0,
+            "comments": 1
           }
         },
         {
@@ -2320,7 +2381,7 @@
             "blanks": 14,
             "blobs": {},
             "code": 0,
-            "comments": 38
+            "comments": 42
           }
         },
         {
@@ -2329,7 +2390,7 @@
             "blanks": 14,
             "blobs": {},
             "code": 0,
-            "comments": 39
+            "comments": 43
           }
         },
         {
@@ -2338,7 +2399,7 @@
             "blanks": 1,
             "blobs": {},
             "code": 0,
-            "comments": 20
+            "comments": 27
           }
         },
         {
@@ -2401,7 +2462,7 @@
             "blanks": 1,
             "blobs": {},
             "code": 0,
-            "comments": 32
+            "comments": 35
           }
         },
         {
@@ -2417,7 +2478,7 @@
               }
             },
             "code": 0,
-            "comments": 305
+            "comments": 310
           }
         },
         {
@@ -2442,7 +2503,7 @@
             "blanks": 0,
             "blobs": {},
             "code": 0,
-            "comments": 64
+            "comments": 74
           }
         },
         {
@@ -2469,7 +2530,7 @@
             "blanks": 95,
             "blobs": {},
             "code": 0,
-            "comments": 448
+            "comments": 466
           }
         },
         {
@@ -2478,7 +2539,7 @@
             "blanks": 44,
             "blobs": {},
             "code": 0,
-            "comments": 162
+            "comments": 182
           }
         },
         {
@@ -2494,7 +2555,7 @@
               }
             },
             "code": 0,
-            "comments": 253
+            "comments": 255
           }
         },
         {
@@ -2516,7 +2577,7 @@
               }
             },
             "code": 0,
-            "comments": 362
+            "comments": 364
           }
         },
         {
@@ -2538,7 +2599,7 @@
               }
             },
             "code": 0,
-            "comments": 327
+            "comments": 341
           }
         },
         {
@@ -2560,7 +2621,7 @@
               }
             },
             "code": 0,
-            "comments": 394
+            "comments": 399
           }
         },
         {
@@ -2578,16 +2639,16 @@
             "blanks": 14,
             "blobs": {},
             "code": 0,
-            "comments": 92
+            "comments": 101
           }
         },
         {
           "name": "./tracing-subscriber/src/fmt/format/pretty.rs",
           "stats": {
-            "blanks": 23,
+            "blanks": 24,
             "blobs": {},
             "code": 0,
-            "comments": 95
+            "comments": 98
           }
         },
         {
@@ -2612,7 +2673,7 @@
             "blanks": 9,
             "blobs": {},
             "code": 0,
-            "comments": 31
+            "comments": 33
           }
         },
         {
@@ -2636,7 +2697,7 @@
         {
           "name": "./tracing-subscriber/src/fmt/writer.rs",
           "stats": {
-            "blanks": 126,
+            "blanks": 124,
             "blobs": {
               "Rust": {
                 "blanks": 2,
@@ -2646,7 +2707,7 @@
               }
             },
             "code": 0,
-            "comments": 492
+            "comments": 488
           }
         },
         {
@@ -2678,7 +2739,7 @@
               }
             },
             "code": 0,
-            "comments": 132
+            "comments": 120
           }
         },
         {
@@ -2696,7 +2757,7 @@
             "blanks": 1,
             "blobs": {},
             "code": 0,
-            "comments": 4
+            "comments": 29
           }
         },
         {
@@ -2752,7 +2813,7 @@
               }
             },
             "code": 0,
-            "comments": 132
+            "comments": 134
           }
         },
         {
@@ -2795,7 +2856,7 @@
               }
             },
             "code": 0,
-            "comments": 74
+            "comments": 93
           }
         },
         {
@@ -2880,12 +2941,30 @@
           }
         },
         {
+          "name": "./tracing-subscriber/tests/filter_contracts.rs",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 0,
+            "comments": 1
+          }
+        },
+        {
           "name": "./tracing-subscriber/tests/filter_log.rs",
           "stats": {
             "blanks": 0,
             "blobs": {},
             "code": 0,
             "comments": 1
+          }
+        },
+        {
+          "name": "./tracing-subscriber/tests/fmt_contracts.rs",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 0,
+            "comments": 10
           }
         },
         {
@@ -2899,6 +2978,15 @@
         },
         {
           "name": "./tracing-subscriber/tests/hinted_layer_filters_dont_break_other_layers.rs",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 0,
+            "comments": 1
+          }
+        },
+        {
+          "name": "./tracing-subscriber/tests/layer_filter_contracts.rs",
           "stats": {
             "blanks": 0,
             "blobs": {},
@@ -3015,6 +3103,15 @@
           }
         },
         {
+          "name": "./tracing-subscriber/tests/reload_registry_contracts.rs",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 0,
+            "comments": 33
+          }
+        },
+        {
           "name": "./tracing-subscriber/tests/same_len_filters.rs",
           "stats": {
             "blanks": 0,
@@ -3101,7 +3198,7 @@
             "blanks": 0,
             "blobs": {},
             "code": 0,
-            "comments": 22
+            "comments": 23
           }
         },
         {
@@ -3110,7 +3207,16 @@
             "blanks": 0,
             "blobs": {},
             "code": 0,
-            "comments": 22
+            "comments": 24
+          }
+        },
+        {
+          "name": "./tracing-tower/tests/instrumentation.rs",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 0,
+            "comments": 1
           }
         },
         {
@@ -3206,26 +3312,19 @@
         {
           "name": "./tracing/src/dispatcher.rs",
           "stats": {
-            "blanks": 12,
-            "blobs": {
-              "Rust": {
-                "blanks": 5,
-                "blobs": {},
-                "code": 59,
-                "comments": 5
-              }
-            },
+            "blanks": 5,
+            "blobs": {},
             "code": 0,
-            "comments": 49
+            "comments": 17
           }
         },
         {
           "name": "./tracing/src/field.rs",
           "stats": {
-            "blanks": 20,
+            "blanks": 6,
             "blobs": {},
             "code": 0,
-            "comments": 108
+            "comments": 27
           }
         },
         {
@@ -3263,7 +3362,7 @@
         {
           "name": "./tracing/src/lib.rs",
           "stats": {
-            "blanks": 145,
+            "blanks": 147,
             "blobs": {
               "Rust": {
                 "blanks": 11,
@@ -3285,7 +3384,7 @@
               }
             },
             "code": 0,
-            "comments": 714
+            "comments": 723
           }
         },
         {
@@ -3307,7 +3406,7 @@
         {
           "name": "./tracing/src/span.rs",
           "stats": {
-            "blanks": 210,
+            "blanks": 217,
             "blobs": {
               "Rust": {
                 "blanks": 7,
@@ -3330,7 +3429,7 @@
               }
             },
             "code": 0,
-            "comments": 799
+            "comments": 837
           }
         },
         {
@@ -3591,7 +3690,7 @@
             "blanks": 0,
             "blobs": {},
             "code": 0,
-            "comments": 1
+            "comments": 6
           }
         },
         {
@@ -3632,8 +3731,8 @@
         }
       ]
     },
-    "code": 49170,
-    "comments": 2016,
+    "code": 61414,
+    "comments": 2056,
     "inaccurate": false,
     "reports": [
       {
@@ -3735,7 +3834,7 @@
       {
         "name": "./examples/examples/counters.rs",
         "stats": {
-          "blanks": 25,
+          "blanks": 27,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -3744,7 +3843,7 @@
               "comments": 12
             }
           },
-          "code": 179,
+          "code": 176,
           "comments": 1
         }
       },
@@ -3767,17 +3866,17 @@
       {
         "name": "./examples/examples/echo.rs",
         "stats": {
-          "blanks": 18,
+          "blanks": 10,
           "blobs": {
             "Markdown": {
               "blanks": 8,
               "blobs": {},
               "code": 0,
-              "comments": 18
+              "comments": 15
             }
           },
-          "code": 75,
-          "comments": 16
+          "code": 41,
+          "comments": 15
         }
       },
       {
@@ -3792,7 +3891,7 @@
               "comments": 29
             }
           },
-          "code": 248,
+          "code": 246,
           "comments": 0
         }
       },
@@ -3847,7 +3946,7 @@
               "comments": 17
             }
           },
-          "code": 32,
+          "code": 30,
           "comments": 9
         }
       },
@@ -3975,7 +4074,7 @@
               "comments": 27
             }
           },
-          "code": 134,
+          "code": 132,
           "comments": 1
         }
       },
@@ -3991,23 +4090,23 @@
               "comments": 4
             }
           },
-          "code": 114,
+          "code": 112,
           "comments": 5
         }
       },
       {
         "name": "./examples/examples/inferno-flame.rs",
         "stats": {
-          "blanks": 13,
+          "blanks": 12,
           "blobs": {
             "Markdown": {
-              "blanks": 0,
+              "blanks": 5,
               "blobs": {},
               "code": 0,
-              "comments": 6
+              "comments": 21
             }
           },
-          "code": 82,
+          "code": 65,
           "comments": 4
         }
       },
@@ -4023,7 +4122,7 @@
               "comments": 9
             }
           },
-          "code": 96,
+          "code": 94,
           "comments": 3
         }
       },
@@ -4135,7 +4234,7 @@
               "comments": 50
             }
           },
-          "code": 334,
+          "code": 326,
           "comments": 4
         }
       },
@@ -4183,7 +4282,7 @@
               "comments": 16
             }
           },
-          "code": 34,
+          "code": 32,
           "comments": 2
         }
       },
@@ -4263,7 +4362,7 @@
               "comments": 41
             }
           },
-          "code": 404,
+          "code": 399,
           "comments": 2
         }
       },
@@ -4279,7 +4378,7 @@
               "comments": 6
             }
           },
-          "code": 112,
+          "code": 113,
           "comments": 0
         }
       },
@@ -4334,16 +4433,16 @@
       {
         "name": "./tracing-appender/benches/bench.rs",
         "stats": {
-          "blanks": 28,
+          "blanks": 29,
           "blobs": {
             "Markdown": {
               "blanks": 0,
               "blobs": {},
               "code": 0,
-              "comments": 5
+              "comments": 6
             }
           },
-          "code": 123,
+          "code": 108,
           "comments": 2
         }
       },
@@ -4369,7 +4468,7 @@
                 }
               },
               "code": 0,
-              "comments": 93
+              "comments": 94
             }
           },
           "code": 21,
@@ -4379,7 +4478,7 @@
       {
         "name": "./tracing-appender/src/non_blocking.rs",
         "stats": {
-          "blanks": 79,
+          "blanks": 99,
           "blobs": {
             "Markdown": {
               "blanks": 33,
@@ -4395,17 +4494,17 @@
               "comments": 148
             }
           },
-          "code": 350,
+          "code": 487,
           "comments": 26
         }
       },
       {
         "name": "./tracing-appender/src/rolling.rs",
         "stats": {
-          "blanks": 162,
+          "blanks": 182,
           "blobs": {
             "Markdown": {
-              "blanks": 74,
+              "blanks": 75,
               "blobs": {
                 "Rust": {
                   "blanks": 14,
@@ -4415,17 +4514,17 @@
                 }
               },
               "code": 0,
-              "comments": 243
+              "comments": 255
             }
           },
-          "code": 977,
+          "code": 1132,
           "comments": 35
         }
       },
       {
         "name": "./tracing-appender/src/rolling/builder.rs",
         "stats": {
-          "blanks": 13,
+          "blanks": 27,
           "blobs": {
             "Markdown": {
               "blanks": 48,
@@ -4434,7 +4533,7 @@
               "comments": 177
             }
           },
-          "code": 101,
+          "code": 191,
           "comments": 5
         }
       },
@@ -4466,46 +4565,78 @@
               "comments": 19
             }
           },
-          "code": 76,
+          "code": 71,
           "comments": 1
         }
       },
       {
-        "name": "./tracing-attributes/src/attr.rs",
+        "name": "./tracing-attributes-internal/src/attr.rs",
         "stats": {
-          "blanks": 37,
+          "blanks": 88,
           "blobs": {
             "Markdown": {
-              "blanks": 1,
+              "blanks": 5,
               "blobs": {},
               "code": 0,
-              "comments": 60
+              "comments": 89
             }
           },
-          "code": 442,
+          "code": 829,
           "comments": 21
         }
       },
       {
-        "name": "./tracing-attributes/src/expand.rs",
+        "name": "./tracing-attributes-internal/src/entry.rs",
         "stats": {
-          "blanks": 73,
+          "blanks": 26,
           "blobs": {
             "Markdown": {
-              "blanks": 6,
+              "blanks": 2,
               "blobs": {},
               "code": 0,
-              "comments": 59
+              "comments": 33
             }
           },
-          "code": 749,
+          "code": 240,
+          "comments": 3
+        }
+      },
+      {
+        "name": "./tracing-attributes-internal/src/expand.rs",
+        "stats": {
+          "blanks": 102,
+          "blobs": {
+            "Markdown": {
+              "blanks": 8,
+              "blobs": {},
+              "code": 0,
+              "comments": 73
+            }
+          },
+          "code": 986,
           "comments": 58
+        }
+      },
+      {
+        "name": "./tracing-attributes-internal/src/lib.rs",
+        "stats": {
+          "blanks": 2,
+          "blobs": {
+            "Markdown": {
+              "blanks": 2,
+              "blobs": {},
+              "code": 0,
+              "comments": 9
+            }
+          },
+          "code": 4,
+          "comments": 0
         }
       },
       {
         "name": "./tracing-attributes/src/lib.rs",
         "stats": {
-          "blanks": 13,
+          "blanks": 1,
           "blobs": {
             "Markdown": {
               "blanks": 92,
@@ -4518,11 +4649,11 @@
                 }
               },
               "code": 0,
-              "comments": 464
+              "comments": 441
             }
           },
-          "code": 165,
-          "comments": 5
+          "code": 14,
+          "comments": 0
         }
       },
       {
@@ -4560,16 +4691,16 @@
       {
         "name": "./tracing-attributes/tests/destructuring.rs",
         "stats": {
-          "blanks": 34,
+          "blanks": 36,
           "blobs": {
             "Markdown": {
               "blanks": 0,
               "blobs": {},
               "code": 0,
-              "comments": 1
+              "comments": 3
             }
           },
-          "code": 195,
+          "code": 197,
           "comments": 0
         }
       },
@@ -4804,14 +4935,14 @@
               "comments": 199
             }
           },
-          "code": 286,
+          "code": 290,
           "comments": 24
         }
       },
       {
         "name": "./tracing-core/src/dispatcher.rs",
         "stats": {
-          "blanks": 104,
+          "blanks": 131,
           "blobs": {
             "Markdown": {
               "blanks": 89,
@@ -4827,7 +4958,7 @@
               "comments": 303
             }
           },
-          "code": 582,
+          "code": 786,
           "comments": 28
         }
       },
@@ -4843,33 +4974,33 @@
               "comments": 39
             }
           },
-          "code": 79,
+          "code": 83,
           "comments": 0
         }
       },
       {
         "name": "./tracing-core/src/field.rs",
         "stats": {
-          "blanks": 164,
+          "blanks": 202,
           "blobs": {
             "Markdown": {
               "blanks": 54,
               "blobs": {},
               "code": 0,
-              "comments": 294
+              "comments": 296
             }
           },
-          "code": 977,
+          "code": 1215,
           "comments": 31
         }
       },
       {
         "name": "./tracing-core/src/lib.rs",
         "stats": {
-          "blanks": 11,
+          "blanks": 12,
           "blobs": {
             "Markdown": {
-              "blanks": 40,
+              "blanks": 41,
               "blobs": {
                 "Rust": {
                   "blanks": 3,
@@ -4891,52 +5022,52 @@
                 }
               },
               "code": 0,
-              "comments": 95
+              "comments": 97
             }
           },
-          "code": 91,
+          "code": 95,
           "comments": 3
         }
       },
       {
         "name": "./tracing-core/src/metadata.rs",
         "stats": {
-          "blanks": 112,
+          "blanks": 153,
           "blobs": {
             "Markdown": {
-              "blanks": 55,
+              "blanks": 62,
               "blobs": {},
               "code": 0,
-              "comments": 303
+              "comments": 355
             }
           },
-          "code": 614,
-          "comments": 88
+          "code": 971,
+          "comments": 89
         }
       },
       {
         "name": "./tracing-core/src/span.rs",
         "stats": {
-          "blanks": 44,
+          "blanks": 77,
           "blobs": {
             "Markdown": {
               "blanks": 14,
               "blobs": {},
               "code": 0,
-              "comments": 96
+              "comments": 105
             }
           },
-          "code": 236,
+          "code": 411,
           "comments": 4
         }
       },
       {
         "name": "./tracing-core/src/subscriber.rs",
         "stats": {
-          "blanks": 86,
+          "blanks": 98,
           "blobs": {
             "Markdown": {
-              "blanks": 103,
+              "blanks": 105,
               "blobs": {
                 "Rust": {
                   "blanks": 3,
@@ -4949,7 +5080,7 @@
               "comments": 412
             }
           },
-          "code": 353,
+          "code": 430,
           "comments": 2
         }
       },
@@ -4970,25 +5101,48 @@
         }
       },
       {
-        "name": "./tracing-core/tests/common/mod.rs",
+        "name": "./tracing-core/src/test_util.rs",
         "stats": {
-          "blanks": 3,
+          "blanks": 82,
+          "blobs": {
+            "Markdown": {
+              "blanks": 35,
+              "blobs": {
+                "Rust": {
+                  "blanks": 22,
+                  "blobs": {},
+                  "code": 145,
+                  "comments": 0
+                }
+              },
+              "code": 0,
+              "comments": 119
+            }
+          },
+          "code": 449,
+          "comments": 3
+        }
+      },
+      {
+        "name": "./tracing-core/tests/core_contracts.rs",
+        "stats": {
+          "blanks": 60,
           "blobs": {
             "Markdown": {
               "blanks": 0,
               "blobs": {},
               "code": 0,
-              "comments": 2
+              "comments": 25
             }
           },
-          "code": 57,
-          "comments": 1
+          "code": 567,
+          "comments": 0
         }
       },
       {
         "name": "./tracing-core/tests/dispatch.rs",
         "stats": {
-          "blanks": 9,
+          "blanks": 8,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -4997,14 +5151,14 @@
               "comments": 1
             }
           },
-          "code": 30,
+          "code": 32,
           "comments": 1
         }
       },
       {
         "name": "./tracing-core/tests/global_dispatch.rs",
         "stats": {
-          "blanks": 6,
+          "blanks": 5,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -5013,14 +5167,14 @@
               "comments": 1
             }
           },
-          "code": 25,
+          "code": 33,
           "comments": 0
         }
       },
       {
         "name": "./tracing-core/tests/local_dispatch_before_init.rs",
         "stats": {
-          "blanks": 7,
+          "blanks": 6,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -5029,7 +5183,7 @@
               "comments": 5
             }
           },
-          "code": 29,
+          "code": 27,
           "comments": 3
         }
       },
@@ -5045,14 +5199,14 @@
               "comments": 1
             }
           },
-          "code": 55,
+          "code": 54,
           "comments": 2
         }
       },
       {
         "name": "./tracing-core/tests/missed_register_callsite.rs",
         "stats": {
-          "blanks": 18,
+          "blanks": 11,
           "blobs": {
             "Markdown": {
               "blanks": 2,
@@ -5061,8 +5215,8 @@
               "comments": 6
             }
           },
-          "code": 127,
-          "comments": 6
+          "code": 71,
+          "comments": 5
         }
       },
       {
@@ -5081,10 +5235,10 @@
                 }
               },
               "code": 0,
-              "comments": 81
+              "comments": 84
             }
           },
-          "code": 173,
+          "code": 175,
           "comments": 1
         }
       },
@@ -5107,14 +5261,14 @@
               "comments": 39
             }
           },
-          "code": 109,
+          "code": 107,
           "comments": 0
         }
       },
       {
         "name": "./tracing-error/src/layer.rs",
         "stats": {
-          "blanks": 18,
+          "blanks": 31,
           "blobs": {
             "Markdown": {
               "blanks": 3,
@@ -5123,14 +5277,14 @@
               "comments": 17
             }
           },
-          "code": 116,
+          "code": 186,
           "comments": 0
         }
       },
       {
         "name": "./tracing-error/src/lib.rs",
         "stats": {
-          "blanks": 8,
+          "blanks": 25,
           "blobs": {
             "Markdown": {
               "blanks": 29,
@@ -5143,17 +5297,33 @@
                 }
               },
               "code": 0,
-              "comments": 79
+              "comments": 81
             }
           },
-          "code": 60,
+          "code": 156,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./tracing-error/tests/span_trace.rs",
+        "stats": {
+          "blanks": 30,
+          "blobs": {
+            "Markdown": {
+              "blanks": 0,
+              "blobs": {},
+              "code": 0,
+              "comments": 1
+            }
+          },
+          "code": 174,
           "comments": 0
         }
       },
       {
         "name": "./tracing-flame/src/error.rs",
         "stats": {
-          "blanks": 14,
+          "blanks": 27,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -5162,14 +5332,14 @@
               "comments": 13
             }
           },
-          "code": 93,
+          "code": 167,
           "comments": 0
         }
       },
       {
         "name": "./tracing-flame/src/lib.rs",
         "stats": {
-          "blanks": 62,
+          "blanks": 64,
           "blobs": {
             "Markdown": {
               "blanks": 42,
@@ -5182,10 +5352,10 @@
                 }
               },
               "code": 0,
-              "comments": 167
+              "comments": 169
             }
           },
-          "code": 344,
+          "code": 341,
           "comments": 2
         }
       },
@@ -5201,7 +5371,7 @@
               "comments": 11
             }
           },
-          "code": 76,
+          "code": 74,
           "comments": 0
         }
       },
@@ -5217,40 +5387,40 @@
               "comments": 16
             }
           },
-          "code": 108,
+          "code": 105,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./tracing-flame/tests/configuration.rs",
+        "stats": {
+          "blanks": 26,
+          "blobs": {
+            "Markdown": {
+              "blanks": 0,
+              "blobs": {},
+              "code": 0,
+              "comments": 1
+            }
+          },
+          "code": 185,
           "comments": 0
         }
       },
       {
         "name": "./tracing-futures/src/executor.rs",
         "stats": {
-          "blanks": 2,
+          "blanks": 1,
           "blobs": {
             "Markdown": {
               "blanks": 0,
               "blobs": {},
               "code": 0,
-              "comments": 3
+              "comments": 2
             }
           },
-          "code": 2,
+          "code": 1,
           "comments": 0
-        }
-      },
-      {
-        "name": "./tracing-futures/src/executor/futures_01.rs",
-        "stats": {
-          "blanks": 25,
-          "blobs": {
-            "Markdown": {
-              "blanks": 44,
-              "blobs": {},
-              "code": 0,
-              "comments": 115
-            }
-          },
-          "code": 208,
-          "comments": 2
         }
       },
       {
@@ -5272,7 +5442,7 @@
       {
         "name": "./tracing-futures/src/lib.rs",
         "stats": {
-          "blanks": 66,
+          "blanks": 45,
           "blobs": {
             "Markdown": {
               "blanks": 34,
@@ -5291,17 +5461,17 @@
                 }
               },
               "code": 0,
-              "comments": 122
+              "comments": 111
             }
           },
-          "code": 497,
-          "comments": 31
+          "code": 323,
+          "comments": 2
         }
       },
       {
         "name": "./tracing-futures/tests/std_future.rs",
         "stats": {
-          "blanks": 12,
+          "blanks": 43,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -5310,14 +5480,14 @@
               "comments": 1
             }
           },
-          "code": 114,
+          "code": 348,
           "comments": 2
         }
       },
       {
         "name": "./tracing-journald/src/lib.rs",
         "stats": {
-          "blanks": 61,
+          "blanks": 86,
           "blobs": {
             "Markdown": {
               "blanks": 65,
@@ -5330,10 +5500,10 @@
                 }
               },
               "code": 0,
-              "comments": 205
+              "comments": 210
             }
           },
-          "code": 471,
+          "code": 683,
           "comments": 13
         }
       },
@@ -5365,7 +5535,7 @@
               "comments": 4
             }
           },
-          "code": 78,
+          "code": 76,
           "comments": 0
         }
       },
@@ -5388,39 +5558,39 @@
       {
         "name": "./tracing-log/benches/logging.rs",
         "stats": {
-          "blanks": 20,
+          "blanks": 19,
           "blobs": {
             "Markdown": {
               "blanks": 0,
               "blobs": {},
               "code": 0,
-              "comments": 17
+              "comments": 16
             }
           },
-          "code": 170,
+          "code": 155,
           "comments": 0
         }
       },
       {
         "name": "./tracing-log/src/interest_cache.rs",
         "stats": {
-          "blanks": 70,
+          "blanks": 74,
           "blobs": {
             "Markdown": {
               "blanks": 11,
               "blobs": {},
               "code": 0,
-              "comments": 50
+              "comments": 54
             }
           },
-          "code": 495,
+          "code": 455,
           "comments": 36
         }
       },
       {
         "name": "./tracing-log/src/lib.rs",
         "stats": {
-          "blanks": 72,
+          "blanks": 99,
           "blobs": {
             "Markdown": {
               "blanks": 30,
@@ -5436,14 +5606,14 @@
               "comments": 149
             }
           },
-          "code": 496,
+          "code": 708,
           "comments": 0
         }
       },
       {
         "name": "./tracing-log/src/log_tracer.rs",
         "stats": {
-          "blanks": 25,
+          "blanks": 49,
           "blobs": {
             "Markdown": {
               "blanks": 37,
@@ -5456,26 +5626,26 @@
                 }
               },
               "code": 0,
-              "comments": 100
+              "comments": 105
             }
           },
-          "code": 138,
-          "comments": 10
+          "code": 264,
+          "comments": 9
         }
       },
       {
         "name": "./tracing-log/tests/log_tracer.rs",
         "stats": {
-          "blanks": 19,
+          "blanks": 21,
           "blobs": {
             "Markdown": {
               "blanks": 0,
               "blobs": {},
               "code": 0,
-              "comments": 13
+              "comments": 15
             }
           },
-          "code": 138,
+          "code": 140,
           "comments": 0
         }
       },
@@ -5507,7 +5677,7 @@
               "comments": 2
             }
           },
-          "code": 25,
+          "code": 23,
           "comments": 0
         }
       },
@@ -5539,14 +5709,14 @@
               "comments": 36
             }
           },
-          "code": 139,
+          "code": 137,
           "comments": 0
         }
       },
       {
         "name": "./tracing-mock/src/event.rs",
         "stats": {
-          "blanks": 21,
+          "blanks": 35,
           "blobs": {
             "Markdown": {
               "blanks": 115,
@@ -5555,14 +5725,14 @@
               "comments": 364
             }
           },
-          "code": 141,
+          "code": 204,
           "comments": 0
         }
       },
       {
         "name": "./tracing-mock/src/expect.rs",
         "stats": {
-          "blanks": 15,
+          "blanks": 23,
           "blobs": {
             "Markdown": {
               "blanks": 58,
@@ -5571,7 +5741,7 @@
               "comments": 200
             }
           },
-          "code": 169,
+          "code": 273,
           "comments": 0
         }
       },
@@ -5594,7 +5764,7 @@
       {
         "name": "./tracing-mock/src/field.rs",
         "stats": {
-          "blanks": 38,
+          "blanks": 52,
           "blobs": {
             "Markdown": {
               "blanks": 95,
@@ -5603,23 +5773,23 @@
               "comments": 316
             }
           },
-          "code": 261,
+          "code": 304,
           "comments": 0
         }
       },
       {
         "name": "./tracing-mock/src/layer.rs",
         "stats": {
-          "blanks": 37,
+          "blanks": 76,
           "blobs": {
             "Markdown": {
-              "blanks": 167,
+              "blanks": 176,
               "blobs": {},
               "code": 0,
-              "comments": 649
+              "comments": 704
             }
           },
-          "code": 389,
+          "code": 542,
           "comments": 0
         }
       },
@@ -5642,7 +5812,7 @@
       {
         "name": "./tracing-mock/src/metadata.rs",
         "stats": {
-          "blanks": 13,
+          "blanks": 23,
           "blobs": {
             "Markdown": {
               "blanks": 3,
@@ -5651,14 +5821,14 @@
               "comments": 14
             }
           },
-          "code": 73,
+          "code": 141,
           "comments": 0
         }
       },
       {
         "name": "./tracing-mock/src/span.rs",
         "stats": {
-          "blanks": 60,
+          "blanks": 91,
           "blobs": {
             "Markdown": {
               "blanks": 166,
@@ -5667,23 +5837,23 @@
               "comments": 577
             }
           },
-          "code": 334,
+          "code": 480,
           "comments": 1
         }
       },
       {
         "name": "./tracing-mock/src/subscriber.rs",
         "stats": {
-          "blanks": 49,
+          "blanks": 74,
           "blobs": {
             "Markdown": {
-              "blanks": 207,
+              "blanks": 215,
               "blobs": {},
               "code": 0,
-              "comments": 825
+              "comments": 873
             }
           },
-          "code": 621,
+          "code": 682,
           "comments": 0
         }
       },
@@ -5715,8 +5885,8 @@
               "comments": 2
             }
           },
-          "code": 93,
-          "comments": 5
+          "code": 114,
+          "comments": 3
         }
       },
       {
@@ -5822,11 +5992,27 @@
                 }
               },
               "code": 0,
-              "comments": 115
+              "comments": 116
             }
           },
           "code": 325,
           "comments": 4
+        }
+      },
+      {
+        "name": "./tracing-serde/tests/serialization.rs",
+        "stats": {
+          "blanks": 35,
+          "blobs": {
+            "Markdown": {
+              "blanks": 0,
+              "blobs": {},
+              "code": 0,
+              "comments": 1
+            }
+          },
+          "code": 277,
+          "comments": 0
         }
       },
       {
@@ -5848,48 +6034,48 @@
       {
         "name": "./tracing-subscriber/benches/filter.rs",
         "stats": {
-          "blanks": 39,
+          "blanks": 43,
           "blobs": {
             "Markdown": {
               "blanks": 14,
               "blobs": {},
               "code": 0,
-              "comments": 38
+              "comments": 42
             }
           },
-          "code": 359,
+          "code": 275,
           "comments": 0
         }
       },
       {
         "name": "./tracing-subscriber/benches/filter_log.rs",
         "stats": {
-          "blanks": 40,
+          "blanks": 44,
           "blobs": {
             "Markdown": {
               "blanks": 14,
               "blobs": {},
               "code": 0,
-              "comments": 39
+              "comments": 43
             }
           },
-          "code": 365,
+          "code": 281,
           "comments": 0
         }
       },
       {
         "name": "./tracing-subscriber/benches/fmt.rs",
         "stats": {
-          "blanks": 22,
+          "blanks": 26,
           "blobs": {
             "Markdown": {
               "blanks": 1,
               "blobs": {},
               "code": 0,
-              "comments": 20
+              "comments": 27
             }
           },
-          "code": 311,
+          "code": 254,
           "comments": 0
         }
       },
@@ -5912,7 +6098,7 @@
       {
         "name": "./tracing-subscriber/src/field.rs",
         "stats": {
-          "blanks": 42,
+          "blanks": 44,
           "blobs": {
             "Markdown": {
               "blanks": 9,
@@ -5921,14 +6107,14 @@
               "comments": 67
             }
           },
-          "code": 257,
+          "code": 258,
           "comments": 2
         }
       },
       {
         "name": "./tracing-subscriber/src/field/debug.rs",
         "stats": {
-          "blanks": 18,
+          "blanks": 58,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -5937,7 +6123,7 @@
               "comments": 6
             }
           },
-          "code": 87,
+          "code": 252,
           "comments": 8
         }
       },
@@ -5960,7 +6146,7 @@
       {
         "name": "./tracing-subscriber/src/field/display.rs",
         "stats": {
-          "blanks": 18,
+          "blanks": 62,
           "blobs": {
             "Markdown": {
               "blanks": 1,
@@ -5969,7 +6155,7 @@
               "comments": 7
             }
           },
-          "code": 91,
+          "code": 263,
           "comments": 8
         }
       },
@@ -5992,23 +6178,23 @@
       {
         "name": "./tracing-subscriber/src/filter/directive.rs",
         "stats": {
-          "blanks": 58,
+          "blanks": 87,
           "blobs": {
             "Markdown": {
               "blanks": 1,
               "blobs": {},
               "code": 0,
-              "comments": 32
+              "comments": 35
             }
           },
-          "code": 352,
+          "code": 615,
           "comments": 43
         }
       },
       {
         "name": "./tracing-subscriber/src/filter/env.rs",
         "stats": {
-          "blanks": 89,
+          "blanks": 99,
           "blobs": {
             "Markdown": {
               "blanks": 84,
@@ -6021,17 +6207,17 @@
                 }
               },
               "code": 0,
-              "comments": 305
+              "comments": 310
             }
           },
-          "code": 643,
-          "comments": 26
+          "code": 708,
+          "comments": 25
         }
       },
       {
         "name": "./tracing-subscriber/src/filter/env/builder.rs",
         "stats": {
-          "blanks": 28,
+          "blanks": 48,
           "blobs": {
             "Markdown": {
               "blanks": 35,
@@ -6047,30 +6233,30 @@
               "comments": 88
             }
           },
-          "code": 217,
+          "code": 342,
           "comments": 0
         }
       },
       {
         "name": "./tracing-subscriber/src/filter/env/directive.rs",
         "stats": {
-          "blanks": 108,
+          "blanks": 112,
           "blobs": {
             "Markdown": {
               "blanks": 0,
               "blobs": {},
               "code": 0,
-              "comments": 64
+              "comments": 74
             }
           },
-          "code": 1071,
+          "code": 1037,
           "comments": 36
         }
       },
       {
         "name": "./tracing-subscriber/src/filter/env/field.rs",
         "stats": {
-          "blanks": 83,
+          "blanks": 121,
           "blobs": {
             "Markdown": {
               "blanks": 4,
@@ -6079,14 +6265,14 @@
               "comments": 64
             }
           },
-          "code": 637,
+          "code": 944,
           "comments": 17
         }
       },
       {
         "name": "./tracing-subscriber/src/filter/filter_fn.rs",
         "stats": {
-          "blanks": 39,
+          "blanks": 77,
           "blobs": {
             "Markdown": {
               "blanks": 84,
@@ -6095,39 +6281,39 @@
               "comments": 326
             }
           },
-          "code": 258,
+          "code": 472,
           "comments": 12
         }
       },
       {
         "name": "./tracing-subscriber/src/filter/layer_filters.rs",
         "stats": {
-          "blanks": 97,
+          "blanks": 141,
           "blobs": {
             "Markdown": {
               "blanks": 95,
               "blobs": {},
               "code": 0,
-              "comments": 448
+              "comments": 466
             }
           },
-          "code": 620,
+          "code": 1035,
           "comments": 75
         }
       },
       {
         "name": "./tracing-subscriber/src/filter/layer_filters/combinator.rs",
         "stats": {
-          "blanks": 48,
+          "blanks": 91,
           "blobs": {
             "Markdown": {
               "blanks": 44,
               "blobs": {},
               "code": 0,
-              "comments": 162
+              "comments": 182
             }
           },
-          "code": 324,
+          "code": 747,
           "comments": 15
         }
       },
@@ -6143,7 +6329,7 @@
       {
         "name": "./tracing-subscriber/src/filter/targets.rs",
         "stats": {
-          "blanks": 63,
+          "blanks": 78,
           "blobs": {
             "Markdown": {
               "blanks": 73,
@@ -6156,17 +6342,17 @@
                 }
               },
               "code": 0,
-              "comments": 253
+              "comments": 255
             }
           },
-          "code": 451,
+          "code": 603,
           "comments": 8
         }
       },
       {
         "name": "./tracing-subscriber/src/fmt.rs",
         "stats": {
-          "blanks": 91,
+          "blanks": 93,
           "blobs": {
             "Markdown": {
               "blanks": 128,
@@ -6185,17 +6371,17 @@
                 }
               },
               "code": 0,
-              "comments": 362
+              "comments": 364
             }
           },
-          "code": 645,
+          "code": 647,
           "comments": 11
         }
       },
       {
         "name": "./tracing-subscriber/src/fmt/fmt_layer.rs",
         "stats": {
-          "blanks": 142,
+          "blanks": 164,
           "blobs": {
             "Markdown": {
               "blanks": 94,
@@ -6214,17 +6400,17 @@
                 }
               },
               "code": 0,
-              "comments": 327
+              "comments": 341
             }
           },
-          "code": 1219,
+          "code": 1324,
           "comments": 21
         }
       },
       {
         "name": "./tracing-subscriber/src/fmt/format.rs",
         "stats": {
-          "blanks": 253,
+          "blanks": 295,
           "blobs": {
             "Markdown": {
               "blanks": 81,
@@ -6243,10 +6429,10 @@
                 }
               },
               "code": 0,
-              "comments": 394
+              "comments": 399
             }
           },
-          "code": 1811,
+          "code": 2053,
           "comments": 51
         }
       },
@@ -6262,24 +6448,24 @@
               "comments": 7
             }
           },
-          "code": 51,
+          "code": 54,
           "comments": 4
         }
       },
       {
         "name": "./tracing-subscriber/src/fmt/format/json.rs",
         "stats": {
-          "blanks": 110,
+          "blanks": 127,
           "blobs": {
             "Markdown": {
               "blanks": 14,
               "blobs": {},
               "code": 0,
-              "comments": 92
+              "comments": 101
             }
           },
-          "code": 769,
-          "comments": 36
+          "code": 1022,
+          "comments": 35
         }
       },
       {
@@ -6288,20 +6474,20 @@
           "blanks": 53,
           "blobs": {
             "Markdown": {
-              "blanks": 23,
+              "blanks": 24,
               "blobs": {},
               "code": 0,
-              "comments": 95
+              "comments": 98
             }
           },
-          "code": 416,
+          "code": 415,
           "comments": 18
         }
       },
       {
         "name": "./tracing-subscriber/src/fmt/time.rs",
         "stats": {
-          "blanks": 20,
+          "blanks": 39,
           "blobs": {
             "Markdown": {
               "blanks": 13,
@@ -6317,24 +6503,24 @@
               "comments": 36
             }
           },
-          "code": 85,
+          "code": 169,
           "comments": 0
         }
       },
       {
         "name": "./tracing-subscriber/src/fmt/time/chrono_crate.rs",
         "stats": {
-          "blanks": 17,
+          "blanks": 19,
           "blobs": {
             "Markdown": {
               "blanks": 9,
               "blobs": {},
               "code": 0,
-              "comments": 31
+              "comments": 33
             }
           },
-          "code": 145,
-          "comments": 4
+          "code": 148,
+          "comments": 2
         }
       },
       {
@@ -6356,7 +6542,7 @@
       {
         "name": "./tracing-subscriber/src/fmt/time/time_crate.rs",
         "stats": {
-          "blanks": 18,
+          "blanks": 43,
           "blobs": {
             "Markdown": {
               "blanks": 81,
@@ -6365,17 +6551,17 @@
               "comments": 275
             }
           },
-          "code": 118,
+          "code": 253,
           "comments": 3
         }
       },
       {
         "name": "./tracing-subscriber/src/fmt/writer.rs",
         "stats": {
-          "blanks": 148,
+          "blanks": 172,
           "blobs": {
             "Markdown": {
-              "blanks": 126,
+              "blanks": 124,
               "blobs": {
                 "Rust": {
                   "blanks": 2,
@@ -6385,11 +6571,11 @@
                 }
               },
               "code": 0,
-              "comments": 492
+              "comments": 488
             }
           },
-          "code": 777,
-          "comments": 14
+          "code": 1064,
+          "comments": 13
         }
       },
       {
@@ -6431,10 +6617,10 @@
                 }
               },
               "code": 0,
-              "comments": 132
+              "comments": 120
             }
           },
-          "code": 202,
+          "code": 200,
           "comments": 28
         }
       },
@@ -6450,23 +6636,23 @@
               "comments": 26
             }
           },
-          "code": 367,
+          "code": 363,
           "comments": 99
         }
       },
       {
         "name": "./tracing-subscriber/src/layer/tests.rs",
         "stats": {
-          "blanks": 47,
+          "blanks": 130,
           "blobs": {
             "Markdown": {
               "blanks": 1,
               "blobs": {},
               "code": 0,
-              "comments": 4
+              "comments": 29
             }
           },
-          "code": 283,
+          "code": 1141,
           "comments": 7
         }
       },
@@ -6534,7 +6720,7 @@
       {
         "name": "./tracing-subscriber/src/registry.rs",
         "stats": {
-          "blanks": 65,
+          "blanks": 62,
           "blobs": {
             "Markdown": {
               "blanks": 34,
@@ -6547,11 +6733,11 @@
                 }
               },
               "code": 0,
-              "comments": 132
+              "comments": 134
             }
           },
-          "code": 324,
-          "comments": 8
+          "code": 327,
+          "comments": 0
         }
       },
       {
@@ -6582,7 +6768,7 @@
               "comments": 124
             }
           },
-          "code": 678,
+          "code": 676,
           "comments": 72
         }
       },
@@ -6605,7 +6791,7 @@
       {
         "name": "./tracing-subscriber/src/reload.rs",
         "stats": {
-          "blanks": 50,
+          "blanks": 106,
           "blobs": {
             "Markdown": {
               "blanks": 23,
@@ -6618,10 +6804,10 @@
                 }
               },
               "code": 0,
-              "comments": 74
+              "comments": 93
             }
           },
-          "code": 246,
+          "code": 625,
           "comments": 18
         }
       },
@@ -6653,7 +6839,7 @@
               "comments": 39
             }
           },
-          "code": 98,
+          "code": 96,
           "comments": 6
         }
       },
@@ -6685,7 +6871,7 @@
               "comments": 1
             }
           },
-          "code": 110,
+          "code": 108,
           "comments": 0
         }
       },
@@ -6701,7 +6887,7 @@
               "comments": 1
             }
           },
-          "code": 38,
+          "code": 36,
           "comments": 5
         }
       },
@@ -6717,7 +6903,7 @@
               "comments": 6
             }
           },
-          "code": 657,
+          "code": 654,
           "comments": 13
         }
       },
@@ -6765,7 +6951,23 @@
               "comments": 1
             }
           },
-          "code": 99,
+          "code": 96,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./tracing-subscriber/tests/filter_contracts.rs",
+        "stats": {
+          "blanks": 24,
+          "blobs": {
+            "Markdown": {
+              "blanks": 0,
+              "blobs": {},
+              "code": 0,
+              "comments": 1
+            }
+          },
+          "code": 146,
           "comments": 0
         }
       },
@@ -6781,8 +6983,24 @@
               "comments": 1
             }
           },
-          "code": 57,
+          "code": 54,
           "comments": 2
+        }
+      },
+      {
+        "name": "./tracing-subscriber/tests/fmt_contracts.rs",
+        "stats": {
+          "blanks": 105,
+          "blobs": {
+            "Markdown": {
+              "blanks": 0,
+              "blobs": {},
+              "code": 0,
+              "comments": 10
+            }
+          },
+          "code": 770,
+          "comments": 0
         }
       },
       {
@@ -6813,7 +7031,23 @@
               "comments": 1
             }
           },
-          "code": 131,
+          "code": 129,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./tracing-subscriber/tests/layer_filter_contracts.rs",
+        "stats": {
+          "blanks": 14,
+          "blobs": {
+            "Markdown": {
+              "blanks": 0,
+              "blobs": {},
+              "code": 0,
+              "comments": 1
+            }
+          },
+          "code": 71,
           "comments": 0
         }
       },
@@ -6897,7 +7131,7 @@
         "stats": {
           "blanks": 24,
           "blobs": {},
-          "code": 116,
+          "code": 114,
           "comments": 0
         }
       },
@@ -7029,7 +7263,7 @@
               "comments": 4
             }
           },
-          "code": 216,
+          "code": 214,
           "comments": 0
         }
       },
@@ -7045,7 +7279,7 @@
               "comments": 1
             }
           },
-          "code": 32,
+          "code": 24,
           "comments": 0
         }
       },
@@ -7061,7 +7295,7 @@
               "comments": 6
             }
           },
-          "code": 212,
+          "code": 206,
           "comments": 0
         }
       },
@@ -7077,7 +7311,23 @@
               "comments": 1
             }
           },
-          "code": 40,
+          "code": 37,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./tracing-subscriber/tests/reload_registry_contracts.rs",
+        "stats": {
+          "blanks": 41,
+          "blobs": {
+            "Markdown": {
+              "blanks": 0,
+              "blobs": {},
+              "code": 0,
+              "comments": 33
+            }
+          },
+          "code": 325,
           "comments": 0
         }
       },
@@ -7093,7 +7343,7 @@
               "comments": 1
             }
           },
-          "code": 76,
+          "code": 73,
           "comments": 2
         }
       },
@@ -7161,7 +7411,7 @@
               "comments": 1
             }
           },
-          "code": 110,
+          "code": 108,
           "comments": 0
         }
       },
@@ -7232,7 +7482,7 @@
       {
         "name": "./tracing-tower/src/http.rs",
         "stats": {
-          "blanks": 3,
+          "blanks": 12,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -7241,7 +7491,7 @@
               "comments": 3
             }
           },
-          "code": 42,
+          "code": 137,
           "comments": 0
         }
       },
@@ -7264,33 +7514,49 @@
       {
         "name": "./tracing-tower/src/request_span.rs",
         "stats": {
-          "blanks": 35,
+          "blanks": 36,
           "blobs": {
             "Markdown": {
               "blanks": 0,
               "blobs": {},
               "code": 0,
-              "comments": 22
+              "comments": 23
             }
           },
-          "code": 255,
+          "code": 259,
           "comments": 4
         }
       },
       {
         "name": "./tracing-tower/src/service_span.rs",
         "stats": {
-          "blanks": 35,
+          "blanks": 37,
           "blobs": {
             "Markdown": {
               "blanks": 0,
               "blobs": {},
               "code": 0,
-              "comments": 22
+              "comments": 24
             }
           },
-          "code": 229,
+          "code": 236,
           "comments": 4
+        }
+      },
+      {
+        "name": "./tracing-tower/tests/instrumentation.rs",
+        "stats": {
+          "blanks": 100,
+          "blobs": {
+            "Markdown": {
+              "blanks": 0,
+              "blobs": {},
+              "code": 0,
+              "comments": 1
+            }
+          },
+          "code": 728,
+          "comments": 0
         }
       },
       {
@@ -7401,7 +7667,7 @@
               "comments": 15
             }
           },
-          "code": 169,
+          "code": 167,
           "comments": 0
         }
       },
@@ -7459,17 +7725,10 @@
           "blanks": 0,
           "blobs": {
             "Markdown": {
-              "blanks": 12,
-              "blobs": {
-                "Rust": {
-                  "blanks": 5,
-                  "blobs": {},
-                  "code": 59,
-                  "comments": 5
-                }
-              },
+              "blanks": 5,
+              "blobs": {},
               "code": 0,
-              "comments": 49
+              "comments": 17
             }
           },
           "code": 16,
@@ -7479,16 +7738,16 @@
       {
         "name": "./tracing/src/field.rs",
         "stats": {
-          "blanks": 7,
+          "blanks": 15,
           "blobs": {
             "Markdown": {
-              "blanks": 20,
+              "blanks": 6,
               "blobs": {},
               "code": 0,
-              "comments": 108
+              "comments": 27
             }
           },
-          "code": 27,
+          "code": 79,
           "comments": 1
         }
       },
@@ -7511,7 +7770,7 @@
               "comments": 146
             }
           },
-          "code": 160,
+          "code": 158,
           "comments": 2
         }
       },
@@ -7541,10 +7800,10 @@
       {
         "name": "./tracing/src/lib.rs",
         "stats": {
-          "blanks": 33,
+          "blanks": 57,
           "blobs": {
             "Markdown": {
-              "blanks": 145,
+              "blanks": 147,
               "blobs": {
                 "Rust": {
                   "blanks": 11,
@@ -7566,10 +7825,10 @@
                 }
               },
               "code": 0,
-              "comments": 714
+              "comments": 723
             }
           },
-          "code": 236,
+          "code": 417,
           "comments": 3
         }
       },
@@ -7599,10 +7858,10 @@
       {
         "name": "./tracing/src/span.rs",
         "stats": {
-          "blanks": 81,
+          "blanks": 82,
           "blobs": {
             "Markdown": {
-              "blanks": 210,
+              "blanks": 217,
               "blobs": {
                 "Rust": {
                   "blanks": 7,
@@ -7625,10 +7884,10 @@
                 }
               },
               "code": 0,
-              "comments": 799
+              "comments": 837
             }
           },
-          "code": 475,
+          "code": 479,
           "comments": 8
         }
       },
@@ -7795,38 +8054,6 @@
       {
         "name": "./tracing/tests/enabled.rs",
         "stats": {
-          "blanks": 16,
-          "blobs": {
-            "Markdown": {
-              "blanks": 0,
-              "blobs": {},
-              "code": 0,
-              "comments": 1
-            }
-          },
-          "code": 162,
-          "comments": 2
-        }
-      },
-      {
-        "name": "./tracing/tests/event.rs",
-        "stats": {
-          "blanks": 62,
-          "blobs": {
-            "Markdown": {
-              "blanks": 0,
-              "blobs": {},
-              "code": 0,
-              "comments": 1
-            }
-          },
-          "code": 547,
-          "comments": 11
-        }
-      },
-      {
-        "name": "./tracing/tests/filter_caching_is_lexically_scoped.rs",
-        "stats": {
           "blanks": 15,
           "blobs": {
             "Markdown": {
@@ -7836,14 +8063,46 @@
               "comments": 1
             }
           },
-          "code": 50,
-          "comments": 9
+          "code": 159,
+          "comments": 2
+        }
+      },
+      {
+        "name": "./tracing/tests/event.rs",
+        "stats": {
+          "blanks": 64,
+          "blobs": {
+            "Markdown": {
+              "blanks": 0,
+              "blobs": {},
+              "code": 0,
+              "comments": 1
+            }
+          },
+          "code": 608,
+          "comments": 22
+        }
+      },
+      {
+        "name": "./tracing/tests/filter_caching_is_lexically_scoped.rs",
+        "stats": {
+          "blanks": 16,
+          "blobs": {
+            "Markdown": {
+              "blanks": 0,
+              "blobs": {},
+              "code": 0,
+              "comments": 1
+            }
+          },
+          "code": 77,
+          "comments": 12
         }
       },
       {
         "name": "./tracing/tests/filters_are_not_reevaluated_for_the_same_span.rs",
         "stats": {
-          "blanks": 12,
+          "blanks": 13,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -7852,14 +8111,14 @@
               "comments": 1
             }
           },
-          "code": 69,
-          "comments": 14
+          "code": 79,
+          "comments": 17
         }
       },
       {
         "name": "./tracing/tests/filters_are_reevaluated_for_different_call_sites.rs",
         "stats": {
-          "blanks": 12,
+          "blanks": 13,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -7868,8 +8127,8 @@
               "comments": 1
             }
           },
-          "code": 71,
-          "comments": 18
+          "code": 90,
+          "comments": 21
         }
       },
       {
@@ -7884,14 +8143,14 @@
               "comments": 1
             }
           },
-          "code": 63,
+          "code": 68,
           "comments": 0
         }
       },
       {
         "name": "./tracing/tests/future_send.rs",
         "stats": {
-          "blanks": 5,
+          "blanks": 6,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -7900,14 +8159,14 @@
               "comments": 1
             }
           },
-          "code": 21,
+          "code": 19,
           "comments": 3
         }
       },
       {
         "name": "./tracing/tests/instrument.rs",
         "stats": {
-          "blanks": 12,
+          "blanks": 28,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -7916,7 +8175,7 @@
               "comments": 1
             }
           },
-          "code": 71,
+          "code": 196,
           "comments": 5
         }
       },
@@ -7948,7 +8207,7 @@
               "comments": 2
             }
           },
-          "code": 1398,
+          "code": 1396,
           "comments": 12
         }
       },
@@ -7980,14 +8239,14 @@
               "comments": 1
             }
           },
-          "code": 40,
+          "code": 47,
           "comments": 7
         }
       },
       {
         "name": "./tracing/tests/missed_register_callsite.rs",
         "stats": {
-          "blanks": 16,
+          "blanks": 10,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -7996,7 +8255,7 @@
               "comments": 1
             }
           },
-          "code": 105,
+          "code": 48,
           "comments": 4
         }
       },
@@ -8012,7 +8271,7 @@
               "comments": 1
             }
           },
-          "code": 68,
+          "code": 83,
           "comments": 9
         }
       },
@@ -8035,7 +8294,7 @@
       {
         "name": "./tracing/tests/register_callsite_deadlock.rs",
         "stats": {
-          "blanks": 8,
+          "blanks": 5,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -8044,8 +8303,8 @@
               "comments": 1
             }
           },
-          "code": 66,
-          "comments": 3
+          "code": 33,
+          "comments": 6
         }
       },
       {
@@ -8060,14 +8319,14 @@
               "comments": 1
             }
           },
-          "code": 30,
+          "code": 37,
           "comments": 5
         }
       },
       {
         "name": "./tracing/tests/span.rs",
         "stats": {
-          "blanks": 111,
+          "blanks": 153,
           "blobs": {
             "Markdown": {
               "blanks": 0,
@@ -8076,24 +8335,24 @@
               "comments": 1
             }
           },
-          "code": 796,
-          "comments": 90
+          "code": 1203,
+          "comments": 140
         }
       },
       {
         "name": "./tracing/tests/subscriber.rs",
         "stats": {
-          "blanks": 23,
+          "blanks": 43,
           "blobs": {
             "Markdown": {
               "blanks": 0,
               "blobs": {},
               "code": 0,
-              "comments": 1
+              "comments": 6
             }
           },
-          "code": 140,
-          "comments": 11
+          "code": 229,
+          "comments": 26
         }
       },
       {
@@ -8165,7 +8424,7 @@
   "SVG": {
     "blanks": 9,
     "children": {},
-    "code": 5598,
+    "code": 5612,
     "comments": 1,
     "inaccurate": false,
     "reports": [
@@ -8186,22 +8445,148 @@
           "code": 5593,
           "comments": 1
         }
+      },
+      {
+        "name": "./badges/clippy.svg",
+        "stats": {
+          "blanks": 0,
+          "blobs": {},
+          "code": 1,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./badges/commits.svg",
+        "stats": {
+          "blanks": 0,
+          "blobs": {},
+          "code": 1,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./badges/complexity.svg",
+        "stats": {
+          "blanks": 0,
+          "blobs": {},
+          "code": 1,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./badges/coverage-branches.svg",
+        "stats": {
+          "blanks": 0,
+          "blobs": {},
+          "code": 1,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./badges/coverage-functions.svg",
+        "stats": {
+          "blanks": 0,
+          "blobs": {},
+          "code": 1,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./badges/coverage-lines.svg",
+        "stats": {
+          "blanks": 0,
+          "blobs": {},
+          "code": 1,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./badges/coverage-regions.svg",
+        "stats": {
+          "blanks": 0,
+          "blobs": {},
+          "code": 1,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./badges/cross.svg",
+        "stats": {
+          "blanks": 0,
+          "blobs": {},
+          "code": 1,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./badges/duplication.svg",
+        "stats": {
+          "blanks": 0,
+          "blobs": {},
+          "code": 1,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./badges/edition.svg",
+        "stats": {
+          "blanks": 0,
+          "blobs": {},
+          "code": 1,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./badges/loc.svg",
+        "stats": {
+          "blanks": 0,
+          "blobs": {},
+          "code": 1,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./badges/panics.svg",
+        "stats": {
+          "blanks": 0,
+          "blobs": {},
+          "code": 1,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./badges/toolchain.svg",
+        "stats": {
+          "blanks": 0,
+          "blobs": {},
+          "code": 1,
+          "comments": 0
+        }
+      },
+      {
+        "name": "./badges/unsafe.svg",
+        "stats": {
+          "blanks": 0,
+          "blobs": {},
+          "code": 1,
+          "comments": 0
+        }
       }
     ]
   },
   "TOML": {
-    "blanks": 237,
+    "blanks": 225,
     "children": {},
-    "code": 2224,
-    "comments": 366,
+    "code": 2037,
+    "comments": 301,
     "inaccurate": false,
     "reports": [
       {
         "name": "./Cargo.toml",
         "stats": {
-          "blanks": 50,
+          "blanks": 52,
           "blobs": {},
-          "code": 476,
+          "code": 477,
           "comments": 135
         }
       },
@@ -8237,7 +8622,7 @@
         "stats": {
           "blanks": 12,
           "blobs": {},
-          "code": 49,
+          "code": 47,
           "comments": 8
         }
       },
@@ -8269,51 +8654,6 @@
         }
       },
       {
-        "name": "./template-baselines/clippy.toml",
-        "stats": {
-          "blanks": 9,
-          "blobs": {},
-          "code": 126,
-          "comments": 42
-        }
-      },
-      {
-        "name": "./template-baselines/deny.toml",
-        "stats": {
-          "blanks": 5,
-          "blobs": {},
-          "code": 33,
-          "comments": 13
-        }
-      },
-      {
-        "name": "./template-baselines/dupes.toml",
-        "stats": {
-          "blanks": 3,
-          "blobs": {},
-          "code": 10,
-          "comments": 16
-        }
-      },
-      {
-        "name": "./template-baselines/rust-toolchain.toml",
-        "stats": {
-          "blanks": 0,
-          "blobs": {},
-          "code": 4,
-          "comments": 4
-        }
-      },
-      {
-        "name": "./template-baselines/rustfmt.toml",
-        "stats": {
-          "blanks": 4,
-          "blobs": {},
-          "code": 53,
-          "comments": 11
-        }
-      },
-      {
         "name": "./tracing-appender/Cargo.toml",
         "stats": {
           "blanks": 5,
@@ -8323,21 +8663,30 @@
         }
       },
       {
+        "name": "./tracing-attributes-internal/Cargo.toml",
+        "stats": {
+          "blanks": 3,
+          "blobs": {},
+          "code": 31,
+          "comments": 0
+        }
+      },
+      {
         "name": "./tracing-attributes/Cargo.toml",
         "stats": {
           "blanks": 7,
           "blobs": {},
-          "code": 44,
+          "code": 42,
           "comments": 6
         }
       },
       {
         "name": "./tracing-core/Cargo.toml",
         "stats": {
-          "blanks": 7,
+          "blanks": 8,
           "blobs": {},
-          "code": 38,
-          "comments": 11
+          "code": 42,
+          "comments": 20
         }
       },
       {
@@ -8354,17 +8703,17 @@
         "stats": {
           "blanks": 4,
           "blobs": {},
-          "code": 32,
+          "code": 33,
           "comments": 0
         }
       },
       {
         "name": "./tracing-futures/Cargo.toml",
         "stats": {
-          "blanks": 7,
+          "blanks": 6,
           "blobs": {},
-          "code": 51,
-          "comments": 1
+          "code": 43,
+          "comments": 0
         }
       },
       {
@@ -8372,7 +8721,7 @@
         "stats": {
           "blanks": 3,
           "blobs": {},
-          "code": 27,
+          "code": 28,
           "comments": 0
         }
       },
@@ -8397,28 +8746,28 @@
       {
         "name": "./tracing-mock/Cargo.toml",
         "stats": {
-          "blanks": 5,
+          "blanks": 6,
           "blobs": {},
-          "code": 38,
-          "comments": 1
+          "code": 40,
+          "comments": 5
         }
       },
       {
         "name": "./tracing-serde/Cargo.toml",
         "stats": {
-          "blanks": 6,
+          "blanks": 7,
           "blobs": {},
-          "code": 33,
-          "comments": 0
+          "code": 36,
+          "comments": 2
         }
       },
       {
         "name": "./tracing-subscriber/Cargo.toml",
         "stats": {
-          "blanks": 17,
+          "blanks": 19,
           "blobs": {},
-          "code": 86,
-          "comments": 10
+          "code": 90,
+          "comments": 17
         }
       },
       {
@@ -8433,9 +8782,9 @@
       {
         "name": "./tracing-tower/Cargo.toml",
         "stats": {
-          "blanks": 5,
+          "blanks": 6,
           "blobs": {},
-          "code": 39,
+          "code": 44,
           "comments": 0
         }
       },
@@ -8444,7 +8793,7 @@
         "stats": {
           "blanks": 20,
           "blobs": {},
-          "code": 87,
+          "code": 88,
           "comments": 9
         }
       },
@@ -8460,9 +8809,9 @@
       {
         "name": "./tracing/test_static_max_level_features/Cargo.toml",
         "stats": {
-          "blanks": 9,
+          "blanks": 8,
           "blobs": {},
-          "code": 274,
+          "code": 272,
           "comments": 4
         }
       },
@@ -8478,7 +8827,7 @@
     ]
   },
   "Total": {
-    "blanks": 14084,
+    "blanks": 15858,
     "children": {
       "BASH": [
         {
@@ -8500,15 +8849,6 @@
             "code": 79,
             "comments": 97
           }
-        },
-        {
-          "name": "./template-baselines/justfile",
-          "stats": {
-            "blanks": 49,
-            "blobs": {},
-            "code": 79,
-            "comments": 97
-          }
         }
       ],
       "Markdown": [
@@ -8518,7 +8858,7 @@
             "blanks": 52,
             "blobs": {},
             "code": 0,
-            "comments": 125
+            "comments": 126
           }
         },
         {
@@ -8601,7 +8941,7 @@
             "blanks": 3,
             "blobs": {},
             "code": 0,
-            "comments": 81
+            "comments": 80
           }
         },
         {
@@ -8654,12 +8994,30 @@
           }
         },
         {
+          "name": "./tracing-attributes-internal/AGENTS.md",
+          "stats": {
+            "blanks": 9,
+            "blobs": {},
+            "code": 0,
+            "comments": 15
+          }
+        },
+        {
+          "name": "./tracing-attributes-internal/CLAUDE.md",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 0,
+            "comments": 1
+          }
+        },
+        {
           "name": "./tracing-attributes/AGENTS.md",
           "stats": {
             "blanks": 11,
             "blobs": {},
             "code": 0,
-            "comments": 19
+            "comments": 17
           }
         },
         {
@@ -8715,7 +9073,7 @@
             "blanks": 10,
             "blobs": {},
             "code": 0,
-            "comments": 23
+            "comments": 24
           }
         },
         {
@@ -8835,7 +9193,7 @@
             "blanks": 7,
             "blobs": {},
             "code": 0,
-            "comments": 18
+            "comments": 13
           }
         },
         {
@@ -9218,10 +9576,10 @@
         {
           "name": "./xtask/AGENTS.md",
           "stats": {
-            "blanks": 52,
+            "blanks": 40,
             "blobs": {},
             "code": 0,
-            "comments": 102
+            "comments": 51
           }
         },
         {
@@ -9378,7 +9736,7 @@
         {
           "name": "./examples/examples/counters.rs",
           "stats": {
-            "blanks": 25,
+            "blanks": 27,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -9387,7 +9745,7 @@
                 "comments": 12
               }
             },
-            "code": 179,
+            "code": 176,
             "comments": 1
           }
         },
@@ -9410,17 +9768,17 @@
         {
           "name": "./examples/examples/echo.rs",
           "stats": {
-            "blanks": 18,
+            "blanks": 10,
             "blobs": {
               "Markdown": {
                 "blanks": 8,
                 "blobs": {},
                 "code": 0,
-                "comments": 18
+                "comments": 15
               }
             },
-            "code": 75,
-            "comments": 16
+            "code": 41,
+            "comments": 15
           }
         },
         {
@@ -9435,7 +9793,7 @@
                 "comments": 29
               }
             },
-            "code": 248,
+            "code": 246,
             "comments": 0
           }
         },
@@ -9490,7 +9848,7 @@
                 "comments": 17
               }
             },
-            "code": 32,
+            "code": 30,
             "comments": 9
           }
         },
@@ -9618,7 +9976,7 @@
                 "comments": 27
               }
             },
-            "code": 134,
+            "code": 132,
             "comments": 1
           }
         },
@@ -9634,23 +9992,23 @@
                 "comments": 4
               }
             },
-            "code": 114,
+            "code": 112,
             "comments": 5
           }
         },
         {
           "name": "./examples/examples/inferno-flame.rs",
           "stats": {
-            "blanks": 13,
+            "blanks": 12,
             "blobs": {
               "Markdown": {
-                "blanks": 0,
+                "blanks": 5,
                 "blobs": {},
                 "code": 0,
-                "comments": 6
+                "comments": 21
               }
             },
-            "code": 82,
+            "code": 65,
             "comments": 4
           }
         },
@@ -9666,7 +10024,7 @@
                 "comments": 9
               }
             },
-            "code": 96,
+            "code": 94,
             "comments": 3
           }
         },
@@ -9778,7 +10136,7 @@
                 "comments": 50
               }
             },
-            "code": 334,
+            "code": 326,
             "comments": 4
           }
         },
@@ -9826,7 +10184,7 @@
                 "comments": 16
               }
             },
-            "code": 34,
+            "code": 32,
             "comments": 2
           }
         },
@@ -9906,7 +10264,7 @@
                 "comments": 41
               }
             },
-            "code": 404,
+            "code": 399,
             "comments": 2
           }
         },
@@ -9922,7 +10280,7 @@
                 "comments": 6
               }
             },
-            "code": 112,
+            "code": 113,
             "comments": 0
           }
         },
@@ -9977,16 +10335,16 @@
         {
           "name": "./tracing-appender/benches/bench.rs",
           "stats": {
-            "blanks": 28,
+            "blanks": 29,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
                 "blobs": {},
                 "code": 0,
-                "comments": 5
+                "comments": 6
               }
             },
-            "code": 123,
+            "code": 108,
             "comments": 2
           }
         },
@@ -10012,7 +10370,7 @@
                   }
                 },
                 "code": 0,
-                "comments": 93
+                "comments": 94
               }
             },
             "code": 21,
@@ -10022,7 +10380,7 @@
         {
           "name": "./tracing-appender/src/non_blocking.rs",
           "stats": {
-            "blanks": 79,
+            "blanks": 99,
             "blobs": {
               "Markdown": {
                 "blanks": 33,
@@ -10038,17 +10396,17 @@
                 "comments": 148
               }
             },
-            "code": 350,
+            "code": 487,
             "comments": 26
           }
         },
         {
           "name": "./tracing-appender/src/rolling.rs",
           "stats": {
-            "blanks": 162,
+            "blanks": 182,
             "blobs": {
               "Markdown": {
-                "blanks": 74,
+                "blanks": 75,
                 "blobs": {
                   "Rust": {
                     "blanks": 14,
@@ -10058,17 +10416,17 @@
                   }
                 },
                 "code": 0,
-                "comments": 243
+                "comments": 255
               }
             },
-            "code": 977,
+            "code": 1132,
             "comments": 35
           }
         },
         {
           "name": "./tracing-appender/src/rolling/builder.rs",
           "stats": {
-            "blanks": 13,
+            "blanks": 27,
             "blobs": {
               "Markdown": {
                 "blanks": 48,
@@ -10077,7 +10435,7 @@
                 "comments": 177
               }
             },
-            "code": 101,
+            "code": 191,
             "comments": 5
           }
         },
@@ -10109,46 +10467,78 @@
                 "comments": 19
               }
             },
-            "code": 76,
+            "code": 71,
             "comments": 1
           }
         },
         {
-          "name": "./tracing-attributes/src/attr.rs",
+          "name": "./tracing-attributes-internal/src/attr.rs",
           "stats": {
-            "blanks": 37,
+            "blanks": 88,
             "blobs": {
               "Markdown": {
-                "blanks": 1,
+                "blanks": 5,
                 "blobs": {},
                 "code": 0,
-                "comments": 60
+                "comments": 89
               }
             },
-            "code": 442,
+            "code": 829,
             "comments": 21
           }
         },
         {
-          "name": "./tracing-attributes/src/expand.rs",
+          "name": "./tracing-attributes-internal/src/entry.rs",
           "stats": {
-            "blanks": 73,
+            "blanks": 26,
             "blobs": {
               "Markdown": {
-                "blanks": 6,
+                "blanks": 2,
                 "blobs": {},
                 "code": 0,
-                "comments": 59
+                "comments": 33
               }
             },
-            "code": 749,
+            "code": 240,
+            "comments": 3
+          }
+        },
+        {
+          "name": "./tracing-attributes-internal/src/expand.rs",
+          "stats": {
+            "blanks": 102,
+            "blobs": {
+              "Markdown": {
+                "blanks": 8,
+                "blobs": {},
+                "code": 0,
+                "comments": 73
+              }
+            },
+            "code": 986,
             "comments": 58
+          }
+        },
+        {
+          "name": "./tracing-attributes-internal/src/lib.rs",
+          "stats": {
+            "blanks": 2,
+            "blobs": {
+              "Markdown": {
+                "blanks": 2,
+                "blobs": {},
+                "code": 0,
+                "comments": 9
+              }
+            },
+            "code": 4,
+            "comments": 0
           }
         },
         {
           "name": "./tracing-attributes/src/lib.rs",
           "stats": {
-            "blanks": 13,
+            "blanks": 1,
             "blobs": {
               "Markdown": {
                 "blanks": 92,
@@ -10161,11 +10551,11 @@
                   }
                 },
                 "code": 0,
-                "comments": 464
+                "comments": 441
               }
             },
-            "code": 165,
-            "comments": 5
+            "code": 14,
+            "comments": 0
           }
         },
         {
@@ -10203,16 +10593,16 @@
         {
           "name": "./tracing-attributes/tests/destructuring.rs",
           "stats": {
-            "blanks": 34,
+            "blanks": 36,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
                 "blobs": {},
                 "code": 0,
-                "comments": 1
+                "comments": 3
               }
             },
-            "code": 195,
+            "code": 197,
             "comments": 0
           }
         },
@@ -10447,14 +10837,14 @@
                 "comments": 199
               }
             },
-            "code": 286,
+            "code": 290,
             "comments": 24
           }
         },
         {
           "name": "./tracing-core/src/dispatcher.rs",
           "stats": {
-            "blanks": 104,
+            "blanks": 131,
             "blobs": {
               "Markdown": {
                 "blanks": 89,
@@ -10470,7 +10860,7 @@
                 "comments": 303
               }
             },
-            "code": 582,
+            "code": 786,
             "comments": 28
           }
         },
@@ -10486,33 +10876,33 @@
                 "comments": 39
               }
             },
-            "code": 79,
+            "code": 83,
             "comments": 0
           }
         },
         {
           "name": "./tracing-core/src/field.rs",
           "stats": {
-            "blanks": 164,
+            "blanks": 202,
             "blobs": {
               "Markdown": {
                 "blanks": 54,
                 "blobs": {},
                 "code": 0,
-                "comments": 294
+                "comments": 296
               }
             },
-            "code": 977,
+            "code": 1215,
             "comments": 31
           }
         },
         {
           "name": "./tracing-core/src/lib.rs",
           "stats": {
-            "blanks": 11,
+            "blanks": 12,
             "blobs": {
               "Markdown": {
-                "blanks": 40,
+                "blanks": 41,
                 "blobs": {
                   "Rust": {
                     "blanks": 3,
@@ -10534,52 +10924,52 @@
                   }
                 },
                 "code": 0,
-                "comments": 95
+                "comments": 97
               }
             },
-            "code": 91,
+            "code": 95,
             "comments": 3
           }
         },
         {
           "name": "./tracing-core/src/metadata.rs",
           "stats": {
-            "blanks": 112,
+            "blanks": 153,
             "blobs": {
               "Markdown": {
-                "blanks": 55,
+                "blanks": 62,
                 "blobs": {},
                 "code": 0,
-                "comments": 303
+                "comments": 355
               }
             },
-            "code": 614,
-            "comments": 88
+            "code": 971,
+            "comments": 89
           }
         },
         {
           "name": "./tracing-core/src/span.rs",
           "stats": {
-            "blanks": 44,
+            "blanks": 77,
             "blobs": {
               "Markdown": {
                 "blanks": 14,
                 "blobs": {},
                 "code": 0,
-                "comments": 96
+                "comments": 105
               }
             },
-            "code": 236,
+            "code": 411,
             "comments": 4
           }
         },
         {
           "name": "./tracing-core/src/subscriber.rs",
           "stats": {
-            "blanks": 86,
+            "blanks": 98,
             "blobs": {
               "Markdown": {
-                "blanks": 103,
+                "blanks": 105,
                 "blobs": {
                   "Rust": {
                     "blanks": 3,
@@ -10592,7 +10982,7 @@
                 "comments": 412
               }
             },
-            "code": 353,
+            "code": 430,
             "comments": 2
           }
         },
@@ -10613,25 +11003,48 @@
           }
         },
         {
-          "name": "./tracing-core/tests/common/mod.rs",
+          "name": "./tracing-core/src/test_util.rs",
           "stats": {
-            "blanks": 3,
+            "blanks": 82,
+            "blobs": {
+              "Markdown": {
+                "blanks": 35,
+                "blobs": {
+                  "Rust": {
+                    "blanks": 22,
+                    "blobs": {},
+                    "code": 145,
+                    "comments": 0
+                  }
+                },
+                "code": 0,
+                "comments": 119
+              }
+            },
+            "code": 449,
+            "comments": 3
+          }
+        },
+        {
+          "name": "./tracing-core/tests/core_contracts.rs",
+          "stats": {
+            "blanks": 60,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
                 "blobs": {},
                 "code": 0,
-                "comments": 2
+                "comments": 25
               }
             },
-            "code": 57,
-            "comments": 1
+            "code": 567,
+            "comments": 0
           }
         },
         {
           "name": "./tracing-core/tests/dispatch.rs",
           "stats": {
-            "blanks": 9,
+            "blanks": 8,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -10640,14 +11053,14 @@
                 "comments": 1
               }
             },
-            "code": 30,
+            "code": 32,
             "comments": 1
           }
         },
         {
           "name": "./tracing-core/tests/global_dispatch.rs",
           "stats": {
-            "blanks": 6,
+            "blanks": 5,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -10656,14 +11069,14 @@
                 "comments": 1
               }
             },
-            "code": 25,
+            "code": 33,
             "comments": 0
           }
         },
         {
           "name": "./tracing-core/tests/local_dispatch_before_init.rs",
           "stats": {
-            "blanks": 7,
+            "blanks": 6,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -10672,7 +11085,7 @@
                 "comments": 5
               }
             },
-            "code": 29,
+            "code": 27,
             "comments": 3
           }
         },
@@ -10688,14 +11101,14 @@
                 "comments": 1
               }
             },
-            "code": 55,
+            "code": 54,
             "comments": 2
           }
         },
         {
           "name": "./tracing-core/tests/missed_register_callsite.rs",
           "stats": {
-            "blanks": 18,
+            "blanks": 11,
             "blobs": {
               "Markdown": {
                 "blanks": 2,
@@ -10704,8 +11117,8 @@
                 "comments": 6
               }
             },
-            "code": 127,
-            "comments": 6
+            "code": 71,
+            "comments": 5
           }
         },
         {
@@ -10724,10 +11137,10 @@
                   }
                 },
                 "code": 0,
-                "comments": 81
+                "comments": 84
               }
             },
-            "code": 173,
+            "code": 175,
             "comments": 1
           }
         },
@@ -10750,14 +11163,14 @@
                 "comments": 39
               }
             },
-            "code": 109,
+            "code": 107,
             "comments": 0
           }
         },
         {
           "name": "./tracing-error/src/layer.rs",
           "stats": {
-            "blanks": 18,
+            "blanks": 31,
             "blobs": {
               "Markdown": {
                 "blanks": 3,
@@ -10766,14 +11179,14 @@
                 "comments": 17
               }
             },
-            "code": 116,
+            "code": 186,
             "comments": 0
           }
         },
         {
           "name": "./tracing-error/src/lib.rs",
           "stats": {
-            "blanks": 8,
+            "blanks": 25,
             "blobs": {
               "Markdown": {
                 "blanks": 29,
@@ -10786,17 +11199,33 @@
                   }
                 },
                 "code": 0,
-                "comments": 79
+                "comments": 81
               }
             },
-            "code": 60,
+            "code": 156,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./tracing-error/tests/span_trace.rs",
+          "stats": {
+            "blanks": 30,
+            "blobs": {
+              "Markdown": {
+                "blanks": 0,
+                "blobs": {},
+                "code": 0,
+                "comments": 1
+              }
+            },
+            "code": 174,
             "comments": 0
           }
         },
         {
           "name": "./tracing-flame/src/error.rs",
           "stats": {
-            "blanks": 14,
+            "blanks": 27,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -10805,14 +11234,14 @@
                 "comments": 13
               }
             },
-            "code": 93,
+            "code": 167,
             "comments": 0
           }
         },
         {
           "name": "./tracing-flame/src/lib.rs",
           "stats": {
-            "blanks": 62,
+            "blanks": 64,
             "blobs": {
               "Markdown": {
                 "blanks": 42,
@@ -10825,10 +11254,10 @@
                   }
                 },
                 "code": 0,
-                "comments": 167
+                "comments": 169
               }
             },
-            "code": 344,
+            "code": 341,
             "comments": 2
           }
         },
@@ -10844,7 +11273,7 @@
                 "comments": 11
               }
             },
-            "code": 76,
+            "code": 74,
             "comments": 0
           }
         },
@@ -10860,40 +11289,40 @@
                 "comments": 16
               }
             },
-            "code": 108,
+            "code": 105,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./tracing-flame/tests/configuration.rs",
+          "stats": {
+            "blanks": 26,
+            "blobs": {
+              "Markdown": {
+                "blanks": 0,
+                "blobs": {},
+                "code": 0,
+                "comments": 1
+              }
+            },
+            "code": 185,
             "comments": 0
           }
         },
         {
           "name": "./tracing-futures/src/executor.rs",
           "stats": {
-            "blanks": 2,
+            "blanks": 1,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
                 "blobs": {},
                 "code": 0,
-                "comments": 3
+                "comments": 2
               }
             },
-            "code": 2,
+            "code": 1,
             "comments": 0
-          }
-        },
-        {
-          "name": "./tracing-futures/src/executor/futures_01.rs",
-          "stats": {
-            "blanks": 25,
-            "blobs": {
-              "Markdown": {
-                "blanks": 44,
-                "blobs": {},
-                "code": 0,
-                "comments": 115
-              }
-            },
-            "code": 208,
-            "comments": 2
           }
         },
         {
@@ -10915,7 +11344,7 @@
         {
           "name": "./tracing-futures/src/lib.rs",
           "stats": {
-            "blanks": 66,
+            "blanks": 45,
             "blobs": {
               "Markdown": {
                 "blanks": 34,
@@ -10934,17 +11363,17 @@
                   }
                 },
                 "code": 0,
-                "comments": 122
+                "comments": 111
               }
             },
-            "code": 497,
-            "comments": 31
+            "code": 323,
+            "comments": 2
           }
         },
         {
           "name": "./tracing-futures/tests/std_future.rs",
           "stats": {
-            "blanks": 12,
+            "blanks": 43,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -10953,14 +11382,14 @@
                 "comments": 1
               }
             },
-            "code": 114,
+            "code": 348,
             "comments": 2
           }
         },
         {
           "name": "./tracing-journald/src/lib.rs",
           "stats": {
-            "blanks": 61,
+            "blanks": 86,
             "blobs": {
               "Markdown": {
                 "blanks": 65,
@@ -10973,10 +11402,10 @@
                   }
                 },
                 "code": 0,
-                "comments": 205
+                "comments": 210
               }
             },
-            "code": 471,
+            "code": 683,
             "comments": 13
           }
         },
@@ -11008,7 +11437,7 @@
                 "comments": 4
               }
             },
-            "code": 78,
+            "code": 76,
             "comments": 0
           }
         },
@@ -11031,39 +11460,39 @@
         {
           "name": "./tracing-log/benches/logging.rs",
           "stats": {
-            "blanks": 20,
+            "blanks": 19,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
                 "blobs": {},
                 "code": 0,
-                "comments": 17
+                "comments": 16
               }
             },
-            "code": 170,
+            "code": 155,
             "comments": 0
           }
         },
         {
           "name": "./tracing-log/src/interest_cache.rs",
           "stats": {
-            "blanks": 70,
+            "blanks": 74,
             "blobs": {
               "Markdown": {
                 "blanks": 11,
                 "blobs": {},
                 "code": 0,
-                "comments": 50
+                "comments": 54
               }
             },
-            "code": 495,
+            "code": 455,
             "comments": 36
           }
         },
         {
           "name": "./tracing-log/src/lib.rs",
           "stats": {
-            "blanks": 72,
+            "blanks": 99,
             "blobs": {
               "Markdown": {
                 "blanks": 30,
@@ -11079,14 +11508,14 @@
                 "comments": 149
               }
             },
-            "code": 496,
+            "code": 708,
             "comments": 0
           }
         },
         {
           "name": "./tracing-log/src/log_tracer.rs",
           "stats": {
-            "blanks": 25,
+            "blanks": 49,
             "blobs": {
               "Markdown": {
                 "blanks": 37,
@@ -11099,26 +11528,26 @@
                   }
                 },
                 "code": 0,
-                "comments": 100
+                "comments": 105
               }
             },
-            "code": 138,
-            "comments": 10
+            "code": 264,
+            "comments": 9
           }
         },
         {
           "name": "./tracing-log/tests/log_tracer.rs",
           "stats": {
-            "blanks": 19,
+            "blanks": 21,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
                 "blobs": {},
                 "code": 0,
-                "comments": 13
+                "comments": 15
               }
             },
-            "code": 138,
+            "code": 140,
             "comments": 0
           }
         },
@@ -11150,7 +11579,7 @@
                 "comments": 2
               }
             },
-            "code": 25,
+            "code": 23,
             "comments": 0
           }
         },
@@ -11182,14 +11611,14 @@
                 "comments": 36
               }
             },
-            "code": 139,
+            "code": 137,
             "comments": 0
           }
         },
         {
           "name": "./tracing-mock/src/event.rs",
           "stats": {
-            "blanks": 21,
+            "blanks": 35,
             "blobs": {
               "Markdown": {
                 "blanks": 115,
@@ -11198,14 +11627,14 @@
                 "comments": 364
               }
             },
-            "code": 141,
+            "code": 204,
             "comments": 0
           }
         },
         {
           "name": "./tracing-mock/src/expect.rs",
           "stats": {
-            "blanks": 15,
+            "blanks": 23,
             "blobs": {
               "Markdown": {
                 "blanks": 58,
@@ -11214,7 +11643,7 @@
                 "comments": 200
               }
             },
-            "code": 169,
+            "code": 273,
             "comments": 0
           }
         },
@@ -11237,7 +11666,7 @@
         {
           "name": "./tracing-mock/src/field.rs",
           "stats": {
-            "blanks": 38,
+            "blanks": 52,
             "blobs": {
               "Markdown": {
                 "blanks": 95,
@@ -11246,23 +11675,23 @@
                 "comments": 316
               }
             },
-            "code": 261,
+            "code": 304,
             "comments": 0
           }
         },
         {
           "name": "./tracing-mock/src/layer.rs",
           "stats": {
-            "blanks": 37,
+            "blanks": 76,
             "blobs": {
               "Markdown": {
-                "blanks": 167,
+                "blanks": 176,
                 "blobs": {},
                 "code": 0,
-                "comments": 649
+                "comments": 704
               }
             },
-            "code": 389,
+            "code": 542,
             "comments": 0
           }
         },
@@ -11285,7 +11714,7 @@
         {
           "name": "./tracing-mock/src/metadata.rs",
           "stats": {
-            "blanks": 13,
+            "blanks": 23,
             "blobs": {
               "Markdown": {
                 "blanks": 3,
@@ -11294,14 +11723,14 @@
                 "comments": 14
               }
             },
-            "code": 73,
+            "code": 141,
             "comments": 0
           }
         },
         {
           "name": "./tracing-mock/src/span.rs",
           "stats": {
-            "blanks": 60,
+            "blanks": 91,
             "blobs": {
               "Markdown": {
                 "blanks": 166,
@@ -11310,23 +11739,23 @@
                 "comments": 577
               }
             },
-            "code": 334,
+            "code": 480,
             "comments": 1
           }
         },
         {
           "name": "./tracing-mock/src/subscriber.rs",
           "stats": {
-            "blanks": 49,
+            "blanks": 74,
             "blobs": {
               "Markdown": {
-                "blanks": 207,
+                "blanks": 215,
                 "blobs": {},
                 "code": 0,
-                "comments": 825
+                "comments": 873
               }
             },
-            "code": 621,
+            "code": 682,
             "comments": 0
           }
         },
@@ -11358,8 +11787,8 @@
                 "comments": 2
               }
             },
-            "code": 93,
-            "comments": 5
+            "code": 114,
+            "comments": 3
           }
         },
         {
@@ -11465,11 +11894,27 @@
                   }
                 },
                 "code": 0,
-                "comments": 115
+                "comments": 116
               }
             },
             "code": 325,
             "comments": 4
+          }
+        },
+        {
+          "name": "./tracing-serde/tests/serialization.rs",
+          "stats": {
+            "blanks": 35,
+            "blobs": {
+              "Markdown": {
+                "blanks": 0,
+                "blobs": {},
+                "code": 0,
+                "comments": 1
+              }
+            },
+            "code": 277,
+            "comments": 0
           }
         },
         {
@@ -11491,48 +11936,48 @@
         {
           "name": "./tracing-subscriber/benches/filter.rs",
           "stats": {
-            "blanks": 39,
+            "blanks": 43,
             "blobs": {
               "Markdown": {
                 "blanks": 14,
                 "blobs": {},
                 "code": 0,
-                "comments": 38
+                "comments": 42
               }
             },
-            "code": 359,
+            "code": 275,
             "comments": 0
           }
         },
         {
           "name": "./tracing-subscriber/benches/filter_log.rs",
           "stats": {
-            "blanks": 40,
+            "blanks": 44,
             "blobs": {
               "Markdown": {
                 "blanks": 14,
                 "blobs": {},
                 "code": 0,
-                "comments": 39
+                "comments": 43
               }
             },
-            "code": 365,
+            "code": 281,
             "comments": 0
           }
         },
         {
           "name": "./tracing-subscriber/benches/fmt.rs",
           "stats": {
-            "blanks": 22,
+            "blanks": 26,
             "blobs": {
               "Markdown": {
                 "blanks": 1,
                 "blobs": {},
                 "code": 0,
-                "comments": 20
+                "comments": 27
               }
             },
-            "code": 311,
+            "code": 254,
             "comments": 0
           }
         },
@@ -11555,7 +12000,7 @@
         {
           "name": "./tracing-subscriber/src/field.rs",
           "stats": {
-            "blanks": 42,
+            "blanks": 44,
             "blobs": {
               "Markdown": {
                 "blanks": 9,
@@ -11564,14 +12009,14 @@
                 "comments": 67
               }
             },
-            "code": 257,
+            "code": 258,
             "comments": 2
           }
         },
         {
           "name": "./tracing-subscriber/src/field/debug.rs",
           "stats": {
-            "blanks": 18,
+            "blanks": 58,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -11580,7 +12025,7 @@
                 "comments": 6
               }
             },
-            "code": 87,
+            "code": 252,
             "comments": 8
           }
         },
@@ -11603,7 +12048,7 @@
         {
           "name": "./tracing-subscriber/src/field/display.rs",
           "stats": {
-            "blanks": 18,
+            "blanks": 62,
             "blobs": {
               "Markdown": {
                 "blanks": 1,
@@ -11612,7 +12057,7 @@
                 "comments": 7
               }
             },
-            "code": 91,
+            "code": 263,
             "comments": 8
           }
         },
@@ -11635,23 +12080,23 @@
         {
           "name": "./tracing-subscriber/src/filter/directive.rs",
           "stats": {
-            "blanks": 58,
+            "blanks": 87,
             "blobs": {
               "Markdown": {
                 "blanks": 1,
                 "blobs": {},
                 "code": 0,
-                "comments": 32
+                "comments": 35
               }
             },
-            "code": 352,
+            "code": 615,
             "comments": 43
           }
         },
         {
           "name": "./tracing-subscriber/src/filter/env.rs",
           "stats": {
-            "blanks": 89,
+            "blanks": 99,
             "blobs": {
               "Markdown": {
                 "blanks": 84,
@@ -11664,17 +12109,17 @@
                   }
                 },
                 "code": 0,
-                "comments": 305
+                "comments": 310
               }
             },
-            "code": 643,
-            "comments": 26
+            "code": 708,
+            "comments": 25
           }
         },
         {
           "name": "./tracing-subscriber/src/filter/env/builder.rs",
           "stats": {
-            "blanks": 28,
+            "blanks": 48,
             "blobs": {
               "Markdown": {
                 "blanks": 35,
@@ -11690,30 +12135,30 @@
                 "comments": 88
               }
             },
-            "code": 217,
+            "code": 342,
             "comments": 0
           }
         },
         {
           "name": "./tracing-subscriber/src/filter/env/directive.rs",
           "stats": {
-            "blanks": 108,
+            "blanks": 112,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
                 "blobs": {},
                 "code": 0,
-                "comments": 64
+                "comments": 74
               }
             },
-            "code": 1071,
+            "code": 1037,
             "comments": 36
           }
         },
         {
           "name": "./tracing-subscriber/src/filter/env/field.rs",
           "stats": {
-            "blanks": 83,
+            "blanks": 121,
             "blobs": {
               "Markdown": {
                 "blanks": 4,
@@ -11722,14 +12167,14 @@
                 "comments": 64
               }
             },
-            "code": 637,
+            "code": 944,
             "comments": 17
           }
         },
         {
           "name": "./tracing-subscriber/src/filter/filter_fn.rs",
           "stats": {
-            "blanks": 39,
+            "blanks": 77,
             "blobs": {
               "Markdown": {
                 "blanks": 84,
@@ -11738,39 +12183,39 @@
                 "comments": 326
               }
             },
-            "code": 258,
+            "code": 472,
             "comments": 12
           }
         },
         {
           "name": "./tracing-subscriber/src/filter/layer_filters.rs",
           "stats": {
-            "blanks": 97,
+            "blanks": 141,
             "blobs": {
               "Markdown": {
                 "blanks": 95,
                 "blobs": {},
                 "code": 0,
-                "comments": 448
+                "comments": 466
               }
             },
-            "code": 620,
+            "code": 1035,
             "comments": 75
           }
         },
         {
           "name": "./tracing-subscriber/src/filter/layer_filters/combinator.rs",
           "stats": {
-            "blanks": 48,
+            "blanks": 91,
             "blobs": {
               "Markdown": {
                 "blanks": 44,
                 "blobs": {},
                 "code": 0,
-                "comments": 162
+                "comments": 182
               }
             },
-            "code": 324,
+            "code": 747,
             "comments": 15
           }
         },
@@ -11786,7 +12231,7 @@
         {
           "name": "./tracing-subscriber/src/filter/targets.rs",
           "stats": {
-            "blanks": 63,
+            "blanks": 78,
             "blobs": {
               "Markdown": {
                 "blanks": 73,
@@ -11799,17 +12244,17 @@
                   }
                 },
                 "code": 0,
-                "comments": 253
+                "comments": 255
               }
             },
-            "code": 451,
+            "code": 603,
             "comments": 8
           }
         },
         {
           "name": "./tracing-subscriber/src/fmt.rs",
           "stats": {
-            "blanks": 91,
+            "blanks": 93,
             "blobs": {
               "Markdown": {
                 "blanks": 128,
@@ -11828,17 +12273,17 @@
                   }
                 },
                 "code": 0,
-                "comments": 362
+                "comments": 364
               }
             },
-            "code": 645,
+            "code": 647,
             "comments": 11
           }
         },
         {
           "name": "./tracing-subscriber/src/fmt/fmt_layer.rs",
           "stats": {
-            "blanks": 142,
+            "blanks": 164,
             "blobs": {
               "Markdown": {
                 "blanks": 94,
@@ -11857,17 +12302,17 @@
                   }
                 },
                 "code": 0,
-                "comments": 327
+                "comments": 341
               }
             },
-            "code": 1219,
+            "code": 1324,
             "comments": 21
           }
         },
         {
           "name": "./tracing-subscriber/src/fmt/format.rs",
           "stats": {
-            "blanks": 253,
+            "blanks": 295,
             "blobs": {
               "Markdown": {
                 "blanks": 81,
@@ -11886,10 +12331,10 @@
                   }
                 },
                 "code": 0,
-                "comments": 394
+                "comments": 399
               }
             },
-            "code": 1811,
+            "code": 2053,
             "comments": 51
           }
         },
@@ -11905,24 +12350,24 @@
                 "comments": 7
               }
             },
-            "code": 51,
+            "code": 54,
             "comments": 4
           }
         },
         {
           "name": "./tracing-subscriber/src/fmt/format/json.rs",
           "stats": {
-            "blanks": 110,
+            "blanks": 127,
             "blobs": {
               "Markdown": {
                 "blanks": 14,
                 "blobs": {},
                 "code": 0,
-                "comments": 92
+                "comments": 101
               }
             },
-            "code": 769,
-            "comments": 36
+            "code": 1022,
+            "comments": 35
           }
         },
         {
@@ -11931,20 +12376,20 @@
             "blanks": 53,
             "blobs": {
               "Markdown": {
-                "blanks": 23,
+                "blanks": 24,
                 "blobs": {},
                 "code": 0,
-                "comments": 95
+                "comments": 98
               }
             },
-            "code": 416,
+            "code": 415,
             "comments": 18
           }
         },
         {
           "name": "./tracing-subscriber/src/fmt/time.rs",
           "stats": {
-            "blanks": 20,
+            "blanks": 39,
             "blobs": {
               "Markdown": {
                 "blanks": 13,
@@ -11960,24 +12405,24 @@
                 "comments": 36
               }
             },
-            "code": 85,
+            "code": 169,
             "comments": 0
           }
         },
         {
           "name": "./tracing-subscriber/src/fmt/time/chrono_crate.rs",
           "stats": {
-            "blanks": 17,
+            "blanks": 19,
             "blobs": {
               "Markdown": {
                 "blanks": 9,
                 "blobs": {},
                 "code": 0,
-                "comments": 31
+                "comments": 33
               }
             },
-            "code": 145,
-            "comments": 4
+            "code": 148,
+            "comments": 2
           }
         },
         {
@@ -11999,7 +12444,7 @@
         {
           "name": "./tracing-subscriber/src/fmt/time/time_crate.rs",
           "stats": {
-            "blanks": 18,
+            "blanks": 43,
             "blobs": {
               "Markdown": {
                 "blanks": 81,
@@ -12008,17 +12453,17 @@
                 "comments": 275
               }
             },
-            "code": 118,
+            "code": 253,
             "comments": 3
           }
         },
         {
           "name": "./tracing-subscriber/src/fmt/writer.rs",
           "stats": {
-            "blanks": 148,
+            "blanks": 172,
             "blobs": {
               "Markdown": {
-                "blanks": 126,
+                "blanks": 124,
                 "blobs": {
                   "Rust": {
                     "blanks": 2,
@@ -12028,11 +12473,11 @@
                   }
                 },
                 "code": 0,
-                "comments": 492
+                "comments": 488
               }
             },
-            "code": 777,
-            "comments": 14
+            "code": 1064,
+            "comments": 13
           }
         },
         {
@@ -12074,10 +12519,10 @@
                   }
                 },
                 "code": 0,
-                "comments": 132
+                "comments": 120
               }
             },
-            "code": 202,
+            "code": 200,
             "comments": 28
           }
         },
@@ -12093,23 +12538,23 @@
                 "comments": 26
               }
             },
-            "code": 367,
+            "code": 363,
             "comments": 99
           }
         },
         {
           "name": "./tracing-subscriber/src/layer/tests.rs",
           "stats": {
-            "blanks": 47,
+            "blanks": 130,
             "blobs": {
               "Markdown": {
                 "blanks": 1,
                 "blobs": {},
                 "code": 0,
-                "comments": 4
+                "comments": 29
               }
             },
-            "code": 283,
+            "code": 1141,
             "comments": 7
           }
         },
@@ -12177,7 +12622,7 @@
         {
           "name": "./tracing-subscriber/src/registry.rs",
           "stats": {
-            "blanks": 65,
+            "blanks": 62,
             "blobs": {
               "Markdown": {
                 "blanks": 34,
@@ -12190,11 +12635,11 @@
                   }
                 },
                 "code": 0,
-                "comments": 132
+                "comments": 134
               }
             },
-            "code": 324,
-            "comments": 8
+            "code": 327,
+            "comments": 0
           }
         },
         {
@@ -12225,7 +12670,7 @@
                 "comments": 124
               }
             },
-            "code": 678,
+            "code": 676,
             "comments": 72
           }
         },
@@ -12248,7 +12693,7 @@
         {
           "name": "./tracing-subscriber/src/reload.rs",
           "stats": {
-            "blanks": 50,
+            "blanks": 106,
             "blobs": {
               "Markdown": {
                 "blanks": 23,
@@ -12261,10 +12706,10 @@
                   }
                 },
                 "code": 0,
-                "comments": 74
+                "comments": 93
               }
             },
-            "code": 246,
+            "code": 625,
             "comments": 18
           }
         },
@@ -12296,7 +12741,7 @@
                 "comments": 39
               }
             },
-            "code": 98,
+            "code": 96,
             "comments": 6
           }
         },
@@ -12328,7 +12773,7 @@
                 "comments": 1
               }
             },
-            "code": 110,
+            "code": 108,
             "comments": 0
           }
         },
@@ -12344,7 +12789,7 @@
                 "comments": 1
               }
             },
-            "code": 38,
+            "code": 36,
             "comments": 5
           }
         },
@@ -12360,7 +12805,7 @@
                 "comments": 6
               }
             },
-            "code": 657,
+            "code": 654,
             "comments": 13
           }
         },
@@ -12408,7 +12853,23 @@
                 "comments": 1
               }
             },
-            "code": 99,
+            "code": 96,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./tracing-subscriber/tests/filter_contracts.rs",
+          "stats": {
+            "blanks": 24,
+            "blobs": {
+              "Markdown": {
+                "blanks": 0,
+                "blobs": {},
+                "code": 0,
+                "comments": 1
+              }
+            },
+            "code": 146,
             "comments": 0
           }
         },
@@ -12424,8 +12885,24 @@
                 "comments": 1
               }
             },
-            "code": 57,
+            "code": 54,
             "comments": 2
+          }
+        },
+        {
+          "name": "./tracing-subscriber/tests/fmt_contracts.rs",
+          "stats": {
+            "blanks": 105,
+            "blobs": {
+              "Markdown": {
+                "blanks": 0,
+                "blobs": {},
+                "code": 0,
+                "comments": 10
+              }
+            },
+            "code": 770,
+            "comments": 0
           }
         },
         {
@@ -12456,7 +12933,23 @@
                 "comments": 1
               }
             },
-            "code": 131,
+            "code": 129,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./tracing-subscriber/tests/layer_filter_contracts.rs",
+          "stats": {
+            "blanks": 14,
+            "blobs": {
+              "Markdown": {
+                "blanks": 0,
+                "blobs": {},
+                "code": 0,
+                "comments": 1
+              }
+            },
+            "code": 71,
             "comments": 0
           }
         },
@@ -12540,7 +13033,7 @@
           "stats": {
             "blanks": 24,
             "blobs": {},
-            "code": 116,
+            "code": 114,
             "comments": 0
           }
         },
@@ -12672,7 +13165,7 @@
                 "comments": 4
               }
             },
-            "code": 216,
+            "code": 214,
             "comments": 0
           }
         },
@@ -12688,7 +13181,7 @@
                 "comments": 1
               }
             },
-            "code": 32,
+            "code": 24,
             "comments": 0
           }
         },
@@ -12704,7 +13197,7 @@
                 "comments": 6
               }
             },
-            "code": 212,
+            "code": 206,
             "comments": 0
           }
         },
@@ -12720,7 +13213,23 @@
                 "comments": 1
               }
             },
-            "code": 40,
+            "code": 37,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./tracing-subscriber/tests/reload_registry_contracts.rs",
+          "stats": {
+            "blanks": 41,
+            "blobs": {
+              "Markdown": {
+                "blanks": 0,
+                "blobs": {},
+                "code": 0,
+                "comments": 33
+              }
+            },
+            "code": 325,
             "comments": 0
           }
         },
@@ -12736,7 +13245,7 @@
                 "comments": 1
               }
             },
-            "code": 76,
+            "code": 73,
             "comments": 2
           }
         },
@@ -12804,7 +13313,7 @@
                 "comments": 1
               }
             },
-            "code": 110,
+            "code": 108,
             "comments": 0
           }
         },
@@ -12875,7 +13384,7 @@
         {
           "name": "./tracing-tower/src/http.rs",
           "stats": {
-            "blanks": 3,
+            "blanks": 12,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -12884,7 +13393,7 @@
                 "comments": 3
               }
             },
-            "code": 42,
+            "code": 137,
             "comments": 0
           }
         },
@@ -12907,33 +13416,49 @@
         {
           "name": "./tracing-tower/src/request_span.rs",
           "stats": {
-            "blanks": 35,
+            "blanks": 36,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
                 "blobs": {},
                 "code": 0,
-                "comments": 22
+                "comments": 23
               }
             },
-            "code": 255,
+            "code": 259,
             "comments": 4
           }
         },
         {
           "name": "./tracing-tower/src/service_span.rs",
           "stats": {
-            "blanks": 35,
+            "blanks": 37,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
                 "blobs": {},
                 "code": 0,
-                "comments": 22
+                "comments": 24
               }
             },
-            "code": 229,
+            "code": 236,
             "comments": 4
+          }
+        },
+        {
+          "name": "./tracing-tower/tests/instrumentation.rs",
+          "stats": {
+            "blanks": 100,
+            "blobs": {
+              "Markdown": {
+                "blanks": 0,
+                "blobs": {},
+                "code": 0,
+                "comments": 1
+              }
+            },
+            "code": 728,
+            "comments": 0
           }
         },
         {
@@ -13044,7 +13569,7 @@
                 "comments": 15
               }
             },
-            "code": 169,
+            "code": 167,
             "comments": 0
           }
         },
@@ -13102,17 +13627,10 @@
             "blanks": 0,
             "blobs": {
               "Markdown": {
-                "blanks": 12,
-                "blobs": {
-                  "Rust": {
-                    "blanks": 5,
-                    "blobs": {},
-                    "code": 59,
-                    "comments": 5
-                  }
-                },
+                "blanks": 5,
+                "blobs": {},
                 "code": 0,
-                "comments": 49
+                "comments": 17
               }
             },
             "code": 16,
@@ -13122,16 +13640,16 @@
         {
           "name": "./tracing/src/field.rs",
           "stats": {
-            "blanks": 7,
+            "blanks": 15,
             "blobs": {
               "Markdown": {
-                "blanks": 20,
+                "blanks": 6,
                 "blobs": {},
                 "code": 0,
-                "comments": 108
+                "comments": 27
               }
             },
-            "code": 27,
+            "code": 79,
             "comments": 1
           }
         },
@@ -13154,7 +13672,7 @@
                 "comments": 146
               }
             },
-            "code": 160,
+            "code": 158,
             "comments": 2
           }
         },
@@ -13184,10 +13702,10 @@
         {
           "name": "./tracing/src/lib.rs",
           "stats": {
-            "blanks": 33,
+            "blanks": 57,
             "blobs": {
               "Markdown": {
-                "blanks": 145,
+                "blanks": 147,
                 "blobs": {
                   "Rust": {
                     "blanks": 11,
@@ -13209,10 +13727,10 @@
                   }
                 },
                 "code": 0,
-                "comments": 714
+                "comments": 723
               }
             },
-            "code": 236,
+            "code": 417,
             "comments": 3
           }
         },
@@ -13242,10 +13760,10 @@
         {
           "name": "./tracing/src/span.rs",
           "stats": {
-            "blanks": 81,
+            "blanks": 82,
             "blobs": {
               "Markdown": {
-                "blanks": 210,
+                "blanks": 217,
                 "blobs": {
                   "Rust": {
                     "blanks": 7,
@@ -13268,10 +13786,10 @@
                   }
                 },
                 "code": 0,
-                "comments": 799
+                "comments": 837
               }
             },
-            "code": 475,
+            "code": 479,
             "comments": 8
           }
         },
@@ -13438,38 +13956,6 @@
         {
           "name": "./tracing/tests/enabled.rs",
           "stats": {
-            "blanks": 16,
-            "blobs": {
-              "Markdown": {
-                "blanks": 0,
-                "blobs": {},
-                "code": 0,
-                "comments": 1
-              }
-            },
-            "code": 162,
-            "comments": 2
-          }
-        },
-        {
-          "name": "./tracing/tests/event.rs",
-          "stats": {
-            "blanks": 62,
-            "blobs": {
-              "Markdown": {
-                "blanks": 0,
-                "blobs": {},
-                "code": 0,
-                "comments": 1
-              }
-            },
-            "code": 547,
-            "comments": 11
-          }
-        },
-        {
-          "name": "./tracing/tests/filter_caching_is_lexically_scoped.rs",
-          "stats": {
             "blanks": 15,
             "blobs": {
               "Markdown": {
@@ -13479,14 +13965,46 @@
                 "comments": 1
               }
             },
-            "code": 50,
-            "comments": 9
+            "code": 159,
+            "comments": 2
+          }
+        },
+        {
+          "name": "./tracing/tests/event.rs",
+          "stats": {
+            "blanks": 64,
+            "blobs": {
+              "Markdown": {
+                "blanks": 0,
+                "blobs": {},
+                "code": 0,
+                "comments": 1
+              }
+            },
+            "code": 608,
+            "comments": 22
+          }
+        },
+        {
+          "name": "./tracing/tests/filter_caching_is_lexically_scoped.rs",
+          "stats": {
+            "blanks": 16,
+            "blobs": {
+              "Markdown": {
+                "blanks": 0,
+                "blobs": {},
+                "code": 0,
+                "comments": 1
+              }
+            },
+            "code": 77,
+            "comments": 12
           }
         },
         {
           "name": "./tracing/tests/filters_are_not_reevaluated_for_the_same_span.rs",
           "stats": {
-            "blanks": 12,
+            "blanks": 13,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -13495,14 +14013,14 @@
                 "comments": 1
               }
             },
-            "code": 69,
-            "comments": 14
+            "code": 79,
+            "comments": 17
           }
         },
         {
           "name": "./tracing/tests/filters_are_reevaluated_for_different_call_sites.rs",
           "stats": {
-            "blanks": 12,
+            "blanks": 13,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -13511,8 +14029,8 @@
                 "comments": 1
               }
             },
-            "code": 71,
-            "comments": 18
+            "code": 90,
+            "comments": 21
           }
         },
         {
@@ -13527,14 +14045,14 @@
                 "comments": 1
               }
             },
-            "code": 63,
+            "code": 68,
             "comments": 0
           }
         },
         {
           "name": "./tracing/tests/future_send.rs",
           "stats": {
-            "blanks": 5,
+            "blanks": 6,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -13543,14 +14061,14 @@
                 "comments": 1
               }
             },
-            "code": 21,
+            "code": 19,
             "comments": 3
           }
         },
         {
           "name": "./tracing/tests/instrument.rs",
           "stats": {
-            "blanks": 12,
+            "blanks": 28,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -13559,7 +14077,7 @@
                 "comments": 1
               }
             },
-            "code": 71,
+            "code": 196,
             "comments": 5
           }
         },
@@ -13591,7 +14109,7 @@
                 "comments": 2
               }
             },
-            "code": 1398,
+            "code": 1396,
             "comments": 12
           }
         },
@@ -13623,14 +14141,14 @@
                 "comments": 1
               }
             },
-            "code": 40,
+            "code": 47,
             "comments": 7
           }
         },
         {
           "name": "./tracing/tests/missed_register_callsite.rs",
           "stats": {
-            "blanks": 16,
+            "blanks": 10,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -13639,7 +14157,7 @@
                 "comments": 1
               }
             },
-            "code": 105,
+            "code": 48,
             "comments": 4
           }
         },
@@ -13655,7 +14173,7 @@
                 "comments": 1
               }
             },
-            "code": 68,
+            "code": 83,
             "comments": 9
           }
         },
@@ -13678,7 +14196,7 @@
         {
           "name": "./tracing/tests/register_callsite_deadlock.rs",
           "stats": {
-            "blanks": 8,
+            "blanks": 5,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -13687,8 +14205,8 @@
                 "comments": 1
               }
             },
-            "code": 66,
-            "comments": 3
+            "code": 33,
+            "comments": 6
           }
         },
         {
@@ -13703,14 +14221,14 @@
                 "comments": 1
               }
             },
-            "code": 30,
+            "code": 37,
             "comments": 5
           }
         },
         {
           "name": "./tracing/tests/span.rs",
           "stats": {
-            "blanks": 111,
+            "blanks": 153,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
@@ -13719,24 +14237,24 @@
                 "comments": 1
               }
             },
-            "code": 796,
-            "comments": 90
+            "code": 1203,
+            "comments": 140
           }
         },
         {
           "name": "./tracing/tests/subscriber.rs",
           "stats": {
-            "blanks": 23,
+            "blanks": 43,
             "blobs": {
               "Markdown": {
                 "blanks": 0,
                 "blobs": {},
                 "code": 0,
-                "comments": 1
+                "comments": 6
               }
             },
-            "code": 140,
-            "comments": 11
+            "code": 229,
+            "comments": 26
           }
         },
         {
@@ -13822,15 +14340,141 @@
             "code": 5593,
             "comments": 1
           }
+        },
+        {
+          "name": "./badges/clippy.svg",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 1,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./badges/commits.svg",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 1,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./badges/complexity.svg",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 1,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./badges/coverage-branches.svg",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 1,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./badges/coverage-functions.svg",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 1,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./badges/coverage-lines.svg",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 1,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./badges/coverage-regions.svg",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 1,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./badges/cross.svg",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 1,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./badges/duplication.svg",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 1,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./badges/edition.svg",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 1,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./badges/loc.svg",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 1,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./badges/panics.svg",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 1,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./badges/toolchain.svg",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 1,
+            "comments": 0
+          }
+        },
+        {
+          "name": "./badges/unsafe.svg",
+          "stats": {
+            "blanks": 0,
+            "blobs": {},
+            "code": 1,
+            "comments": 0
+          }
         }
       ],
       "TOML": [
         {
           "name": "./Cargo.toml",
           "stats": {
-            "blanks": 50,
+            "blanks": 52,
             "blobs": {},
-            "code": 476,
+            "code": 477,
             "comments": 135
           }
         },
@@ -13866,7 +14510,7 @@
           "stats": {
             "blanks": 12,
             "blobs": {},
-            "code": 49,
+            "code": 47,
             "comments": 8
           }
         },
@@ -13898,51 +14542,6 @@
           }
         },
         {
-          "name": "./template-baselines/clippy.toml",
-          "stats": {
-            "blanks": 9,
-            "blobs": {},
-            "code": 126,
-            "comments": 42
-          }
-        },
-        {
-          "name": "./template-baselines/deny.toml",
-          "stats": {
-            "blanks": 5,
-            "blobs": {},
-            "code": 33,
-            "comments": 13
-          }
-        },
-        {
-          "name": "./template-baselines/dupes.toml",
-          "stats": {
-            "blanks": 3,
-            "blobs": {},
-            "code": 10,
-            "comments": 16
-          }
-        },
-        {
-          "name": "./template-baselines/rust-toolchain.toml",
-          "stats": {
-            "blanks": 0,
-            "blobs": {},
-            "code": 4,
-            "comments": 4
-          }
-        },
-        {
-          "name": "./template-baselines/rustfmt.toml",
-          "stats": {
-            "blanks": 4,
-            "blobs": {},
-            "code": 53,
-            "comments": 11
-          }
-        },
-        {
           "name": "./tracing-appender/Cargo.toml",
           "stats": {
             "blanks": 5,
@@ -13952,21 +14551,30 @@
           }
         },
         {
+          "name": "./tracing-attributes-internal/Cargo.toml",
+          "stats": {
+            "blanks": 3,
+            "blobs": {},
+            "code": 31,
+            "comments": 0
+          }
+        },
+        {
           "name": "./tracing-attributes/Cargo.toml",
           "stats": {
             "blanks": 7,
             "blobs": {},
-            "code": 44,
+            "code": 42,
             "comments": 6
           }
         },
         {
           "name": "./tracing-core/Cargo.toml",
           "stats": {
-            "blanks": 7,
+            "blanks": 8,
             "blobs": {},
-            "code": 38,
-            "comments": 11
+            "code": 42,
+            "comments": 20
           }
         },
         {
@@ -13983,17 +14591,17 @@
           "stats": {
             "blanks": 4,
             "blobs": {},
-            "code": 32,
+            "code": 33,
             "comments": 0
           }
         },
         {
           "name": "./tracing-futures/Cargo.toml",
           "stats": {
-            "blanks": 7,
+            "blanks": 6,
             "blobs": {},
-            "code": 51,
-            "comments": 1
+            "code": 43,
+            "comments": 0
           }
         },
         {
@@ -14001,7 +14609,7 @@
           "stats": {
             "blanks": 3,
             "blobs": {},
-            "code": 27,
+            "code": 28,
             "comments": 0
           }
         },
@@ -14026,28 +14634,28 @@
         {
           "name": "./tracing-mock/Cargo.toml",
           "stats": {
-            "blanks": 5,
+            "blanks": 6,
             "blobs": {},
-            "code": 38,
-            "comments": 1
+            "code": 40,
+            "comments": 5
           }
         },
         {
           "name": "./tracing-serde/Cargo.toml",
           "stats": {
-            "blanks": 6,
+            "blanks": 7,
             "blobs": {},
-            "code": 33,
-            "comments": 0
+            "code": 36,
+            "comments": 2
           }
         },
         {
           "name": "./tracing-subscriber/Cargo.toml",
           "stats": {
-            "blanks": 17,
+            "blanks": 19,
             "blobs": {},
-            "code": 86,
-            "comments": 10
+            "code": 90,
+            "comments": 17
           }
         },
         {
@@ -14062,9 +14670,9 @@
         {
           "name": "./tracing-tower/Cargo.toml",
           "stats": {
-            "blanks": 5,
+            "blanks": 6,
             "blobs": {},
-            "code": 39,
+            "code": 44,
             "comments": 0
           }
         },
@@ -14073,7 +14681,7 @@
           "stats": {
             "blanks": 20,
             "blobs": {},
-            "code": 87,
+            "code": 88,
             "comments": 9
           }
         },
@@ -14089,9 +14697,9 @@
         {
           "name": "./tracing/test_static_max_level_features/Cargo.toml",
           "stats": {
-            "blanks": 9,
+            "blanks": 8,
             "blobs": {},
-            "code": 274,
+            "code": 272,
             "comments": 4
           }
         },
@@ -14106,8 +14714,8 @@
         }
       ]
     },
-    "code": 59403,
-    "comments": 24297,
+    "code": 71481,
+    "comments": 24554,
     "inaccurate": false,
     "reports": []
   }

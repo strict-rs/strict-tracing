@@ -3,12 +3,10 @@
 #![deny(rust_2018_idioms)]
 use std::error::Error;
 use std::fmt;
+use std::io;
 use std::io::Write;
 use std::io::stderr;
 use std::io::stdout;
-use std::io::{
-  self,
-};
 
 use tracing_error::ErrorLayer;
 use tracing_error::prelude::*;
@@ -36,7 +34,7 @@ impl fmt::Display for FooError {
   reason = "keeps the outer span separate from the nested failing operation"
 )]
 #[tracing::instrument]
-fn do_something(foo: &str) -> Result<&'static str, impl Error + Send + Sync + 'static + use<>> {
+fn do_something(greeting: &str) -> Result<&'static str, impl Error + Send + Sync + 'static + use<>> {
   // Results can be instrumented with a `SpanTrace` via the `InstrumentResult` trait
   do_another_thing(42, false).in_current_span()
 }

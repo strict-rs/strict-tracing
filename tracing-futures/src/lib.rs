@@ -24,17 +24,7 @@
 //! This crate provides a number of feature flags that enable compatibility
 //! features with other crates in the asynchronous ecosystem:
 //!
-//! - `tokio`: Enables compatibility with the `tokio` 0.1 crate. Implies the `tokio-executor`
-//!   feature, and additionally adds [`Instrument`] and [`WithSubscriber`] implementations for
-//!   `tokio::runtime::Runtime` and `tokio::runtime::current_thread`. This is not needed for
-//!   compatibility with `tokio` v1.
-//! - `tokio-executor`: Enables compatibility with the `tokio-executor` 0.1 crate, adding
-//!   [`Instrument`] and [`WithSubscriber`] implementations for types implementing
-//!   `tokio_executor::Executor` and `tokio_executor::TypedExecutor`. Intended for crates that
-//!   depend on `tokio-executor` directly rather than the full `tokio` 0.1 crate; the `tokio`
-//!   feature enables this implicitly.
 //! - `std-future`: Enables compatibility with `std::future::Future`.
-//! - `futures-01`: Enables compatibility with version 0.1.x of the [`futures`] crate.
 //! - `futures-03`: Enables compatibility with version 0.3.x of the `futures` crate's `Spawn` and
 //!   `LocalSpawn` traits.
 //! - `std`: Depend on the Rust standard library.
@@ -51,7 +41,6 @@
 //! [`tracing`]: https://crates.io/crates/tracing
 //! [span]: tracing::span!
 //! [`Subscriber`]: tracing::subscriber
-//! [`futures`]: https://crates.io/crates/futures
 //!
 //! ## Supported Rust Versions
 //!
@@ -298,60 +287,6 @@ impl<T: Future> Future for Instrumented<T> {
   }
 }
 
-#[cfg(feature = "futures-01")]
-#[cfg_attr(docsrs, doc(cfg(feature = "futures-01")))]
-impl<T: futures_01::Future> futures_01::Future for Instrumented<T> {
-  type Item = T::Item;
-  type Error = T::Error;
-
-  fn poll(&mut self) -> futures_01::Poll<Self::Item, Self::Error> {
-    let Some(inner) = self.inner.as_mut() else {
-      return Ok(futures_01::Async::NotReady);
-    };
-    let _enter = self.span.enter();
-    inner.poll()
-  }
-}
-
-#[cfg(feature = "futures-01")]
-#[cfg_attr(docsrs, doc(cfg(feature = "futures-01")))]
-impl<T: futures_01::Stream> futures_01::Stream for Instrumented<T> {
-  type Item = T::Item;
-  type Error = T::Error;
-
-  fn poll(&mut self) -> futures_01::Poll<Option<Self::Item>, Self::Error> {
-    let Some(inner) = self.inner.as_mut() else {
-      return Ok(futures_01::Async::Ready(None));
-    };
-    let _enter = self.span.enter();
-    inner.poll()
-  }
-}
-
-#[cfg(feature = "futures-01")]
-#[cfg_attr(docsrs, doc(cfg(feature = "futures-01")))]
-impl<T: futures_01::Sink> futures_01::Sink for Instrumented<T> {
-  type SinkItem = T::SinkItem;
-  type SinkError = T::SinkError;
-
-  fn start_send(&mut self, item: Self::SinkItem) -> futures_01::StartSend<Self::SinkItem, Self::SinkError> {
-    let Some(inner) = self.inner.as_mut() else {
-      let _item = item;
-      return Ok(futures_01::AsyncSink::Ready);
-    };
-    let _enter = self.span.enter();
-    inner.start_send(item)
-  }
-
-  fn poll_complete(&mut self) -> futures_01::Poll<(), Self::SinkError> {
-    let Some(inner) = self.inner.as_mut() else {
-      return Ok(futures_01::Async::Ready(()));
-    };
-    let _enter = self.span.enter();
-    inner.poll_complete()
-  }
-}
-
 #[cfg(all(feature = "futures-03", feature = "std-future"))]
 #[cfg_attr(docsrs, doc(cfg(all(feature = "futures-03", feature = "std-future"))))]
 impl<T: futures::Stream> futures::Stream for Instrumented<T> {
@@ -382,13 +317,13 @@ where
     T::poll_ready(inner, cx)
   }
 
-  fn start_send(self: Pin<&mut Self>, item: I) -> Result<(), Self::Error> {
+  fn start_send(self: Pin<&mut Self>, outgoing: I) -> Result<(), Self::Error> {
     let (span, Some(inner)) = self.span_and_inner_pin_mut() else {
-      let _item = item;
+      let _outgoing = outgoing;
       return Ok(());
     };
     let _enter = span.enter();
-    T::start_send(inner, item)
+    T::start_send(inner, outgoing)
   }
 
   fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -468,18 +403,6 @@ impl<T> Instrumented<T> {
 #[cfg(feature = "std")]
 impl<T: Sized> WithSubscriber for T {}
 
-#[cfg(all(feature = "futures-01", feature = "std"))]
-#[cfg_attr(docsrs, doc(cfg(all(feature = "futures-01", feature = "std"))))]
-impl<T: futures_01::Future> futures_01::Future for WithDispatch<T> {
-  type Item = T::Item;
-  type Error = T::Error;
-
-  fn poll(&mut self) -> futures_01::Poll<Self::Item, Self::Error> {
-    let inner = &mut self.inner;
-    dispatcher::with_default(&self.dispatch, || inner.poll())
-  }
-}
-
 #[cfg(all(feature = "std-future", feature = "std"))]
 #[cfg_attr(docsrs, doc(cfg(all(feature = "std-future", feature = "std"))))]
 impl<T: Future> Future for WithDispatch<T> {
@@ -544,169 +467,6 @@ impl<T> WithDispatch<T> {
 #[cfg(test)]
 mod tests {
 
-  use strict_test_support::TestFailure;
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_ok;
-  use tracing_mock::*;
-
-  use super::*;
-
-  #[cfg(feature = "futures-01")]
-  mod futures_01_tests {
-    use futures_01::Async;
-    use futures_01::Future;
-    use futures_01::Stream as _;
-    use futures_01::future;
-    use futures_01::stream;
-    use futures_01::task;
-    use tracing::subscriber::with_default;
-
-    use super::*;
-
-    struct PollN<T, E> {
-      and_return: Option<Result<T, E>>,
-      finish_at:  usize,
-      polls:      usize,
-    }
-
-    impl<T, E> PollN<T, E> {
-      fn new(finish_at: usize, and_return: Result<T, E>) -> Self {
-        Self {
-          and_return: Some(and_return),
-          finish_at,
-          polls: 0,
-        }
-      }
-    }
-
-    impl<T, E> Future for PollN<T, E> {
-      type Item = T;
-      type Error = E;
-      fn poll(&mut self) -> futures_01::Poll<Self::Item, Self::Error> {
-        self.polls = self.polls.saturating_add(1);
-        if self.polls == self.finish_at {
-          let Some(result) = self.and_return.take() else {
-            return Ok(Async::NotReady);
-          };
-          result.map(Async::Ready)
-        } else {
-          task::current().notify();
-          Ok(Async::NotReady)
-        }
-      }
-    }
-
-    #[test]
-    fn future_enter_exit_is_reasonable() -> Result<(), TestFailure> {
-      let (subscriber, handle) = subscriber::mock()
-        .enter(expect::span().named("foo"))
-        .exit(expect::span().named("foo"))
-        .enter(expect::span().named("foo"))
-        .exit(expect::span().named("foo"))
-        .enter(expect::span().named("foo"))
-        .exit(expect::span().named("foo"))
-        .close_span(expect::span().named("foo"))
-        .only()
-        .run_with_handle();
-      with_default(subscriber, || {
-        ensure(
-          PollN::<(), ()>::new(2, Ok(()))
-            .instrument(tracing::trace_span!("foo"))
-            .wait()
-            .is_ok(),
-          "instrumented futures 0.1 future resolves successfully",
-        )
-      })?;
-      ensure_ok(handle.finished(), "mock expectations should finish")?;
-      Ok(())
-    }
-
-    #[test]
-    fn future_error_ends_span() -> Result<(), TestFailure> {
-      let (subscriber, handle) = subscriber::mock()
-        .enter(expect::span().named("foo"))
-        .exit(expect::span().named("foo"))
-        .enter(expect::span().named("foo"))
-        .exit(expect::span().named("foo"))
-        .enter(expect::span().named("foo"))
-        .exit(expect::span().named("foo"))
-        .close_span(expect::span().named("foo"))
-        .only()
-        .run_with_handle();
-      with_default(subscriber, || {
-        ensure(
-          PollN::<(), ()>::new(2, Err(()))
-            .instrument(tracing::trace_span!("foo"))
-            .wait()
-            .is_err(),
-          "instrumented futures 0.1 future returns its error",
-        )
-      })?;
-
-      ensure_ok(handle.finished(), "mock expectations should finish")?;
-      Ok(())
-    }
-
-    #[test]
-    fn stream_enter_exit_is_reasonable() -> Result<(), TestFailure> {
-      let (subscriber, handle) = subscriber::mock()
-        .enter(expect::span().named("foo"))
-        .exit(expect::span().named("foo"))
-        .enter(expect::span().named("foo"))
-        .exit(expect::span().named("foo"))
-        .enter(expect::span().named("foo"))
-        .exit(expect::span().named("foo"))
-        .enter(expect::span().named("foo"))
-        .exit(expect::span().named("foo"))
-        .enter(expect::span().named("foo"))
-        .exit(expect::span().named("foo"))
-        .close_span(expect::span().named("foo"))
-        .run_with_handle();
-      with_default(subscriber, || {
-        ensure(
-          stream::iter_ok::<_, ()>(&[1, 2, 3])
-            .instrument(tracing::trace_span!("foo"))
-            .for_each(|_| future::ok(()))
-            .wait()
-            .is_ok(),
-          "instrumented futures 0.1 stream resolves successfully",
-        )
-      })?;
-      ensure_ok(handle.finished(), "mock expectations should finish")?;
-      Ok(())
-    }
-
-    // #[test]
-    // fn span_follows_future_onto_threadpool() {
-    //     let (subscriber, handle) = subscriber::mock()
-    //         .enter(expect::span().named("a"))
-    //         .enter(expect::span().named("b"))
-    //         .exit(expect::span().named("b"))
-    //         .enter(expect::span().named("b"))
-    //         .exit(expect::span().named("b"))
-    //         .close_span(expect::span().named("b"))
-    //         .exit(expect::span().named("a"))
-    //         .close_span(expect::span().named("a"))
-    //         .only()
-    //         .run_with_handle();
-    //     let mut runtime = tokio::runtime::Runtime::new()?;
-    //     with_default(subscriber, || {
-    //         tracing::trace_span!("a").in_scope(|| {
-    //             let future = PollN::new_ok(2)
-    //                 .instrument(tracing::trace_span!("b"))
-    //                 .map(|_| {
-    //                     tracing::trace_span!("c").in_scope(|| {
-    //                         // "c" happens _outside_ of the instrumented future's
-    //                         // span, so we don't expect it.
-    //                     })
-    //                 });
-    //             runtime.block_on(Box::new(future))?;
-    //         })
-    //     });
-    //     ensure_ok(handle.finished(), "mock expectations should finish")?;
-    // }
-  }
-
   #[cfg(all(feature = "futures-03", feature = "std-future"))]
   mod futures_03_tests {
     use futures::FutureExt as _;
@@ -715,10 +475,15 @@ mod tests {
     use futures::future;
     use futures::sink;
     use futures::stream;
+    use strict_test_support::TestFailure;
+    use strict_test_support::ensure;
+    use strict_test_support::ensure_ok;
     use strict_test_support::ensure_some;
     use tracing::subscriber::with_default;
+    use tracing_mock::expect;
+    use tracing_mock::subscriber;
 
-    use super::*;
+    use crate::Instrument;
 
     #[test]
     fn stream_enter_exit_is_reasonable() -> Result<(), TestFailure> {

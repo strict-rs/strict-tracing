@@ -149,10 +149,8 @@ async fn main() -> Result<(), Error> {
 
     let proxy_addr = server_addr;
     let transfer = async move { transfer(inbound, &proxy_addr).await }.map(|result| {
-      if let Err(err) = result {
-        // Don't panic, maybe the client just disconnected too soon
-        debug!(error = %err);
-      }
+      // Don't panic, maybe the client just disconnected too soon.
+      let _transfer_error = result.map_err(|err| debug!(error = %err));
     });
 
     let _task = tokio::spawn(transfer);

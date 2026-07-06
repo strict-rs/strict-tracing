@@ -7,9 +7,6 @@ use strict_test_support::TestFailure;
 use strict_test_support::ensure_ok;
 use tracing::Level;
 use tracing::subscriber::with_default;
-use tracing::{
-  self,
-};
 use tracing_mock::*;
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::prelude::*;

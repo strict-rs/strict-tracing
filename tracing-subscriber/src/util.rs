@@ -7,10 +7,8 @@ use core::fmt;
 #[cfg(feature = "std")]
 use std::error::Error;
 
+use tracing_core::dispatcher;
 use tracing_core::dispatcher::Dispatch;
-use tracing_core::dispatcher::{
-  self,
-};
 #[cfg(feature = "tracing-log")]
 use tracing_log::AsLog as _;
 

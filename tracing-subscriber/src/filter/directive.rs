@@ -273,13 +273,14 @@ impl Match for StaticDirective {
             return false;
         }
 
-        if meta.is_event() && !self.field_names.is_empty() {
-            let fields = meta.fields();
-            for name in &self.field_names {
-                if fields.field(name).is_none() {
-                    return false;
-                }
-            }
+        if meta.is_event()
+            && !self.field_names.is_empty()
+            && !self
+                .field_names
+                .iter()
+                .all(|field_name| meta.fields().field(field_name).is_some())
+        {
+            return false;
         }
 
         true
@@ -317,9 +318,7 @@ impl fmt::Display for StaticDirective {
             let mut fields = self.field_names.iter();
             if let Some(field) = fields.next() {
                 write!(f, "{{{field}")?;
-                for field_name in fields {
-                    write!(f, ",{field_name}")?;
-                }
+                fields.try_for_each(|field_name| write!(f, ",{field_name}"))?;
                 f.write_str("}")?;
             }
 
@@ -368,28 +367,26 @@ impl FromStr for StaticDirective {
             // Directive includes fields:
             // * `foo[{bar}]=trace`
             // * `foo[{bar,baz}]=trace`
-            if let Some(maybe_fields) = target_and_fields.next() {
-                if target_and_fields.next().is_some() {
-                    return Err(ParseError::msg(
-                        "too many '[{' in filter directive, expected 0 or 1",
-                    ));
-                }
+            let maybe_field_list = target_and_fields.next();
+            if target_and_fields.next().is_some() {
+                return Err(ParseError::msg(
+                    "too many '[{' in filter directive, expected 0 or 1",
+                ));
+            }
 
-                if !maybe_fields.ends_with("}]") {
+            match maybe_field_list {
+                Some(field_list) if !field_list.ends_with("}]") => {
                     return Err(ParseError::msg("expected fields list to end with '}]'"));
                 }
-
-                let fields = maybe_fields
-                    .trim_end_matches("}]")
-                    .split(',')
-                    .filter_map(|field| {
-                        if field.is_empty() {
-                            None
-                        } else {
-                            Some(String::from(field))
-                        }
-                    });
-                field_names.extend(fields);
+                Some(field_list) => {
+                    let fields = field_list
+                        .trim_end_matches("}]")
+                        .split(',')
+                        .filter(|field| !field.is_empty())
+                        .map(String::from);
+                    field_names.extend(fields);
+                }
+                None => {}
             }
             let level = part1.parse()?;
             return Ok(Self {
@@ -484,5 +481,303 @@ impl From<level::ParseError> for ParseError {
         Self {
             kind: ParseErrorKind::Level(error),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::{
+        string::{String, ToString as _},
+        vec,
+        vec::Vec,
+    };
+    use core::cmp::Ordering;
+    #[cfg(feature = "std")]
+    use std::error::Error;
+    use strict_test_support::{TestFailure, ensure, ensure_contains, ensure_ok};
+    use tracing_core::callsite::Callsite;
+    use tracing_core::metadata::Kind;
+    use tracing_core::subscriber::Interest;
+
+    /// Callsite shared by directive metadata fixtures.
+    struct DirectiveTestCallsite;
+
+    /// Static callsite used by directive metadata fixtures.
+    static DIRECTIVE_TEST_CALLSITE: DirectiveTestCallsite = DirectiveTestCallsite;
+
+    /// Typed source error used to test field parse error forwarding.
+    #[cfg(all(feature = "std", feature = "env-filter"))]
+    #[derive(Debug)]
+    struct FieldParseTestError;
+
+    static EVENT_WITH_FIELDS: Metadata<'static> = tracing_core::metadata! {
+        name: "directive_event",
+        target: "app::module",
+        level: Level::INFO,
+        fields: &["field", "other"],
+        callsite: &DIRECTIVE_TEST_CALLSITE,
+        kind: Kind::EVENT,
+    };
+
+    static EVENT_WITHOUT_FIELD: Metadata<'static> = tracing_core::metadata! {
+        name: "directive_event_without_field",
+        target: "app::module",
+        level: Level::INFO,
+        fields: &["other"],
+        callsite: &DIRECTIVE_TEST_CALLSITE,
+        kind: Kind::EVENT,
+    };
+
+    static SPAN_WITHOUT_FIELD: Metadata<'static> = tracing_core::metadata! {
+        name: "directive_span",
+        target: "app::module",
+        level: Level::DEBUG,
+        fields: &[],
+        callsite: &DIRECTIVE_TEST_CALLSITE,
+        kind: Kind::SPAN,
+    };
+
+    static OTHER_TARGET_EVENT: Metadata<'static> = tracing_core::metadata! {
+        name: "directive_other_event",
+        target: "other::module",
+        level: Level::INFO,
+        fields: &["field"],
+        callsite: &DIRECTIVE_TEST_CALLSITE,
+        kind: Kind::EVENT,
+    };
+
+    impl Callsite for DirectiveTestCallsite {
+        fn set_interest(&self, _: Interest) {}
+
+        fn metadata(&self) -> &Metadata<'_> {
+            &EVENT_WITH_FIELDS
+        }
+    }
+
+    #[cfg(all(feature = "std", feature = "env-filter"))]
+    impl fmt::Display for FieldParseTestError {
+        fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+            formatter.write_str("bad matcher")
+        }
+    }
+
+    #[cfg(all(feature = "std", feature = "env-filter"))]
+    impl Error for FieldParseTestError {}
+
+    fn parse_static(source: &str) -> Result<StaticDirective, TestFailure> {
+        ensure_ok(source.parse(), "static directive should parse")
+    }
+
+    #[test]
+    fn directive_set_sorts_replaces_and_tracks_max_level() -> Result<(), TestFailure> {
+        let mut directives = DirectiveSet::default();
+        ensure(directives.iter().next().is_none(), "default set is empty")?;
+        ensure(
+            directives.max_level == LevelFilter::OFF,
+            "default max level starts off",
+        )?;
+
+        directives.extend(vec![
+            parse_static("app=info")?,
+            parse_static("app::module=trace")?,
+            parse_static("app[{field}]=debug")?,
+            parse_static("app=warn")?,
+        ]);
+
+        ensure(
+            directives.max_level == LevelFilter::TRACE,
+            "max level tracks the most verbose directive",
+        )?;
+        ensure(
+            directives
+                .into_iter()
+                .map(|directive| directive.to_string())
+                .collect::<Vec<_>>()
+                == vec![
+                    String::from("app::module=trace"),
+                    String::from("app[{field}]=debug"),
+                    String::from("app=warn"),
+                ],
+            "directives sort by specificity and equal directives are replaced",
+        )
+    }
+
+    #[test]
+    fn directive_set_matches_metadata_and_target_only_queries() -> Result<(), TestFailure> {
+        let directives = DirectiveSet::from_iter(vec![
+            parse_static("app::module[{field}]=trace")?,
+            parse_static("app::module=warn")?,
+            parse_static("app=error")?,
+        ]);
+
+        ensure(
+            directives.enabled(&EVENT_WITH_FIELDS),
+            "field directive enables an event carrying the required field",
+        )?;
+        ensure(
+            !directives.enabled(&EVENT_WITHOUT_FIELD),
+            "more specific field directive blocks a matching event missing the field",
+        )?;
+        ensure(
+            directives.enabled(&SPAN_WITHOUT_FIELD),
+            "span metadata ignores field-name filters and matches by target",
+        )?;
+        ensure(
+            !directives.enabled(&OTHER_TARGET_EVENT),
+            "nonmatching target is rejected",
+        )?;
+        ensure(
+            directives.target_enabled("app::module::child", Level::WARN),
+            "target-only lookup uses matching target directives",
+        )?;
+        ensure(
+            !directives.target_enabled("app::module::child", Level::DEBUG),
+            "target-only lookup respects the matched directive level",
+        )
+    }
+
+    #[test]
+    fn static_directive_parse_display_default_and_ordering_contracts() -> Result<(), TestFailure> {
+        let bare_target = parse_static("app::module")?;
+        ensure(
+            bare_target.target.as_deref() == Some("app::module"),
+            "bare target parses target",
+        )?;
+        ensure(
+            bare_target.level == LevelFilter::TRACE,
+            "bare target defaults to trace",
+        )?;
+
+        let bare_level = parse_static("warn")?;
+        ensure(bare_level.target.is_none(), "bare level has no target")?;
+        ensure(
+            bare_level.level == LevelFilter::WARN,
+            "bare level parses the level",
+        )?;
+
+        let fields = parse_static("app[{field,other}]=debug")?;
+        ensure(
+            fields.field_names == vec![String::from("field"), String::from("other")],
+            "field list preserves directive field order",
+        )?;
+        ensure(
+            fields.to_string() == "app[{field,other}]=debug",
+            "field directive display preserves target fields and level",
+        )?;
+
+        let default = StaticDirective::default();
+        ensure(default.target.is_none(), "default directive has no target")?;
+        ensure(
+            default.field_names.is_empty(),
+            "default directive has no field filters",
+        )?;
+        ensure(
+            default.level == LevelFilter::ERROR,
+            "default directive enables error",
+        )?;
+
+        let specific = parse_static("app::module=info")?;
+        let general = parse_static("app=trace")?;
+        ensure(
+            specific < general,
+            "longer target sorts ahead of shorter target",
+        )?;
+        ensure(
+            fields.partial_cmp(&general) == Some(Ordering::Less),
+            "field-specific directive participates in total ordering",
+        )
+    }
+
+    #[test]
+    fn static_directive_rejects_malformed_field_and_level_syntax() -> Result<(), TestFailure> {
+        let too_many_equals = "app=info=debug".parse::<StaticDirective>();
+        ensure(
+            too_many_equals.is_err(),
+            "directives reject more than one equals sign",
+        )?;
+        let Err(too_many_equals_error) = too_many_equals else {
+            return ensure(false, "malformed directive should fail");
+        };
+        ensure_contains(
+            &too_many_equals_error.to_string(),
+            "too many '='",
+            "equals error names the malformed separator",
+        )?;
+
+        let too_many_fields = "app[{one}[{two}]=info".parse::<StaticDirective>();
+        ensure(
+            too_many_fields.is_err(),
+            "directives reject more than one field-list opener",
+        )?;
+        let Err(too_many_fields_error) = too_many_fields else {
+            return ensure(false, "malformed field directive should fail");
+        };
+        ensure_contains(
+            &too_many_fields_error.to_string(),
+            "too many '[{'",
+            "field opener error names the malformed opener",
+        )?;
+
+        let unclosed_fields = "app[{field=info".parse::<StaticDirective>();
+        ensure(
+            unclosed_fields.is_err(),
+            "directives reject unclosed field lists",
+        )?;
+        let Err(unclosed_fields_error) = unclosed_fields else {
+            return ensure(false, "unclosed field directive should fail");
+        };
+        ensure_contains(
+            &unclosed_fields_error.to_string(),
+            "expected fields list to end with '}]'",
+            "field-list error names the missing terminator",
+        )?;
+
+        let invalid_level = "app=definitely-not-a-level".parse::<StaticDirective>();
+        ensure(invalid_level.is_err(), "invalid levels are rejected")?;
+        let Err(invalid_level_error) = invalid_level else {
+            return ensure(false, "invalid level directive should fail");
+        };
+        ensure_contains(
+            &invalid_level_error.to_string(),
+            "level",
+            "level parser error is surfaced",
+        )
+    }
+
+    #[test]
+    #[cfg(all(feature = "std", feature = "env-filter"))]
+    fn parse_error_display_and_source_preserve_error_kinds() -> Result<(), TestFailure> {
+        let generic = ParseError::new();
+        ensure(
+            generic.source().is_none(),
+            "generic parse error has no source",
+        )?;
+        ensure(
+            generic.to_string() == "invalid filter directive",
+            "generic parse error display is stable",
+        )?;
+
+        let message = ParseError::msg("named reason");
+        ensure(
+            message.source().is_none(),
+            "message parse error has no source",
+        )?;
+        ensure(
+            message.to_string() == "invalid filter directive: named reason",
+            "message parse error display includes the reason",
+        )?;
+
+        let field_error: Box<dyn Error + Send + Sync> = Box::new(FieldParseTestError);
+        let field_parse_error = ParseError::from(field_error);
+        ensure(
+            field_parse_error.source().is_some(),
+            "field parse error exposes the boxed matcher source",
+        )?;
+        ensure_contains(
+            &field_parse_error.to_string(),
+            "bad matcher",
+            "field parse error display includes the source error",
+        )
     }
 }

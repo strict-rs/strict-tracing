@@ -21,6 +21,7 @@ tracing-core = { workspace = true, default-features = true }
 tracing-subscriber = { workspace = true, features = ["registry"] }
 
 [dev-dependencies]
+parking_lot = { workspace = true }
 serde_json = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 strict-test-support = { workspace = true }

@@ -7,5 +7,5 @@ error[E0599]: no associated function or constant named `assert_finished` found f
 help: there is a method `finished` with a similar name
  --> src/subscriber.rs
   |
-  |     pub fn finished(&self) -> SubscriberResult {
-  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |   pub fn finished(&self) -> SubscriberResult {
+  |   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

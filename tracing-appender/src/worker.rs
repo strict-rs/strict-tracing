@@ -92,16 +92,11 @@ impl<T: Write + Send + 'static> Worker<T> {
   /// the background worker thread.
   pub(super) fn worker_thread(mut self, name: String) -> io::Result<thread::JoinHandle<()>> {
     thread::Builder::new().name(name).spawn(move || {
-      loop {
-        match self.work() {
-          Ok(WorkerState::Continue | WorkerState::Empty) => {}
-          Ok(WorkerState::Shutdown | WorkerState::Disconnected) => {
-            let _shutdown_ack: Result<(), RecvError> = self.shutdown.recv();
-            break;
-          }
-          Err(_error) => {}
-        }
-      }
+      while self
+        .work()
+        .map_or(true, |state| matches!(state, WorkerState::Continue | WorkerState::Empty))
+      {}
+      let _shutdown_ack: Result<(), RecvError> = self.shutdown.recv();
       let _flush_result = self.writer.flush();
     })
   }

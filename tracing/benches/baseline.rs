@@ -17,12 +17,12 @@ fn bench(criterion: &mut Criterion) {
 
   let mut group = criterion.benchmark_group("comparison");
   let _relaxed_load_benchmark = group.bench_function("relaxed_load", |bencher| {
-    let foo = AtomicUsize::new(1);
-    bencher.iter(|| black_box(foo.load(Ordering::Relaxed)));
+    let counter = AtomicUsize::new(1);
+    bencher.iter(|| black_box(counter.load(Ordering::Relaxed)));
   });
   let _acquire_load_benchmark = group.bench_function("acquire_load", |bencher| {
-    let foo = AtomicUsize::new(1);
-    bencher.iter(|| black_box(foo.load(Ordering::Acquire)));
+    let counter = AtomicUsize::new(1);
+    bencher.iter(|| black_box(counter.load(Ordering::Acquire)));
   });
   let _log_benchmark = group.bench_function("log", |bencher| {
     bencher.iter(|| {

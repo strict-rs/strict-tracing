@@ -5,6 +5,8 @@
 mod tests {
   use strict_test_support::TestFailure;
   use strict_test_support::ensure_ok;
+  use tracing::Level;
+  use tracing::level_filters::STATIC_MAX_LEVEL;
   use tracing::subscriber::set_default;
   use tracing::subscriber::with_default;
   use tracing_mock::*;
@@ -31,10 +33,13 @@ mod tests {
     let (subscriber2, handle2) = subscriber::mock()
       .named("spans/subscriber2")
       .with_filter(|_| true)
-      .new_span(alice.clone())
-      .enter(alice.clone())
-      .exit(alice.clone())
-      .close_span(alice)
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::DEBUG), move |builder| {
+        builder
+          .new_span(alice.clone())
+          .enter(alice.clone())
+          .exit(alice.clone())
+          .close_span(alice)
+      })
       .only()
       .run_with_handle();
 
@@ -67,7 +72,7 @@ mod tests {
     let (subscriber2, handle2) = subscriber::mock()
       .named("events/subscriber2")
       .with_filter(|_| true)
-      .event(expect::event())
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::DEBUG), |builder| builder.event(expect::event()))
       .only()
       .run_with_handle();
 

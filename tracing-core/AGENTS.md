@@ -19,12 +19,13 @@ Data flow: instrumentation builds a static `Callsite`+`Metadata`; first use regi
 - `std` (default) — pulls in `std`; without it the crate is `no_std` but still **requires `liballoc`** (`extern crate alloc`). With `std` off, `with_default`/thread-local dispatch is unavailable (use `set_global_default`), and the external workspace `spin` dependency plus `sync.rs` supply the spinlock-backed `Mutex` shape expected by the callsite registry. The old vendored `src/spin/` module is gone.
 - `valuable` — unstable, gated behind `--cfg tracing_unstable` (a `cfg`, not a plain Cargo feature); the dependency lives under `[target.'cfg(tracing_unstable)'.dependencies]`.
 - `once_cell` — vestigial no-op feature kept for back-compat (a former implicit optional-dep feature); do not build new functionality on it.
+- `test-util` — off by default, implies `std`, and gates the `test_util` module (`src/test_util.rs`) of subscriber fixtures: `CallsiteTrackingSubscriber`/`CallsiteTrackingHandle` (counts `register_callsite` calls, flags callsite mismatches, and optionally re-enters the dispatcher during registration) and the marker-parameterized inert `NoOpSubscriber<M>` (`Primary`/`Secondary`) for dispatch-identity tests. It is test support, not product API; the crate's own tests see it via a self dev-dependency, and downstream crates enable it from `dev-dependencies`.
 
 ## Testing
 
 - `cargo nextest run -p tracing-core` for the bulk; doctests (heavy here) via `cargo test --doc -p tracing-core`.
 - The `std`-off build is its own CI step: `cargo test --no-default-features -p tracing-core`. `tests/dispatch.rs` is `#![cfg(feature = "std")]` (scoped/thread-local dispatch).
-- `tests/global_dispatch.rs` and `tests/local_dispatch_before_init.rs` are **separate test binaries on purpose**: `set_global_default` can succeed only once per process, so each global-dispatch scenario needs its own process. Don't merge them into `dispatch.rs`. `tests/common/mod.rs` provides the shared `TestSubscriberA`/`TestSubscriberB` no-op subscribers.
+- `tests/global_dispatch.rs` and `tests/local_dispatch_before_init.rs` are **separate test binaries on purpose**: `set_global_default` can succeed only once per process, so each global-dispatch scenario needs its own process. Don't merge them into `dispatch.rs`. These dispatch-identity tests install `test_util::NoOpSubscriber<Primary>`/`NoOpSubscriber<Secondary>` and assert which one a dispatcher holds (feature `test-util`, enabled for this crate's tests via the self dev-dependency).
 
 ## Gotchas
 

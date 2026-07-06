@@ -152,9 +152,9 @@ impl SpanTrace {
     } else {
       let mut status = None;
       let _result = self.span.with_subscriber(|(_, subscriber)| {
-        if subscriber.downcast_ref::<WithContext>().is_some() {
-          status = Some(SpanTraceStatusInner::Captured);
-        }
+        status = subscriber
+          .downcast_ref::<WithContext>()
+          .map(|_with_context| SpanTraceStatusInner::Captured);
       });
 
       status.unwrap_or(SpanTraceStatusInner::Unsupported)
@@ -236,31 +236,36 @@ impl fmt::Display for SpanTrace {
   }
 }
 
+/// Debug projection for one formatted span in a [`SpanTrace`].
+struct DebugSpan<'a> {
+  /// Static span metadata.
+  metadata: &'a Metadata<'a>,
+  /// Preformatted span fields.
+  fields:   &'a str,
+}
+
+impl fmt::Debug for DebugSpan<'_> {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    write!(f, "{{ target: {:?}, name: {:?}", self.metadata.target(), self.metadata.name())?;
+
+    if !self.fields.is_empty() {
+      write!(f, ", fields: {:?}", self.fields)?;
+    }
+
+    self
+      .metadata
+      .file()
+      .zip(self.metadata.line())
+      .map_or(Ok(()), |(file, line)| write!(f, ", file: {file:?}, line: {line:?}"))?;
+
+    write!(f, " }}")?;
+
+    Ok(())
+  }
+}
+
 impl fmt::Debug for SpanTrace {
   fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-    struct DebugSpan<'a> {
-      metadata: &'a Metadata<'a>,
-      fields:   &'a str,
-    }
-
-    impl fmt::Debug for DebugSpan<'_> {
-      fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{{ target: {:?}, name: {:?}", self.metadata.target(), self.metadata.name())?;
-
-        if !self.fields.is_empty() {
-          write!(f, ", fields: {:?}", self.fields)?;
-        }
-
-        if let Some((file, line)) = self.metadata.file().zip(self.metadata.line()) {
-          write!(f, ", file: {file:?}, line: {line:?}")?;
-        }
-
-        write!(f, " }}")?;
-
-        Ok(())
-      }
-    }
-
     write!(f, "SpanTrace ")?;
     let mut dbg = f.debug_list();
     self.with_spans(|metadata, fields| {

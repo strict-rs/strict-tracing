@@ -31,7 +31,7 @@ impl SharedFailures {
   /// Records an error result and returns successful values.
   pub(super) fn record_result<T>(&self, result: ExpectationResult<T>) -> Option<T> {
     match result {
-      Ok(value) => Some(value),
+      Ok(checked) => Some(checked),
       Err(error) => {
         self.record(error);
         None

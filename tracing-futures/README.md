@@ -24,8 +24,8 @@ Utilities for instrumenting futures-based code with [`tracing`].
 [docs-v0.2.x-url]: https://tracing.rs/tracing_futures
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [mit-url]: LICENSE
-[actions-badge]: https://github.com/strict-rs/strict-tracing/workflows/CI/badge.svg
-[actions-url]:https://github.com/strict-rs/strict-tracing/actions?query=workflow%3ACI
+[actions-badge]: https://github.com/strict-rs/strict-tracing/actions/workflows/ci.yml/badge.svg
+[actions-url]:https://github.com/strict-rs/strict-tracing/actions/workflows/ci.yml
 [discord-badge]: https://img.shields.io/discord/500028886025895936?logo=discord&label=discord&logoColor=white
 [discord-url]: https://discord.gg/EeF3cQw
 [maint-badge]: https://img.shields.io/badge/maintenance-actively--developed-brightgreen.svg

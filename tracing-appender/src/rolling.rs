@@ -31,19 +31,13 @@
 //! # Ok(())
 //! # }
 //! ```
+use std::fmt;
 use std::fmt::Debug;
-use std::fmt::{
-  self,
-};
+use std::fs;
 use std::fs::File;
 use std::fs::OpenOptions;
-use std::fs::{
-  self,
-};
+use std::io;
 use std::io::Write;
-use std::io::{
-  self,
-};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicI64;
@@ -617,21 +611,21 @@ impl Rotation {
     self.round_date(unrounded_next_date)
   }
 
-  /// Rounds the date towards the past using the [`Rotation`] interval.
-  pub(crate) fn round_date(self, date: OffsetDateTime) -> Option<OffsetDateTime> {
+  /// Rounds the timestamp towards the past using the [`Rotation`] interval.
+  pub(crate) fn round_date(self, timestamp: OffsetDateTime) -> Option<OffsetDateTime> {
     match self.0 {
       RotationKind::Minutely => {
-        let rounded_time = Time::from_hms(date.hour(), date.minute(), 0).ok()?;
-        Some(date.replace_time(rounded_time))
+        let rounded_time = Time::from_hms(timestamp.hour(), timestamp.minute(), 0).ok()?;
+        Some(timestamp.replace_time(rounded_time))
       }
       RotationKind::Hourly => {
-        let rounded_time = Time::from_hms(date.hour(), 0, 0).ok()?;
-        Some(date.replace_time(rounded_time))
+        let rounded_time = Time::from_hms(timestamp.hour(), 0, 0).ok()?;
+        Some(timestamp.replace_time(rounded_time))
       }
-      RotationKind::Daily => Some(date.replace_time(Time::MIDNIGHT)),
+      RotationKind::Daily => Some(timestamp.replace_time(Time::MIDNIGHT)),
       RotationKind::Weekly => {
-        let days_since_sunday = date.weekday().number_days_from_sunday();
-        let rounded_date = date.checked_sub(Duration::days(days_since_sunday.into()))?;
+        let days_since_sunday = timestamp.weekday().number_days_from_sunday();
+        let rounded_date = timestamp.checked_sub(Duration::days(days_since_sunday.into()))?;
         Some(rounded_date.replace_time(Time::MIDNIGHT))
       }
       RotationKind::Never => None,
@@ -720,18 +714,18 @@ impl Inner {
     Ok((inner, writer))
   }
 
-  /// Returns the full filename for the provided date, using [`Rotation`] to round accordingly.
-  pub(crate) fn join_date(&self, date: OffsetDateTime) -> io::Result<String> {
+  /// Returns the full filename for the provided timestamp, using [`Rotation`] to round accordingly.
+  pub(crate) fn join_date(&self, timestamp: OffsetDateTime) -> io::Result<String> {
     if self.rotation == Rotation::NEVER {
       return match (self.log_filename_prefix.as_deref(), self.log_filename_suffix.as_deref()) {
         (Some(filename), None) => Ok(filename.to_owned()),
         (Some(filename), Some(suffix)) => Ok(format!("{filename}.{suffix}")),
         (None, Some(suffix)) => Ok(suffix.to_owned()),
-        (None, None) => format_date(date, &self.date_format),
+        (None, None) => format_date(timestamp, &self.date_format),
       };
     }
 
-    let rounded_date = self.rotation.round_date(date).ok_or_else(invalid_data_error)?;
+    let rounded_date = self.rotation.round_date(timestamp).ok_or_else(invalid_data_error)?;
     let formatted_date = format_date(rounded_date, &self.date_format)?;
 
     let filename = match (self.log_filename_prefix.as_deref(), self.log_filename_suffix.as_deref()) {
@@ -836,14 +830,14 @@ impl Inner {
   ///
   /// If this method returns `Some`, we should roll to a new log file.
   /// Otherwise, if this returns we should not rotate the log file.
-  fn should_rollover(&self, date: OffsetDateTime) -> Option<i64> {
+  fn should_rollover(&self, timestamp: OffsetDateTime) -> Option<i64> {
     let next_date = self.next_date.load(Ordering::Acquire);
     // If the next date is the sentinel, this appender never rotates log files.
     if next_date == NEVER_ROLLOVER_TIMESTAMP {
       return None;
     }
 
-    if date.unix_timestamp() >= next_date {
+    if timestamp.unix_timestamp() >= next_date {
       return Some(next_date);
     }
 
@@ -920,8 +914,8 @@ fn create_writer(directory: &Path, filename: &str, latest_symlink_name: Option<&
 }
 
 /// Formats an [`OffsetDateTime`] using the stored rolling filename format.
-fn format_date(date: OffsetDateTime, date_format: &[format_description::BorrowedFormatItem<'_>]) -> io::Result<String> {
-  date.format(date_format).map_err(|_error| invalid_data_error())
+fn format_date(timestamp: OffsetDateTime, date_format: &[format_description::BorrowedFormatItem<'_>]) -> io::Result<String> {
+  timestamp.format(date_format).map_err(|_error| invalid_data_error())
 }
 
 /// Returns a generic invalid-data I/O error for impossible static format failures.
@@ -974,10 +968,14 @@ mod test {
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
   use strict_test_support::ensure_some;
+  use tracing::subscriber::DefaultGuard;
   use tracing::subscriber::set_default;
   use tracing_subscriber::filter::LevelFilter;
 
   use super::*;
+
+  /// Shared clock and subscriber guard for deterministic rolling-writer tests.
+  type InstalledAppender = (Arc<Mutex<OffsetDateTime>>, DefaultGuard);
 
   /// Builds an appender for `rotation` and verifies a single write reaches disk.
   fn test_appender(rotation: Rotation, file_prefix: &str) -> Result<(), TestFailure> {
@@ -1375,23 +1373,53 @@ mod test {
     check_path_cases(now, directory.path(), &test_cases)
   }
 
-  /// Verifies `MakeWriter` rolls files as the clock crosses an hourly boundary.
+  /// Verifies filename layouts with no explicit prefix or suffix.
   #[test]
-  fn test_make_writer() -> Result<(), TestFailure> {
+  fn test_path_concatenation_without_prefix_or_suffix() -> Result<(), TestFailure> {
     let format = test_datetime_format()?;
-
-    let start_time = parse_test_datetime("2020-02-01 10:01:00 +00:00:00", &format)?;
     let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
-    let (state, writer) = build_inner(
-      start_time,
-      Rotation::HOURLY,
-      directory.path(),
-      Some("test_make_writer"),
-      None,
-      None,
-      None,
-    )?;
+    let now = parse_test_datetime("2020-02-01 10:01:00 +00:00:00", &format)?;
+    let test_cases = [
+      PathTestCase {
+        expected: "2020-02-01-10-01",
+        rotation: Rotation::MINUTELY,
+        prefix:   None,
+        suffix:   None,
+      },
+      PathTestCase {
+        expected: "2020-02-01-10",
+        rotation: Rotation::HOURLY,
+        prefix:   None,
+        suffix:   None,
+      },
+      PathTestCase {
+        expected: "2020-02-01",
+        rotation: Rotation::DAILY,
+        prefix:   None,
+        suffix:   None,
+      },
+      PathTestCase {
+        expected: "2020-02-01",
+        rotation: Rotation::NEVER,
+        prefix:   None,
+        suffix:   None,
+      },
+    ];
 
+    check_path_cases(now, directory.path(), &test_cases)
+  }
+
+  /// Builds an hourly rolling appender at `start_time` and installs it as the default subscriber.
+  ///
+  /// Returns the shared test clock and the subscriber guard so the caller can advance time, emit
+  /// events, and read back the rolled log files.
+  fn install_hourly_appender(
+    start_time: OffsetDateTime,
+    directory: &Path,
+    prefix: &str,
+    max_files: Option<usize>,
+  ) -> Result<InstalledAppender, TestFailure> {
+    let (state, writer) = build_inner(start_time, Rotation::HOURLY, directory, Some(prefix), None, None, max_files)?;
     let clock = Arc::new(Mutex::new(start_time));
     let now_fn = clocked_now(&clock);
     let appender = RollingFileAppender {
@@ -1406,7 +1434,16 @@ mod test {
       .with_max_level(LevelFilter::TRACE)
       .with_writer(appender)
       .finish();
-    let default = set_default(subscriber);
+    Ok((clock, set_default(subscriber)))
+  }
+
+  /// Verifies `MakeWriter` rolls files as the clock crosses an hourly boundary.
+  #[test]
+  fn test_make_writer() -> Result<(), TestFailure> {
+    let format = test_datetime_format()?;
+    let start_time = parse_test_datetime("2020-02-01 10:01:00 +00:00:00", &format)?;
+    let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
+    let (clock, default) = install_hourly_appender(start_time, directory.path(), "test_make_writer", None)?;
 
     tracing::info!("file 1");
 
@@ -1449,31 +1486,7 @@ mod test {
 
     let start_time = parse_test_datetime("2020-02-01 10:01:00 +00:00:00", &format)?;
     let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
-    let (state, writer) = build_inner(
-      start_time,
-      Rotation::HOURLY,
-      directory.path(),
-      Some("test_max_log_files"),
-      None,
-      None,
-      Some(2),
-    )?;
-
-    let clock = Arc::new(Mutex::new(start_time));
-    let now_fn = clocked_now(&clock);
-    let appender = RollingFileAppender {
-      state,
-      writer,
-      now: now_fn,
-    };
-    let subscriber = tracing_subscriber::fmt()
-      .without_time()
-      .with_level(false)
-      .with_target(false)
-      .with_max_level(LevelFilter::TRACE)
-      .with_writer(appender)
-      .finish();
-    let default = set_default(subscriber);
+    let (clock, default) = install_hourly_appender(start_time, directory.path(), "test_max_log_files", Some(2))?;
 
     tracing::info!("file 1");
 
@@ -1560,6 +1573,82 @@ mod test {
     ensure(created == expected, "minutely filename parses to minute UTC")
   }
 
+  /// Verifies malformed filenames do not parse as retention timestamps.
+  #[test]
+  fn parse_date_from_filename_rejects_mismatched_parts() -> Result<(), TestFailure> {
+    let date_format = ensure_ok(Rotation::HOURLY.date_format(), "build hourly date format")?;
+
+    ensure(
+      parse_date_from_filename("other.2020-02-01-10.log", &date_format, Some("app"), Some("log")).is_none(),
+      "mismatched prefix is rejected",
+    )?;
+    ensure(
+      parse_date_from_filename("app.2020-02-01-10.txt", &date_format, Some("app"), Some("log")).is_none(),
+      "mismatched suffix is rejected",
+    )?;
+    ensure(
+      parse_date_from_filename("app.not-a-date.log", &date_format, Some("app"), Some("log")).is_none(),
+      "invalid timestamp is rejected",
+    )
+  }
+
+  /// Verifies retention pruning ignores directories and files outside the configured name shape.
+  #[test]
+  fn prune_old_logs_only_removes_matching_files() -> Result<(), TestFailure> {
+    let format = test_datetime_format()?;
+    let now = parse_test_datetime("2020-02-03 00:00:00 +00:00:00", &format)?;
+    let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
+    let matching_old = directory.path().join("app.2020-02-01.log");
+    let matching_newer = directory.path().join("app.2020-02-02.log");
+    let wrong_prefix = directory.path().join("other.2020-02-02.log");
+    let wrong_suffix = directory.path().join("app.2020-02-02.txt");
+    let matching_directory = directory.path().join("app.2020-01-31.log");
+
+    ensure_ok(fs::write(&matching_old, "old"), "write old matching file")?;
+    ensure_ok(fs::write(&matching_newer, "newer"), "write newer matching file")?;
+    ensure_ok(fs::write(&wrong_prefix, "wrong prefix"), "write wrong-prefix file")?;
+    ensure_ok(fs::write(&wrong_suffix, "wrong suffix"), "write wrong-suffix file")?;
+    ensure_ok(fs::create_dir_all(&matching_directory), "create matching-name directory")?;
+
+    let _inner = build_inner(now, Rotation::DAILY, directory.path(), Some("app"), Some("log"), None, Some(1))?;
+
+    ensure(!matching_old.exists(), "old matching file is pruned")?;
+    ensure(
+      !matching_newer.exists(),
+      "newer matching file is pruned before current file creation",
+    )?;
+    ensure(wrong_prefix.exists(), "wrong-prefix file is retained")?;
+    ensure(wrong_suffix.exists(), "wrong-suffix file is retained")?;
+    ensure(matching_directory.is_dir(), "matching-name directory is retained")?;
+    ensure(
+      directory.path().join("app.2020-02-03.log").exists(),
+      "current log file is created after pruning",
+    )
+  }
+
+  /// Verifies retention pruning ignores invalid date filenames when no prefix or suffix is
+  /// configured.
+  #[test]
+  fn prune_old_logs_without_name_parts_only_removes_parseable_dates() -> Result<(), TestFailure> {
+    let format = test_datetime_format()?;
+    let now = parse_test_datetime("2020-02-03 00:00:00 +00:00:00", &format)?;
+    let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
+    let parseable_old = directory.path().join("2020-02-01");
+    let invalid_name = directory.path().join("not-a-date");
+
+    ensure_ok(fs::write(&parseable_old, "old"), "write parseable old file")?;
+    ensure_ok(fs::write(&invalid_name, "invalid"), "write invalid-name file")?;
+
+    let _inner = build_inner(now, Rotation::DAILY, directory.path(), None, None, None, Some(1))?;
+
+    ensure(!parseable_old.exists(), "parseable old file is pruned")?;
+    ensure(invalid_name.exists(), "invalid date filename is retained")?;
+    ensure(
+      directory.path().join("2020-02-03").exists(),
+      "current no-prefix log file is created after pruning",
+    )
+  }
+
   /// Verifies latest-log symlink creation and rollover updates.
   #[test]
   fn test_latest_symlink() -> Result<(), TestFailure> {
@@ -1610,5 +1699,104 @@ mod test {
     // Verify the symlink is functional
     let content = ensure_ok(fs::read_to_string(&symlink_path), "read through symlink")?;
     ensure_eq(&"test\n", &content.as_str(), "symlink reads rotated log contents")
+  }
+
+  /// Verifies symlink replacement failures are reported with initialization context.
+  #[test]
+  fn create_writer_reports_context_when_previous_latest_path_is_not_a_symlink_file() -> Result<(), TestFailure> {
+    let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
+    ensure_ok(
+      fs::create_dir_all(directory.path().join("latest.log")),
+      "create conflicting latest directory",
+    )?;
+
+    let error = match create_writer(directory.path(), "app.log", Some("latest.log")) {
+      Ok(_file) => {
+        return Err(TestFailure::Condition {
+          context: "latest symlink replacement should reject a directory",
+        });
+      }
+      Err(error) => error,
+    };
+
+    ensure(
+      error.to_string().contains("failed to remove previous latest log symlink"),
+      "symlink removal failure includes operation context",
+    )
+  }
+
+  /// Verifies direct writes restore the rollover timestamp after a refresh failure.
+  #[test]
+  fn direct_write_restores_rollover_deadline_after_refresh_failure() -> Result<(), TestFailure> {
+    let format = test_datetime_format()?;
+    let now = parse_test_datetime("2020-02-01 10:01:00 +00:00:00", &format)?;
+    let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
+    let (state, file_lock) = build_inner(
+      now,
+      Rotation::HOURLY,
+      directory.path(),
+      Some("restore_after_failure"),
+      None,
+      Some("latest.log"),
+      None,
+    )?;
+    let symlink_path = directory.path().join("latest.log");
+    ensure_ok(fs::remove_file(&symlink_path), "remove initial latest symlink")?;
+    ensure_ok(fs::create_dir_all(&symlink_path), "replace latest symlink with directory")?;
+
+    let clock = Arc::new(Mutex::new(now));
+    let mut appender = RollingFileAppender {
+      state,
+      writer: file_lock,
+      now: clocked_now(&clock),
+    };
+    let original_next = appender.state.next_date.load(Ordering::Acquire);
+    advance_clock(&clock, Duration::HOUR)?;
+
+    let error = ensure_some(appender.write_all(b"will fail\n").err(), "rollover write returns error")?;
+    ensure(
+      error.kind() == io::ErrorKind::Other,
+      "rollover failure is mapped to generic write error",
+    )?;
+    ensure_eq(
+      &appender.state.next_date.load(Ordering::Acquire),
+      &original_next,
+      "failed rollover restores previous deadline",
+    )
+  }
+
+  /// Verifies `MakeWriter` returns an erroring writer when rollover refresh fails.
+  #[test]
+  fn make_writer_returns_error_writer_when_rollover_refresh_fails() -> Result<(), TestFailure> {
+    let format = test_datetime_format()?;
+    let now = parse_test_datetime("2020-02-01 10:01:00 +00:00:00", &format)?;
+    let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
+    let (state, file_lock) = build_inner(
+      now,
+      Rotation::HOURLY,
+      directory.path(),
+      Some("make_writer_failure"),
+      None,
+      Some("latest.log"),
+      None,
+    )?;
+    let symlink_path = directory.path().join("latest.log");
+    ensure_ok(fs::remove_file(&symlink_path), "remove initial latest symlink")?;
+    ensure_ok(fs::create_dir_all(&symlink_path), "replace latest symlink with directory")?;
+
+    let clock = Arc::new(Mutex::new(now));
+    let appender = RollingFileAppender {
+      state,
+      writer: file_lock,
+      now: clocked_now(&clock),
+    };
+    advance_clock(&clock, Duration::HOUR)?;
+
+    let mut rolling_writer = appender.make_writer();
+    let write_error = ensure_some(rolling_writer.write_all(b"not written").err(), "rollover writer rejects writes")?;
+    let flush_error = ensure_some(rolling_writer.flush().err(), "rollover writer rejects flush")?;
+    drop(rolling_writer);
+    ensure(write_error.kind() == io::ErrorKind::Other, "rollover writer write error kind")?;
+    ensure(flush_error.kind() == io::ErrorKind::Other, "rollover writer flush error kind")
   }
 }

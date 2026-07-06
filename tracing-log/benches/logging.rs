@@ -1,18 +1,14 @@
 //! Benchmarks for log-to-tracing forwarding.
 
 use std::fmt;
+use std::io;
 use std::io::Write as _;
-use std::io::{
-  self,
-};
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::thread;
 use std::thread::JoinHandle;
-use std::thread::{
-  self,
-};
 use std::time::Duration;
 use std::time::Instant;
 
@@ -91,15 +87,6 @@ fn report_benchmark_failure(message: fmt::Arguments<'_>) {
   }
 }
 
-/// Report an iteration failure and return the named conservative timing value.
-#[must_use]
-fn fallback_duration_after(failure: BenchmarkTimingFailure) -> Duration {
-  report_benchmark_failure(format_args!(
-    "returning conservative fallback duration after timing failure: {failure}"
-  ));
-  FAILURE_FALLBACK_DURATION
-}
-
 /// Prepare process-global benchmark state before registering `Criterion` work.
 #[allow(
   clippy::single_call_fn,
@@ -124,34 +111,32 @@ fn prepare_benchmark() -> Result<(), BenchmarkSetupError> {
   subscriber::set_global_default(tracing_subscriber).map_err(BenchmarkSetupError::GlobalSubscriber)
 }
 
-/// Run `callback` on several threads after every worker reaches a spin barrier.
+/// Run the traced logging workload on several threads after every worker reaches a spin barrier.
 #[allow(
   clippy::single_call_fn,
   reason = "benchmark helper isolates worker barrier and join error handling from timing closure"
 )]
-fn run_on_many_threads<F, R>(thread_count: usize, callback: F) -> Result<Vec<R>, BenchmarkTimingFailure>
-where
-  F: Fn() -> R + 'static + Send + Clone,
-  R: Send + 'static,
-{
+fn run_on_many_threads(thread_count: usize, count: u64) -> Result<Vec<Duration>, BenchmarkTimingFailure> {
   let started_count = Arc::new(AtomicUsize::new(0));
   let barrier = Arc::new(AtomicBool::new(false));
-  let threads: Vec<JoinHandle<R>> = (0..thread_count)
-    .map(|_| {
-      let thread_started_count = Arc::clone(&started_count);
-      let thread_barrier = Arc::clone(&barrier);
-      let thread_callback = callback.clone();
+  let mut threads: Vec<JoinHandle<Duration>> = Vec::with_capacity(thread_count);
+  for _ in 0..thread_count {
+    let thread_started_count = Arc::clone(&started_count);
+    let thread_barrier = Arc::clone(&barrier);
 
-      thread::spawn(move || {
-        let _previous = thread_started_count.fetch_add(1, Ordering::SeqCst);
-        while !thread_barrier.load(Ordering::SeqCst) {
-          thread::yield_now();
-        }
+    threads.push(thread::spawn(move || {
+      let _previous = thread_started_count.fetch_add(1, Ordering::SeqCst);
+      while !thread_barrier.load(Ordering::SeqCst) {
+        thread::yield_now();
+      }
 
-        thread_callback()
-      })
-    })
-    .collect();
+      let start = Instant::now();
+      for _ in 0..count {
+        trace!("A dummy log!");
+      }
+      start.elapsed()
+    }));
+  }
 
   while started_count.load(Ordering::SeqCst) != thread_count {
     thread::yield_now();
@@ -161,7 +146,7 @@ where
   threads
     .into_iter()
     .map(JoinHandle::join)
-    .collect::<Result<Vec<R>, _>>()
+    .collect::<Result<Vec<Duration>, _>>()
     .map_err(|panic_payload| {
       drop(panic_payload);
       BenchmarkTimingFailure::WorkerPanicked
@@ -176,31 +161,29 @@ where
 fn bench_logger(criterion: &mut Criterion) {
   if let Err(error) = prepare_benchmark() {
     report_benchmark_failure(format_args!("skipping benchmark registration after setup failure: {error}"));
-  } else {
-    let _benchmark = criterion.bench_function("log_from_multiple_threads", |bencher| {
-      bencher.iter_custom(|count| {
-        let durations = match run_on_many_threads(THREAD_COUNT, move || {
-          let start = Instant::now();
-          for _ in 0..count {
-            trace!("A dummy log!");
-          }
-          start.elapsed()
-        }) {
-          Ok(thread_durations) => thread_durations,
-          Err(failure) => return fallback_duration_after(failure),
-        };
-
-        let total_time: Duration = durations.into_iter().sum();
-        let Some(average_nanos) = total_time.as_nanos().checked_div(THREAD_COUNT_U128) else {
-          return fallback_duration_after(BenchmarkTimingFailure::AverageDurationUnavailable);
-        };
-        let Ok(duration_nanos) = u64::try_from(average_nanos) else {
-          return fallback_duration_after(BenchmarkTimingFailure::AverageDurationOverflow);
-        };
-        Duration::from_nanos(duration_nanos)
-      });
-    });
+    return;
   }
+
+  let _benchmark = criterion.bench_function("log_from_multiple_threads", |bencher| {
+    bencher.iter_custom(|count| {
+      run_on_many_threads(THREAD_COUNT, count)
+        .and_then(|durations| {
+          let total_time: Duration = durations.into_iter().sum();
+          let average_nanos = total_time
+            .as_nanos()
+            .checked_div(THREAD_COUNT_U128)
+            .ok_or(BenchmarkTimingFailure::AverageDurationUnavailable)?;
+          let duration_nanos = u64::try_from(average_nanos).map_err(|_error| BenchmarkTimingFailure::AverageDurationOverflow)?;
+          Ok(Duration::from_nanos(duration_nanos))
+        })
+        .inspect_err(|failure| {
+          report_benchmark_failure(format_args!(
+            "returning conservative fallback duration after timing failure: {failure}"
+          ));
+        })
+        .unwrap_or(FAILURE_FALLBACK_DURATION)
+    });
+  });
 }
 
 criterion_group!(benches, bench_logger);

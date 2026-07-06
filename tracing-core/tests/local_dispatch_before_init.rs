@@ -2,19 +2,16 @@
 
 #[cfg(test)]
 mod tests {
-  mod common {
-    include!("common/mod.rs");
-  }
-
-  use common::*;
   use strict_test_support::TestFailure;
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
+  use tracing_core::dispatcher;
   use tracing_core::dispatcher::Dispatch;
-  use tracing_core::dispatcher::{
-    self,
-  };
   use tracing_core::subscriber::NoSubscriber;
+  use tracing_core::test_util::NoOpSubscriber;
+  use tracing_core::test_util::Primary;
+  #[cfg(feature = "std")]
+  use tracing_core::test_util::Secondary;
 
   /// This test reproduces the following issues:
   /// - <https://github.com/tokio-rs/tracing/issues/2587>
@@ -28,17 +25,17 @@ mod tests {
     // Using a scoped dispatcher makes the thread local state attempt to cache
     // the scoped default.
     #[cfg(feature = "std")]
-    dispatcher::with_default(&Dispatch::new(TestSubscriberB), || {
-      dispatcher::get_default(|current| ensure(current.is::<TestSubscriberB>(), "overriden subscriber not set"))
+    dispatcher::with_default(&Dispatch::new(NoOpSubscriber::<Secondary>::new()), || {
+      dispatcher::get_default(|current| ensure(current.is::<NoOpSubscriber<Secondary>>(), "overriden subscriber not set"))
     })?;
 
     dispatcher::get_default(|current| ensure(current.is::<NoSubscriber>(), "scoped default resets to NoSubscriber"))?;
 
     ensure_ok(
-      dispatcher::set_global_default(Dispatch::new(TestSubscriberA)),
+      dispatcher::set_global_default(Dispatch::new(NoOpSubscriber::<Primary>::new())),
       "set global dispatch failed",
     )?;
 
-    dispatcher::get_default(|current| ensure(current.is::<TestSubscriberA>(), "default subscriber not set"))
+    dispatcher::get_default(|current| ensure(current.is::<NoOpSubscriber<Primary>>(), "default subscriber not set"))
   }
 }

@@ -12,6 +12,7 @@ mod tests {
   use strict_test_support::ensure_ok;
   use tracing::Level;
   use tracing::dispatcher::with_default;
+  use tracing::level_filters::STATIC_MAX_LEVEL;
   use tracing_mock::*;
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -45,9 +46,15 @@ mod tests {
         subscriber1_saw_trace_filter.store(level > &Level::DEBUG, Ordering::Relaxed);
         level <= &Level::INFO
       })
-      .event(expect::event().at_level(Level::INFO))
-      .event(expect::event().at_level(Level::WARN))
-      .event(expect::event().at_level(Level::ERROR))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
+        builder.event(expect::event().at_level(Level::INFO))
+      })
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::WARN), |builder| {
+        builder.event(expect::event().at_level(Level::WARN))
+      })
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::ERROR), |builder| {
+        builder.event(expect::event().at_level(Level::ERROR))
+      })
       .only()
       .run_with_handle();
     let subscriber2_saw_trace = Arc::new(AtomicBool::new(false));
@@ -60,10 +67,18 @@ mod tests {
         subscriber2_saw_trace_filter.store(level > &Level::DEBUG, Ordering::Relaxed);
         level <= &Level::DEBUG
       })
-      .event(expect::event().at_level(Level::INFO))
-      .event(expect::event().at_level(Level::DEBUG))
-      .event(expect::event().at_level(Level::WARN))
-      .event(expect::event().at_level(Level::ERROR))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
+        builder.event(expect::event().at_level(Level::INFO))
+      })
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::DEBUG), |builder| {
+        builder.event(expect::event().at_level(Level::DEBUG))
+      })
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::WARN), |builder| {
+        builder.event(expect::event().at_level(Level::WARN))
+      })
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::ERROR), |builder| {
+        builder.event(expect::event().at_level(Level::ERROR))
+      })
       .only()
       .run_with_handle();
 

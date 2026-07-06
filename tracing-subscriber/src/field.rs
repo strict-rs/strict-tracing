@@ -236,7 +236,6 @@ pub struct RecordFieldsMarker {
 #[cfg(all(test, feature = "alloc"))]
 #[macro_use]
 pub(in crate::field) mod test_util {
-  use alloc::format;
   pub(in crate::field) use alloc::string::String;
 
   use strict_test_support::TestFailure;
@@ -330,6 +329,14 @@ pub(in crate::field) mod test_util {
     err:    fmt::Result,
   }
 
+  struct DebugAsDisplay<'a>(&'a dyn fmt::Debug);
+
+  impl fmt::Display for DebugAsDisplay<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+      fmt::Debug::fmt(self.0, formatter)
+    }
+  }
+
   impl<'a> DebugVisitor<'a> {
     pub(in crate::field) fn new(writer: &'a mut dyn fmt::Write) -> Self {
       Self {
@@ -340,11 +347,7 @@ pub(in crate::field) mod test_util {
   }
 
   impl Visit for DebugVisitor<'_> {
-    #[allow(
-      clippy::use_debug,
-      reason = "test debug visitor intentionally verifies Debug rendering for erased field values"
-    )]
-    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+    fn record_debug(&mut self, field: &Field, field_value: &dyn fmt::Debug) {
       if self.err.is_err() {
         return;
       }
@@ -352,7 +355,7 @@ pub(in crate::field) mod test_util {
         self.err = Err(error);
         return;
       }
-      self.err = self.writer.write_str(format!("{value:?}").as_str());
+      self.err = write!(self.writer, "{}", DebugAsDisplay(field_value));
     }
   }
 

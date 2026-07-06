@@ -118,7 +118,7 @@ pub trait LookupSpan<'a> {
   /// Returns a [`SpanRef`] for the span with the given `Id`, if it exists.
   ///
   /// A `SpanRef` is similar to [`SpanData`], but it allows performing
-  /// additional lookups against the registryr that stores the wrapped data.
+  /// additional lookups against the registry that stores the wrapped data.
   ///
   /// In general, _users_ of the `LookupSpan` trait should use this method
   /// rather than the [`span_data`] method; while _implementors_ of this trait
@@ -129,10 +129,10 @@ pub trait LookupSpan<'a> {
   where
     Self: Sized,
   {
-    let data = self.span_data(id)?;
+    let span_data = self.span_data(id)?;
     Some(SpanRef {
       registry: self,
-      data,
+      data: span_data,
       #[cfg(feature = "registry")]
       filter: FilterId::none(),
     })
@@ -202,6 +202,37 @@ pub trait SpanData<'a> {
   fn is_enabled_for(&self, _: FilterId) -> bool {
     true
   }
+}
+
+#[cfg(feature = "registry")]
+/// Returns a span reference when its data is enabled for `filter`.
+fn filtered_span_ref<'a, R>(registry: &'a R, filter: FilterId, span_data: R::Data) -> Option<SpanRef<'a, R>>
+where
+  R: LookupSpan<'a>,
+{
+  if span_data.is_enabled_for(filter) {
+    return Some(SpanRef {
+      registry,
+      data: span_data,
+      filter,
+    });
+  }
+
+  None
+}
+
+#[cfg(feature = "registry")]
+/// Returns the next enabled parent span, skipping disabled parents.
+fn filtered_parent_span<'a, R>(registry: &'a R, filter: FilterId, span_data: R::Data) -> Option<SpanRef<'a, R>>
+where
+  R: LookupSpan<'a>,
+{
+  let maybe_parent_id = span_data.parent().copied();
+  filtered_span_ref(registry, filter, span_data).or_else(|| {
+    let parent_id = maybe_parent_id?;
+    let parent_data = registry.span_data(parent_id)?;
+    filtered_parent_span(registry, filter, parent_data)
+  })
 }
 
 /// A reference to [span data] and the associated [registry].
@@ -330,24 +361,11 @@ where
   fn next(&mut self) -> Option<Self::Item> {
     #[cfg(all(feature = "registry", feature = "std"))]
     {
-      while let Some(next) = self.next {
-        let span = self.registry.span(next)?;
-
-        let current = span.with_filter(self.filter);
-        self.next = current.data.parent().copied();
-
-        // If the `Scope` is filtered, check if the current span is enabled
-        // by the selected filter ID.
-        if !current.is_enabled_for(self.filter) {
-          // The current span in the chain is disabled for this
-          // filter. Try its parent.
-          continue;
-        }
-
-        return Some(current);
-      }
-
-      None
+      let next = self.next?;
+      let span = self.registry.span(next)?;
+      let current = span.with_filter(self.filter);
+      self.next = current.data.parent().copied();
+      filtered_span_ref(self.registry, self.filter, current.data).or_else(|| self.next())
     }
 
     #[cfg(not(all(feature = "registry", feature = "std")))]
@@ -390,33 +408,17 @@ where
   /// span is the root of its trace tree.
   pub fn parent(&self) -> Option<Self> {
     let id = self.data.parent()?;
-    let data = self.registry.span_data(*id)?;
+    let span_data = self.registry.span_data(*id)?;
 
     #[cfg(all(feature = "registry", feature = "std"))]
     {
-      // move these into mut bindings if the registry feature is enabled,
-      // since they may be mutated in the loop.
-      let mut parent_data = data;
-      loop {
-        // Is this parent enabled by our filter?
-        if parent_data.is_enabled_for(self.filter) {
-          return Some(Self {
-            registry: self.registry,
-            filter:   self.filter,
-            data:     parent_data,
-          });
-        }
-
-        // It's not enabled. If the disabled span has a parent, try that!
-        let parent_id = parent_data.parent()?;
-        parent_data = self.registry.span_data(*parent_id)?;
-      }
+      filtered_parent_span(self.registry, self.filter, span_data)
     }
 
     #[cfg(not(all(feature = "registry", feature = "std")))]
     Some(Self {
       registry: self.registry,
-      data,
+      data:     span_data,
     })
   }
 
@@ -578,29 +580,44 @@ mod tests {
     use crate::prelude::*;
     use crate::registry::LookupSpan;
 
+    #[derive(Clone, Copy)]
+    enum ScopeOrder {
+      CurrentToRoot,
+      RootToLeaf,
+    }
+
+    struct PrintingLayer {
+      last_entered_scope: Arc<Mutex<Vec<&'static str>>>,
+      order:              ScopeOrder,
+    }
+
+    impl<S> Layer<S> for PrintingLayer
+    where
+      S: Subscriber + for<'lookup> LookupSpan<'lookup>,
+    {
+      fn on_enter(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult {
+        ctx
+          .span(id)
+          .map(|span| match self.order {
+            ScopeOrder::CurrentToRoot => span.scope().map(|scope_span| scope_span.name()).collect::<Vec<_>>(),
+            ScopeOrder::RootToLeaf => span
+              .scope()
+              .root_to_leaf()
+              .map(|scope_span| scope_span.name())
+              .collect::<Vec<_>>(),
+          })
+          .into_iter()
+          .for_each(|scope| *self.last_entered_scope.lock() = scope);
+        Ok(())
+      }
+    }
+
     #[test]
     fn spanref_scope_iteration_order() -> Result<(), TestFailure> {
-      #[derive(Default)]
-      struct PrintingLayer {
-        last_entered_scope: Arc<Mutex<Vec<&'static str>>>,
-      }
-
-      impl<S> Layer<S> for PrintingLayer
-      where
-        S: Subscriber + for<'lookup> LookupSpan<'lookup>,
-      {
-        fn on_enter(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult {
-          if let Some(span) = ctx.span(id) {
-            let scope = span.scope().map(|scope_span| scope_span.name()).collect::<Vec<_>>();
-            *self.last_entered_scope.lock() = scope;
-          }
-          Ok(())
-        }
-      }
-
       let last_entered_scope = Arc::new(Mutex::new(Vec::new()));
       let _guard = subscriber::set_default(crate::registry().with(PrintingLayer {
         last_entered_scope: Arc::clone(&last_entered_scope),
+        order:              ScopeOrder::CurrentToRoot,
       }));
 
       let _root = tracing::info_span!("root").entered();
@@ -622,31 +639,10 @@ mod tests {
 
     #[test]
     fn spanref_scope_fromroot_iteration_order() -> Result<(), TestFailure> {
-      #[derive(Default)]
-      struct PrintingLayer {
-        last_entered_scope: Arc<Mutex<Vec<&'static str>>>,
-      }
-
-      impl<S> Layer<S> for PrintingLayer
-      where
-        S: Subscriber + for<'lookup> LookupSpan<'lookup>,
-      {
-        fn on_enter(&self, id: span::Id, ctx: Context<'_, S>) -> SubscriberResult {
-          if let Some(span) = ctx.span(id) {
-            let scope = span
-              .scope()
-              .root_to_leaf()
-              .map(|scope_span| scope_span.name())
-              .collect::<Vec<_>>();
-            *self.last_entered_scope.lock() = scope;
-          }
-          Ok(())
-        }
-      }
-
       let last_entered_scope = Arc::new(Mutex::new(Vec::new()));
       let _guard = subscriber::set_default(crate::registry().with(PrintingLayer {
         last_entered_scope: Arc::clone(&last_entered_scope),
+        order:              ScopeOrder::RootToLeaf,
       }));
 
       let _root = tracing::info_span!("root").entered();

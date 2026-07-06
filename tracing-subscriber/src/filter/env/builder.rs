@@ -411,3 +411,148 @@ fn write_stderr_line(args: fmt::Arguments<'_>) {
         let _result = stderr.write_all(b"\n");
     }
 }
+
+#[cfg(test)]
+#[cfg(feature = "std")]
+mod tests {
+    use alloc::string::ToString as _;
+    use std::format;
+    use std::process;
+
+    use strict_test_support::TestFailure;
+    use strict_test_support::ensure;
+    use strict_test_support::ensure_contains;
+    use strict_test_support::ensure_ok;
+    use tracing::Level;
+    use tracing::subscriber::with_default;
+    use tracing_mock::expect;
+    use tracing_mock::subscriber;
+
+    use super::*;
+    use crate::filter::LevelFilter;
+    use crate::prelude::*;
+
+    #[test]
+    fn parse_lossy_uses_default_when_every_directive_is_invalid() -> Result<(), TestFailure> {
+        let filter = Builder::default()
+            .with_default_directive(LevelFilter::INFO.into())
+            .parse_lossy("builder_test=fake_level,another::target=nope");
+
+        ensure(
+            filter.to_string() == "info",
+            "lossy parsing should fall back to the default directive when all directives are invalid",
+        )
+    }
+
+    #[test]
+    fn parse_lossy_keeps_valid_directives_instead_of_default() -> Result<(), TestFailure> {
+        let filter = Builder::default()
+            .with_default_directive(LevelFilter::INFO.into())
+            .parse_lossy("builder_test=fake_level,valid_builder_target=warn");
+
+        ensure(
+            filter.to_string() == "valid_builder_target=warn",
+            "lossy parsing should keep valid directives instead of using the default",
+        )
+    }
+
+    #[test]
+    fn parse_rejects_invalid_non_empty_directives() -> Result<(), TestFailure> {
+        let parsed = Builder::default().parse("valid_builder_target=warn,builder_test=fake_level");
+
+        ensure(parsed.is_err(), "strict parsing should reject any invalid directive")?;
+        let error_text = parsed.err().map(|error| error.to_string()).unwrap_or_default();
+        ensure_contains(
+            &error_text,
+            "error parsing level filter",
+            "strict parse errors should identify the directive parsing failure",
+        )
+    }
+
+    #[test]
+    fn unset_custom_environment_uses_default_for_lossy_and_strict_parsing() -> Result<(), TestFailure> {
+        let environment_name = format!(
+            "STRICT_TRACING_SUBSCRIBER_BUILDER_TEST_UNSET_{}",
+            process::id()
+        );
+        let builder = Builder::default()
+            .with_env_var(environment_name)
+            .with_default_directive(LevelFilter::WARN.into());
+
+        let lossy = builder.parse_env_lossy();
+        ensure(
+            lossy.to_string() == "warn",
+            "lossy env parsing should use the default directive when the custom variable is unset",
+        )?;
+
+        let strict = ensure_ok(
+            builder.parse_env(),
+            "strict env parsing should accept an unset variable by parsing the default empty value",
+        )?;
+        ensure(
+            strict.to_string() == "warn",
+            "strict env parsing should use the default directive when the custom variable is unset",
+        )?;
+
+        let missing = builder.try_parse_env();
+        ensure(
+            missing.is_err(),
+            "try_parse_env should reject an unset custom environment variable",
+        )?;
+        let error_text = missing.err().map(|error| error.to_string()).unwrap_or_default();
+        ensure_contains(
+            &error_text,
+            "environment variable not found",
+            "unset custom environment errors should preserve the environment failure",
+        )
+    }
+
+    #[test]
+    fn default_regex_mode_matches_debug_output_as_a_regular_expression() -> Result<(), TestFailure> {
+        let filter = ensure_ok(
+            Builder::default().parse("[name_span{name=alice.*}]=debug"),
+            "regex field directive should parse",
+        )?;
+
+        run_name_span_filter(filter, true)
+    }
+
+    #[test]
+    fn disabled_regex_mode_matches_debug_output_exactly() -> Result<(), TestFailure> {
+        let filter = ensure_ok(
+            Builder::default()
+                .with_regex(false)
+                .parse("[name_span{name=alice.*}]=debug"),
+            "non-regex field directive should parse",
+        )?;
+
+        run_name_span_filter(filter, false)
+    }
+
+    fn run_name_span_filter(filter: EnvFilter, should_emit_event: bool) -> Result<(), TestFailure> {
+        let (mock_subscriber, handle) = subscriber::mock()
+            .enter("name_span")
+            .expect_when(should_emit_event, |mock| {
+                mock.event(
+                    expect::event()
+                        .at_level(Level::DEBUG)
+                        .with_target("builder_regex_target"),
+                )
+            })
+            .exit("name_span")
+            .only()
+            .run_with_handle();
+        let subscriber = mock_subscriber.with(filter);
+
+        with_default(subscriber, || {
+            let span_guard = tracing::info_span!("name_span", name = "alice-bob").entered();
+            tracing::debug!(target: "builder_regex_target", "field matcher polarity");
+            drop(span_guard);
+        });
+
+        ensure_ok(
+            handle.finished(),
+            "builder regex field filter should produce the expected event polarity",
+        )
+    }
+}

@@ -115,6 +115,7 @@
 //! ```
 //!
 //! [`Layer`]: trait@tracing_subscriber::layer::Layer
+//! [`MockLayer`]: struct@crate::layer::MockLayer
 //! [`MockHandle::finished`]: fn@crate::subscriber::MockHandle::finished
 use std::collections::VecDeque;
 use std::fmt;
@@ -800,6 +801,74 @@ impl MockLayerBuilder {
     self
   }
 
+  /// Applies `build` to this builder only when `enabled` is `true`.
+  ///
+  /// When `enabled` is `false` the builder is returned unchanged, so the
+  /// expectations added inside `build` are skipped entirely. This keeps a
+  /// single expectation script valid across configurations where part of
+  /// the instrumentation under test is compiled out or statically
+  /// filtered away.
+  ///
+  /// The primary use case is the static max level: predicate an
+  /// expectation for a verbose event on
+  /// <code>STATIC_MAX_LEVEL.enables(...)</code> so the same test passes
+  /// whether or not a `max_level_*` / `release_max_level_*` feature
+  /// disables that level at compile time.
+  ///
+  /// # Examples
+  ///
+  /// ```
+  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// use tracing::Level;
+  /// use tracing::level_filters::STATIC_MAX_LEVEL;
+  /// use tracing_mock::expect;
+  /// use tracing_mock::layer;
+  /// use tracing_subscriber::Layer;
+  /// use tracing_subscriber::layer::SubscriberExt;
+  /// use tracing_subscriber::util::SubscriberInitExt;
+  ///
+  /// let (layer, handle) = layer::mock()
+  ///   .event(
+  ///     expect::event()
+  ///       .at_level(Level::INFO)
+  ///       .with_fields(expect::field("expect_when_example").with_value(&true)),
+  ///   )
+  ///   .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+  ///     builder.event(
+  ///       expect::event()
+  ///         .at_level(Level::TRACE)
+  ///         .with_fields(expect::field("expect_when_example").with_value(&true)),
+  ///     )
+  ///   })
+  ///   .only()
+  ///   .run_with_handle();
+  ///
+  /// let _subscriber = tracing_subscriber::registry()
+  ///   .with(
+  ///     layer.with_filter(tracing_subscriber::filter::filter_fn(move |meta| {
+  ///       meta.fields().field("expect_when_example").is_some()
+  ///     })),
+  ///   )
+  ///   .set_default();
+  ///
+  /// tracing::info!(expect_when_example = true, "always recorded");
+  /// tracing::trace!(
+  ///   expect_when_example = true,
+  ///   "recorded only when TRACE is statically enabled"
+  /// );
+  ///
+  /// strict_test_support::ensure_ok(handle.finished(), "mock expectations finished")?;
+  /// # Ok(())
+  /// # }
+  /// ```
+  ///
+  /// [`STATIC_MAX_LEVEL`]: tracing::level_filters::STATIC_MAX_LEVEL
+  /// [`enables`]: tracing::level_filters::LevelFilter::enables
+  #[must_use]
+  pub fn expect_when(self, enabled: bool, build: impl FnOnce(Self) -> Self) -> Self {
+    if enabled { build(self) } else { self }
+  }
+
   /// Expects that no further traces are received.
   ///
   /// The call to `only` should appear immediately before the final
@@ -952,7 +1021,11 @@ impl MockLayerBuilder {
   pub fn run_with_handle(self) -> (MockLayer, MockHandle) {
     let expected = Arc::new(Mutex::new(self.expected));
     let failures = SharedFailures::default();
-    let handle = MockHandle::new(Arc::clone(&expected), failures.clone(), self.name.clone());
+    let handle = MockHandle {
+      expected: Arc::clone(&expected),
+      failures: failures.clone(),
+      name:     self.name.clone(),
+    };
     let subscriber = MockLayer {
       expected,
       failures,
@@ -1164,18 +1237,11 @@ where
     let name = span.as_ref().map(SpanRef::name);
     if let Some(mut expected) = self.expected.try_lock() {
       let was_expected = match expected.front() {
-        Some(expectation) if expectation.close_span().is_some() => {
-          let Some(expected_span) = expectation.close_span() else {
-            return Ok(());
-          };
-          if let Some(ref observed_span) = span {
-            let _result = self.record_result(expected_span.check(&observed_span.into(), "to close a span", &self.name));
-          } else {
-            let actual_span = (&id).into();
-            let _result = self.record_result(expected_span.check(&actual_span, "to close a span", &self.name));
-          }
+        Some(expectation) if expectation.close_span().is_some() => expectation.close_span().is_some_and(|expected_span| {
+          let actual_span = span.as_ref().map_or_else(|| (&id).into(), Into::into);
+          let _result = self.record_result(expected_span.check(&actual_span, "to close a span", &self.name));
           true
-        }
+        }),
         Some(&Expect::Event(_)) => {
           self.record_failure(format_args!(
             "[{}] expected an event, but closed span {} (id={}) instead",
@@ -1201,12 +1267,12 @@ where
 }
 
 /// Resolves ancestry through a layer context.
-fn context_get_ancestry<C>(item: &impl HasAncestry, ctx: &Context<'_, C>) -> ExpectationResult<ActualAncestry>
+fn context_get_ancestry<C>(traced_item: &impl HasAncestry, ctx: &Context<'_, C>) -> ExpectationResult<ActualAncestry>
 where
   C: Subscriber + for<'a> LookupSpan<'a>,
 {
   get_ancestry(
-    item,
+    traced_item,
     || ctx.lookup_current().map(|span_ref| span_ref.id()),
     |span_id| ctx.span(*span_id).map(|span_ref| (&span_ref).into()),
   )
@@ -1226,11 +1292,11 @@ impl fmt::Debug for MockLayer {
 
     if let Some(current) = self.current.try_lock() {
       let mut current_ids = String::new();
-      for id in &*current {
-        if !current_ids.is_empty() {
-          current_ids.push_str(", ");
-        }
-        current_ids.push_str(&id.into_u64().to_string());
+      let mut separator = "";
+      for id in current.iter().map(|id| id.into_u64()) {
+        current_ids.push_str(separator);
+        current_ids.push_str(&id.to_string());
+        separator = ", ";
       }
       let _current = debug.field("current", &current_ids);
     } else {
@@ -1238,5 +1304,195 @@ impl fmt::Debug for MockLayer {
     }
 
     debug.finish()
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_contains;
+  use strict_test_support::ensure_ok;
+  use strict_test_support::ensure_some;
+  use tracing::field::Empty;
+  use tracing::subscriber::set_default;
+  use tracing_subscriber::layer::SubscriberExt as _;
+
+  use super::mock;
+  use super::named;
+  use crate::expect;
+
+  #[test]
+  fn expect_when_enabled_applies_the_built_expectations() -> Result<(), TestFailure> {
+    let (layer, handle) = mock()
+      .expect_when(true, |builder| builder.event(expect::event()))
+      .only()
+      .run_with_handle();
+
+    let registry_guard = set_default(tracing_subscriber::registry().with(layer));
+    tracing::info!("recorded");
+    drop(registry_guard);
+
+    ensure_ok(handle.finished(), "the expectation added by expect_when matches the event")
+  }
+
+  #[test]
+  fn expect_when_enabled_enforces_the_built_expectations() -> Result<(), TestFailure> {
+    let (layer, handle) = mock()
+      .expect_when(true, |builder| builder.event(expect::event()))
+      .run_with_handle();
+
+    let registry_guard = set_default(tracing_subscriber::registry().with(layer));
+    drop(registry_guard);
+
+    ensure(
+      handle.finished().is_err(),
+      "the expectation added by expect_when fails when no event is recorded",
+    )
+  }
+
+  #[test]
+  fn expect_when_disabled_leaves_the_script_unchanged() -> Result<(), TestFailure> {
+    let (layer, handle) = mock()
+      .expect_when(false, |builder| builder.event(expect::event()))
+      .only()
+      .run_with_handle();
+
+    let registry_guard = set_default(tracing_subscriber::registry().with(layer));
+    drop(registry_guard);
+
+    ensure_ok(handle.finished(), "a disabled expect_when adds no expectations")
+  }
+
+  #[test]
+  fn expect_when_disabled_does_not_swallow_recorded_events() -> Result<(), TestFailure> {
+    let (layer, handle) = mock()
+      .expect_when(false, |builder| builder.event(expect::event()))
+      .only()
+      .run_with_handle();
+
+    let registry_guard = set_default(tracing_subscriber::registry().with(layer));
+    tracing::info!("beyond the script");
+    drop(registry_guard);
+
+    ensure(
+      handle.finished().is_err(),
+      "an event recorded against a disabled expect_when still violates only()",
+    )
+  }
+
+  #[test]
+  fn only_rejects_extra_notifications() -> Result<(), TestFailure> {
+    let (layer, handle) = mock().event(expect::event()).only().run_with_handle();
+
+    let registry_guard = set_default(tracing_subscriber::registry().with(layer));
+    tracing::info!("expected");
+    tracing::info!("extra");
+    drop(registry_guard);
+
+    ensure(handle.finished().is_err(), "only rejects extra layer notifications")
+  }
+
+  #[test]
+  fn new_span_field_failures_are_reported_by_finished() -> Result<(), TestFailure> {
+    let expected_span = expect::span()
+      .named("layer_span")
+      .with_fields(expect::field("answer").with_value(&42_i64));
+    let (layer, handle) = mock().new_span(expected_span).run_with_handle();
+
+    let registry_guard = set_default(tracing_subscriber::registry().with(layer));
+    let _span = tracing::info_span!("layer_span", answer = 7_i64);
+    drop(registry_guard);
+
+    ensure(handle.finished().is_err(), "layer new-span field mismatch is reported")
+  }
+
+  #[test]
+  fn on_register_dispatch_expectation_matches_default_registration() -> Result<(), TestFailure> {
+    let (layer, handle) = mock().on_register_dispatch().only().run_with_handle();
+
+    let registry_guard = set_default(tracing_subscriber::registry().with(layer));
+    drop(registry_guard);
+
+    ensure_ok(handle.finished(), "layer observes on_register_dispatch when registered as default")
+  }
+
+  #[test]
+  fn span_lifecycle_and_event_scope_match_through_layer_hooks() -> Result<(), TestFailure> {
+    let span = expect::span().named("layer_scope_span");
+    let event = expect::event().in_scope([expect::span().named("layer_scope_span")]);
+    let (layer, handle) = mock()
+      .new_span(&span)
+      .enter(&span)
+      .event(event)
+      .exit(&span)
+      .close_span(&span)
+      .only()
+      .run_with_handle();
+
+    let registry_guard = set_default(tracing_subscriber::registry().with(layer));
+    let layer_span = tracing::info_span!("layer_scope_span");
+    layer_span.in_scope(|| {
+      tracing::info!("scoped layer event");
+    });
+    drop(layer_span);
+    drop(registry_guard);
+
+    ensure_ok(handle.finished(), "layer span lifecycle and event scope expectations match")
+  }
+
+  #[test]
+  fn event_scope_mismatch_is_reported_by_finished() -> Result<(), TestFailure> {
+    let event = expect::event().in_scope([expect::span().named("missing_scope_span")]);
+    let (layer, handle) = mock().event(event).run_with_handle();
+
+    let registry_guard = set_default(tracing_subscriber::registry().with(layer));
+    tracing::info!("unscoped layer event");
+    drop(registry_guard);
+
+    ensure(handle.finished().is_err(), "missing event scope is reported")
+  }
+
+  #[test]
+  fn layer_record_and_follows_from_hooks_report_unsupported_notifications() -> Result<(), TestFailure> {
+    let (layer, handle) = mock().run_with_handle();
+
+    let registry_guard = set_default(tracing_subscriber::registry().with(layer));
+    let recorded = tracing::info_span!("recorded_layer_span", answer = Empty);
+    let _recorded_span = recorded.record("answer", 7_i64);
+    let consequence = tracing::info_span!("consequence_layer_span");
+    let _follows_from_span = consequence.follows_from(&recorded);
+    drop(registry_guard);
+
+    ensure(
+      handle.finished().is_err(),
+      "layer records unsupported record and follows-from notifications as failures",
+    )
+  }
+
+  #[test]
+  fn composed_layer_names_are_included_in_failure_messages() -> Result<(), TestFailure> {
+    let (layer, handle) = named("outer").named("inner").event(expect::event()).run_with_handle();
+
+    drop(layer);
+    let error = handle.finished();
+
+    ensure(error.is_err(), "missing named layer expectation fails")?;
+    let failure = ensure_some(error.err(), "missing named layer expectation returns an error")?;
+    let rendered = failure.to_string();
+    ensure_contains(&rendered, "outer::inner", "composed layer name appears in failures")
+  }
+
+  #[test]
+  fn mock_layer_debug_reports_name_expected_and_current_state() -> Result<(), TestFailure> {
+    let layer = named("debug-layer").event(expect::event()).run();
+
+    let rendered = format!("{layer:?}");
+
+    ensure_contains(&rendered, "ExpectSubscriber", "debug output names the mock layer")?;
+    ensure_contains(&rendered, "debug-layer", "debug output includes the layer name")?;
+    ensure_contains(&rendered, "expected", "debug output includes pending expectations")?;
+    ensure_contains(&rendered, "failures", "debug output includes recorded failures")?;
+    ensure_contains(&rendered, "current", "debug output includes current span state")
   }
 }

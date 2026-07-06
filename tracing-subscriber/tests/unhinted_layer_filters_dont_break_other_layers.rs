@@ -8,10 +8,8 @@ mod tests {
   use tracing::Level;
   use tracing::subscriber::set_default;
   use tracing_mock::expect;
+  use tracing_mock::layer;
   use tracing_mock::layer::MockLayer;
-  use tracing_mock::layer::{
-    self,
-  };
   use tracing_mock::subscriber;
   use tracing_subscriber::filter::DynFilterFn;
   use tracing_subscriber::prelude::*;

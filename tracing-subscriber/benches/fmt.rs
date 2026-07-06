@@ -46,11 +46,7 @@ fn bench_new_span(criterion: &mut Criterion) {
       configured_span_count,
       |bencher, &span_count| {
         with_default(&mk_dispatch(), || {
-          bencher.iter(|| {
-            for span_index in 0..span_count {
-              let _span = tracing::info_span!("span", span_index);
-            }
-          });
+          bencher.iter(|| emit_spans(span_count));
         });
       },
     ));
@@ -58,37 +54,9 @@ fn bench_new_span(criterion: &mut Criterion) {
       BenchmarkId::new("multithreaded", configured_span_count),
       configured_span_count,
       |bencher, &span_count| {
-        bencher.iter_custom(|iters| {
-          let mut total = Duration::ZERO;
-          let dispatch = mk_dispatch();
-          for _ in 0..iters {
-            let bench = MultithreadedBench::new(dispatch.clone());
-            let elapsed = bench
-              .thread(move || {
-                for span_index in 0..span_count {
-                  let _span = tracing::info_span!("span", span_index);
-                }
-              })
-              .thread(move || {
-                for span_index in 0..span_count {
-                  let _span = tracing::info_span!("span", span_index);
-                }
-              })
-              .thread(move || {
-                for span_index in 0..span_count {
-                  let _span = tracing::info_span!("span", span_index);
-                }
-              })
-              .thread(move || {
-                for span_index in 0..span_count {
-                  let _span = tracing::info_span!("span", span_index);
-                }
-              })
-              .run();
-            total = add_elapsed(total, elapsed);
-          }
-          total
-        });
+        let dispatch = mk_dispatch();
+        bencher
+          .iter_custom(|iters| multithreaded_total(&dispatch, iters, |bench| register_worker_set(bench, span_count, WorkerKind::Span)));
       },
     ));
   });
@@ -117,10 +85,62 @@ const fn add_elapsed(total: Duration, elapsed: Duration) -> Duration {
   total.saturating_add(elapsed)
 }
 
+/// Runs a benchmark worker registration function for each custom iteration.
+fn multithreaded_total(dispatch: &tracing::Dispatch, iters: u64, mut register_workers: impl FnMut(&MultithreadedBench)) -> Duration {
+  let mut total = Duration::ZERO;
+  for _ in 0..iters {
+    let bench = MultithreadedBench::new(dispatch.clone());
+    register_workers(&bench);
+    let elapsed = bench.run();
+    total = add_elapsed(total, elapsed);
+  }
+  total
+}
+
 /// Builds a formatting dispatch that writes to `NoWriter`.
 fn mk_dispatch() -> tracing::Dispatch {
   let subscriber = tracing_subscriber::FmtSubscriber::builder().with_writer(|| NoWriter).finish();
   tracing::Dispatch::new(subscriber)
+}
+
+/// Emits the configured number of span constructions.
+fn emit_spans(span_count: usize) {
+  for span_index in 0..span_count {
+    let _span = tracing::info_span!("span", span_index);
+  }
+}
+
+/// Multithreaded formatting benchmark worker shape.
+#[derive(Clone, Copy)]
+enum WorkerKind {
+  /// Worker constructs spans.
+  Span,
+  /// Worker emits root events.
+  Event,
+  /// Worker emits events below its own parent span.
+  UniqueParent,
+}
+
+/// Registers the four workers used by a multithreaded benchmark case.
+fn register_worker_set(bench: &MultithreadedBench, count: usize, worker_kind: WorkerKind) {
+  for _ in 0..4 {
+    match worker_kind {
+      WorkerKind::Span => {
+        let _worker = bench.thread(move || emit_spans(count));
+      }
+      WorkerKind::Event => {
+        let _worker = bench.thread(move || emit_events(count));
+      }
+      WorkerKind::UniqueParent => {
+        let _worker = bench.thread_with_setup(move |start| {
+          let span = tracing::info_span!("unique_parent", foo = false);
+          let _guard = span.enter();
+          let _wait = start.wait();
+          emit_events(count);
+        });
+      }
+    }
+  }
 }
 
 /// Benchmarks emitting events through a formatting subscriber.
@@ -149,11 +169,7 @@ fn register_root_event_benches(group: &mut Group<'_>, event_count: usize) {
     |bencher, &count| {
       let dispatch = mk_dispatch();
       with_default(&dispatch, || {
-        bencher.iter(|| {
-          for event_index in 0..count {
-            tracing::info!(event_index);
-          }
-        });
+        bencher.iter(|| emit_events(count));
       });
     },
   ));
@@ -161,37 +177,8 @@ fn register_root_event_benches(group: &mut Group<'_>, event_count: usize) {
     BenchmarkId::new("root/multithreaded", event_count),
     &event_count,
     |bencher, &count| {
-      bencher.iter_custom(|iters| {
-        let mut total = Duration::ZERO;
-        let dispatch = mk_dispatch();
-        for _ in 0..iters {
-          let bench = MultithreadedBench::new(dispatch.clone());
-          let elapsed = bench
-            .thread(move || {
-              for event_index in 0..count {
-                tracing::info!(event_index);
-              }
-            })
-            .thread(move || {
-              for event_index in 0..count {
-                tracing::info!(event_index);
-              }
-            })
-            .thread(move || {
-              for event_index in 0..count {
-                tracing::info!(event_index);
-              }
-            })
-            .thread(move || {
-              for event_index in 0..count {
-                tracing::info!(event_index);
-              }
-            })
-            .run();
-          total = add_elapsed(total, elapsed);
-        }
-        total
-      });
+      let dispatch = mk_dispatch();
+      bencher.iter_custom(|iters| multithreaded_total(&dispatch, iters, |bench| register_worker_set(bench, count, WorkerKind::Event)));
     },
   ));
 }
@@ -209,11 +196,7 @@ fn register_unique_parent_event_benches(group: &mut Group<'_>, event_count: usiz
       with_default(&mk_dispatch(), || {
         let span = tracing::info_span!("unique_parent", foo = false);
         let _guard = span.enter();
-        bencher.iter(|| {
-          for event_index in 0..count {
-            tracing::info!(event_index);
-          }
-        });
+        bencher.iter(|| emit_events(count));
       });
     },
   ));
@@ -221,40 +204,11 @@ fn register_unique_parent_event_benches(group: &mut Group<'_>, event_count: usiz
     BenchmarkId::new("unique_parent/multithreaded", event_count),
     &event_count,
     |bencher, &count| {
+      let dispatch = mk_dispatch();
       bencher.iter_custom(|iters| {
-        let mut total = Duration::ZERO;
-        let dispatch = mk_dispatch();
-        for _ in 0..iters {
-          let bench = MultithreadedBench::new(dispatch.clone());
-          let elapsed = bench
-            .thread_with_setup(move |start| {
-              let span = tracing::info_span!("unique_parent", foo = false);
-              let _guard = span.enter();
-              let _wait = start.wait();
-              emit_events(count);
-            })
-            .thread_with_setup(move |start| {
-              let span = tracing::info_span!("unique_parent", foo = false);
-              let _guard = span.enter();
-              let _wait = start.wait();
-              emit_events(count);
-            })
-            .thread_with_setup(move |start| {
-              let span = tracing::info_span!("unique_parent", foo = false);
-              let _guard = span.enter();
-              let _wait = start.wait();
-              emit_events(count);
-            })
-            .thread_with_setup(move |start| {
-              let span = tracing::info_span!("unique_parent", foo = false);
-              let _guard = span.enter();
-              let _wait = start.wait();
-              emit_events(count);
-            })
-            .run();
-          total = add_elapsed(total, elapsed);
-        }
-        total
+        multithreaded_total(&dispatch, iters, |bench| {
+          register_worker_set(bench, count, WorkerKind::UniqueParent);
+        })
       });
     },
   ));

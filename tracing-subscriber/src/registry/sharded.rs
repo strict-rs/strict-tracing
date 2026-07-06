@@ -304,12 +304,12 @@ impl Subscriber for Registry {
             // there are free entries already allocated in the pool, this will
             // preferentially reuse one; otherwise, a new `DataInner` is
             // allocated and added to the pool.
-            .create_with(|data| {
-                data.metadata = attrs.metadata();
-                data.parent = parent;
-                data.filter_map = FILTERING.with(FilterState::filter_map);
+            .create_with(|span_data| {
+                span_data.metadata = attrs.metadata();
+                span_data.parent = parent;
+                span_data.filter_map = FILTERING.with(FilterState::filter_map);
 
-                let refs = data.ref_count.get_mut();
+                let refs = span_data.ref_count.get_mut();
                 *refs = 1;
             })
         else {
@@ -732,10 +732,9 @@ mod tests {
             let name = span.name();
             {
                 let mut lock = self.inner.lock();
-                if let Some(is_removed) = lock.open.remove(name) {
-                    lock.closed.push((name, is_removed));
-                }
-            }
+                let removed = lock.open.remove(name).map(|is_removed| (name, is_removed));
+                lock.closed.extend(removed);
+            };
             Ok(())
         }
     }
@@ -818,11 +817,10 @@ mod tests {
         ) -> Result<(), TestFailure> {
             let closed_in_order = {
                 let lock = self.state.lock();
-                order.as_ref().iter().enumerate().all(|(index, name)| {
-                    lock.closed
-                        .get(index)
-                        .is_some_and(|entry| entry.0 == *name)
-                })
+                lock.closed
+                    .iter()
+                    .map(|entry| entry.0)
+                    .eq(order.as_ref().iter().copied())
             };
             ensure(closed_in_order, "span closed in expected order")
         }

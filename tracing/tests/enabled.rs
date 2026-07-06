@@ -18,10 +18,6 @@ mod tests {
 
   use super::*;
 
-  fn statically_enabled(level: Level) -> bool {
-    level <= STATIC_MAX_LEVEL
-  }
-
   #[allow(
     clippy::single_call_fn,
     reason = "keep the static max-level test oracle split by build profile"
@@ -117,12 +113,12 @@ mod tests {
 
     ensure_eq(
       &enabled!(target: "debug_module", Level::DEBUG),
-      &statically_enabled(Level::DEBUG),
+      &STATIC_MAX_LEVEL.enables(Level::DEBUG),
       "targeted DEBUG enabled status matches static level",
     )?;
     ensure_eq(
       &enabled!(Level::ERROR),
-      &statically_enabled(Level::ERROR),
+      &STATIC_MAX_LEVEL.enables(Level::ERROR),
       "ERROR enabled status matches static level",
     )?;
     ensure(
@@ -158,24 +154,24 @@ mod tests {
     )?;
     ensure_eq(
       &event_enabled!(Level::DEBUG),
-      &statically_enabled(Level::DEBUG),
+      &STATIC_MAX_LEVEL.enables(Level::DEBUG),
       "DEBUG event enabled status matches static level",
     )?;
     ensure_eq(
       &span_enabled!(Level::TRACE),
-      &statically_enabled(Level::TRACE),
+      &STATIC_MAX_LEVEL.enables(Level::TRACE),
       "TRACE span enabled status matches static level",
     )?;
 
     // Target variants.
     ensure_eq(
       &span_enabled!(target: "debug_module", Level::DEBUG),
-      &statically_enabled(Level::DEBUG),
+      &STATIC_MAX_LEVEL.enables(Level::DEBUG),
       "targeted DEBUG span enabled status matches static level",
     )?;
     ensure_eq(
       &event_enabled!(target: "debug_module", Level::DEBUG),
-      &statically_enabled(Level::DEBUG),
+      &STATIC_MAX_LEVEL.enables(Level::DEBUG),
       "targeted DEBUG event enabled status matches static level",
     )
   }

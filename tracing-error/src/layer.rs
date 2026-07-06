@@ -8,19 +8,17 @@ use std::fmt;
 use std::marker::PhantomData;
 
 use tracing::Dispatch;
-use tracing::Metadata;
 use tracing::Subscriber;
 use tracing::span;
 use tracing::subscriber::SubscriberResult;
 use tracing_subscriber::fmt::FormattedFields;
 use tracing_subscriber::fmt::format::DefaultFields;
 use tracing_subscriber::fmt::format::FormatFields;
+use tracing_subscriber::layer;
 use tracing_subscriber::layer::Layer;
-use tracing_subscriber::layer::{
-  self,
-};
 use tracing_subscriber::registry::LookupSpan;
 
+use crate::SpanTraceVisitor;
 use crate::WithContext;
 
 /// A subscriber [`Layer`] that enables capturing [`SpanTrace`]s.
@@ -109,7 +107,7 @@ where
     clippy::single_call_fn,
     reason = "named function item is stored as the type-erased SpanTrace context callback"
   )]
-  fn visit_context(dispatch: &Dispatch, id: span::Id, visitor: &mut dyn FnMut(&'static Metadata<'static>, &str) -> bool) {
+  fn visit_context(dispatch: &Dispatch, id: span::Id, visitor: &mut SpanTraceVisitor<'_>) {
     let Some(subscriber) = dispatch.downcast_ref::<S>() else {
       return;
     };
@@ -150,5 +148,90 @@ impl<S, F: fmt::Debug> fmt::Debug for ErrorLayer<S, F> {
       .field("get_context", &self.get_context)
       .field("_subscriber", &format_args!("{}", type_name::<S>()))
       .finish()
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use std::any::TypeId;
+  use std::fmt;
+
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_eq;
+  use tracing::subscriber::with_default;
+  use tracing_subscriber::Registry;
+  use tracing_subscriber::field::RecordFields;
+  use tracing_subscriber::fmt::FormatFields;
+  use tracing_subscriber::fmt::format::Writer;
+  use tracing_subscriber::prelude::*;
+
+  use super::DefaultFields;
+  use super::ErrorLayer;
+  use super::Layer;
+  use crate::SpanTrace;
+  use crate::SpanTraceStatus;
+  use crate::WithContext;
+
+  #[test]
+  fn downcast_ref_by_id_exposes_layer_and_context_only() -> Result<(), TestFailure> {
+    let layer = ErrorLayer::<Registry>::default();
+
+    let layer_ref = <ErrorLayer<Registry> as Layer<Registry>>::downcast_ref_by_id(&layer, TypeId::of::<ErrorLayer<Registry>>());
+    let context_ref = <ErrorLayer<Registry> as Layer<Registry>>::downcast_ref_by_id(&layer, TypeId::of::<WithContext>());
+    let unrelated_ref = <ErrorLayer<Registry> as Layer<Registry>>::downcast_ref_by_id(&layer, TypeId::of::<String>());
+
+    ensure(layer_ref.is_some(), "error layer downcasts to its concrete type")?;
+    ensure(context_ref.is_some(), "error layer downcasts to its context callback")?;
+    ensure(unrelated_ref.is_none(), "error layer rejects unrelated downcast types")
+  }
+
+  #[test]
+  fn debug_output_names_formatter_context_and_subscriber_type() -> Result<(), TestFailure> {
+    let layer = ErrorLayer::<Registry>::new(DefaultFields::default());
+    let rendered = format!("{layer:?}");
+
+    ensure(rendered.contains("ErrorLayer"), "debug output names the layer type")?;
+    ensure(rendered.contains("DefaultFields"), "debug output names the field formatter")?;
+    ensure(rendered.contains("WithContext"), "debug output includes the context callback")?;
+    ensure(rendered.contains("Registry"), "debug output includes the subscriber type")
+  }
+
+  #[derive(Debug)]
+  struct FailingFields;
+
+  impl<'writer> FormatFields<'writer> for FailingFields {
+    fn format_fields<R: RecordFields>(&self, _writer: Writer<'writer>, _fields: R) -> fmt::Result {
+      Err(fmt::Error)
+    }
+  }
+
+  #[test]
+  fn formatting_failure_keeps_span_trace_visitable_with_empty_fields() -> Result<(), TestFailure> {
+    let subscriber = Registry::default().with(ErrorLayer::<Registry, FailingFields>::new(FailingFields));
+    let trace = with_default(subscriber, || {
+      let span = tracing::info_span!("failing fields", answer = 42);
+      let _guard = span.enter();
+      SpanTrace::capture()
+    });
+    let mut visited_name = String::new();
+    let mut visited_fields = String::from("not visited");
+
+    trace.with_spans(|metadata, fields| {
+      visited_name = metadata.name().to_owned();
+      visited_fields = fields.to_owned();
+      true
+    });
+
+    ensure(
+      trace.status() == SpanTraceStatus::CAPTURED,
+      "formatter failures still capture the span",
+    )?;
+    ensure_eq(
+      &visited_name,
+      &"failing fields".to_owned(),
+      "span trace still visits the captured span",
+    )?;
+    ensure(visited_fields.is_empty(), "formatter failures leave captured fields empty")
   }
 }

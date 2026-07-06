@@ -190,17 +190,12 @@ impl log::Log for LogTracer {
       return false;
     }
 
-    // Okay, it wasn't disabled by the max level — do we have any specific
-    // modules to ignore?
-    if !self.ignore_crates.is_empty() {
-      // If we are ignoring certain module paths, ensure that the metadata
-      // does not start with one of those paths.
-      let target = metadata.target();
-      for ignored in &self.ignore_crates[..] {
-        if target.starts_with(ignored) {
-          return false;
-        }
-      }
+    // Okay, it wasn't disabled by the max level — if we are ignoring certain
+    // module paths, ensure that the metadata does not start with one of those
+    // paths.
+    let target = metadata.target();
+    if self.ignore_crates.iter().any(|ignored| target.starts_with(ignored)) {
+      return false;
     }
 
     let check_dispatch = || {
@@ -345,5 +340,164 @@ impl Default for Builder {
       #[cfg(all(feature = "interest-cache", feature = "std"))]
       interest_cache_config: None,
     }
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use std::num::NonZeroU64;
+  use std::sync::Arc;
+
+  use log::Log as _;
+  use parking_lot::Mutex;
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_eq;
+  use tracing_core::Event;
+  use tracing_core::LevelFilter;
+  use tracing_core::Metadata;
+  use tracing_core::Subscriber;
+  use tracing_core::dispatcher;
+  use tracing_core::span;
+  use tracing_core::span::Attributes;
+  use tracing_core::span::Record;
+  use tracing_core::subscriber::SubscriberResult;
+
+  use super::LogTracer;
+  use crate::NormalizeEvent as _;
+
+  /// Events captured by the direct logger tests.
+  #[derive(Default)]
+  struct CapturedEvents {
+    /// Normalized target for every forwarded log event.
+    normalized_targets: Mutex<Vec<String>>,
+  }
+
+  /// Subscriber that records normalized log metadata.
+  struct CapturingSubscriber {
+    /// Shared event log.
+    captured:  Arc<CapturedEvents>,
+    /// Static max-level hint returned to the dispatcher.
+    max_level: LevelFilter,
+  }
+
+  impl Subscriber for CapturingSubscriber {
+    fn enabled(&self, _meta: &Metadata<'_>) -> SubscriberResult<bool> {
+      Ok(true)
+    }
+
+    fn max_level_hint(&self) -> Option<LevelFilter> {
+      Some(self.max_level)
+    }
+
+    fn new_span(&self, _span: &Attributes<'_>) -> SubscriberResult<span::Id> {
+      Ok(span::Id::from_non_zero_u64(NonZeroU64::MIN))
+    }
+
+    fn record(&self, _span: span::Id, _values: &Record<'_>) -> SubscriberResult {
+      Ok(())
+    }
+
+    fn record_follows_from(&self, _span: span::Id, _follows: span::Id) -> SubscriberResult {
+      Ok(())
+    }
+
+    fn event(&self, event: &Event<'_>) -> SubscriberResult {
+      if let Some(normalized) = event.normalized_metadata() {
+        self.captured.normalized_targets.lock().push(String::from(normalized.target()));
+      }
+
+      Ok(())
+    }
+
+    fn enter(&self, _span: span::Id) -> SubscriberResult {
+      Ok(())
+    }
+
+    fn exit(&self, _span: span::Id) -> SubscriberResult {
+      Ok(())
+    }
+  }
+
+  #[test]
+  fn builder_records_level_filter_and_ignored_targets() -> Result<(), TestFailure> {
+    let builder = LogTracer::builder()
+      .with_max_level(log::LevelFilter::Info)
+      .ignore_crate("ignored")
+      .ignore_all(["also_ignored"]);
+
+    ensure_eq(&builder.filter, &log::LevelFilter::Info, "builder stores max log level")?;
+    ensure(
+      builder.ignore_crates.as_slice() == [String::from("ignored"), String::from("also_ignored")],
+      "builder stores ignored target prefixes in order",
+    )
+  }
+
+  #[test]
+  fn enabled_respects_tracing_max_level_and_ignored_targets() -> Result<(), TestFailure> {
+    let captured = Arc::new(CapturedEvents::default());
+    let subscriber = CapturingSubscriber {
+      captured,
+      max_level: LevelFilter::INFO,
+    };
+    let dispatch = dispatcher::Dispatch::new(subscriber);
+    let logger = LogTracer {
+      ignore_crates: vec![String::from("ignored")].into_boxed_slice(),
+    };
+
+    dispatcher::with_default(&dispatch, || {
+      let accepted_metadata = log::Metadata::builder().level(log::Level::Info).target("accepted").build();
+      let too_verbose_metadata = log::Metadata::builder().level(log::Level::Debug).target("accepted").build();
+      let ignored_metadata = log::Metadata::builder()
+        .level(log::Level::Info)
+        .target("ignored::module")
+        .build();
+
+      ensure(logger.enabled(&accepted_metadata), "info log is enabled by max level")?;
+      ensure(!logger.enabled(&too_verbose_metadata), "debug log is rejected by tracing max level")?;
+      ensure(!logger.enabled(&ignored_metadata), "ignored target prefix rejects log record")
+    })
+  }
+
+  #[test]
+  fn log_forwards_enabled_records_and_filters_disabled_records() -> Result<(), TestFailure> {
+    let captured = Arc::new(CapturedEvents::default());
+    let subscriber = CapturingSubscriber {
+      captured:  Arc::clone(&captured),
+      max_level: LevelFilter::INFO,
+    };
+    let dispatch = dispatcher::Dispatch::new(subscriber);
+    let logger = LogTracer {
+      ignore_crates: vec![String::from("ignored")].into_boxed_slice(),
+    };
+
+    dispatcher::with_default(&dispatch, || {
+      let accepted_record = log::Record::builder()
+        .args(format_args!("accepted"))
+        .level(log::Level::Info)
+        .target("accepted")
+        .build();
+      logger.log(&accepted_record);
+
+      let too_verbose_record = log::Record::builder()
+        .args(format_args!("too verbose"))
+        .level(log::Level::Debug)
+        .target("accepted")
+        .build();
+      logger.log(&too_verbose_record);
+
+      let ignored_record = log::Record::builder()
+        .args(format_args!("ignored"))
+        .level(log::Level::Info)
+        .target("ignored::module")
+        .build();
+      logger.log(&ignored_record);
+
+      let targets = captured.normalized_targets.lock();
+      ensure(
+        targets.as_slice() == [String::from("accepted")],
+        "only enabled log record is forwarded",
+      )
+    })
   }
 }

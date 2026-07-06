@@ -1,11 +1,15 @@
 //! Middleware which instruments a service with a span entered when that service
 //! is called.
+#[cfg(feature = "tower-make")]
 use std::future::Future;
+#[cfg(any(feature = "tower-layer", feature = "tower-make"))]
 use std::marker::PhantomData;
+#[cfg(feature = "tower-make")]
 use std::pin::Pin;
 use std::task::Context;
 use std::task::Poll;
 
+#[cfg(any(feature = "tower-layer", feature = "tower-make"))]
 use crate::GetSpan;
 
 #[derive(Debug)]
@@ -29,6 +33,9 @@ mod layer {
   use super::PhantomData;
   use super::Service;
 
+  /// Marker for service and request types preserved by the layer.
+  type LayerMarker<S, R> = PhantomData<fn(S, R)>;
+
   #[derive(Debug)]
   /// A Tower layer that instruments a service with a span.
   pub struct Layer<S, R, G = fn(&S) -> tracing::Span>
@@ -39,7 +46,7 @@ mod layer {
     /// Function or span used to create service spans.
     get_span: G,
     /// Preserve the service and request type parameters without storing a request.
-    _p:       PhantomData<fn(S, R)>,
+    _p:       LayerMarker<S, R>,
   }
 
   /// Returns a layer that instruments services with spans from `get_span`.
@@ -86,8 +93,8 @@ mod layer {
   }
 }
 
-#[cfg(feature = "tower-layer")]
-#[cfg_attr(docsrs, doc(cfg(feature = "tower-layer")))]
+#[cfg(feature = "tower-make")]
+#[cfg_attr(docsrs, doc(cfg(feature = "tower-make")))]
 /// Make-service adapters that enter spans while creating services.
 pub mod make {
   use pin_project_lite::pin_project;
@@ -100,6 +107,9 @@ pub mod make {
   use super::Poll;
   use super::Service;
 
+  /// Marker for make-service target and request types.
+  type MakeMarker<T, R> = PhantomData<fn(T, R)>;
+
   #[derive(Debug)]
   /// A make-service wrapper that enters a span while creating services.
   pub struct MakeService<M, T, R, G = fn(&T) -> tracing::Span>
@@ -111,7 +121,7 @@ pub mod make {
     /// Wrapped make-service.
     inner:    M,
     /// Preserve the target and request type parameters without storing either value.
-    _p:       PhantomData<fn(T, R)>,
+    _p:       MakeMarker<T, R>,
   }
 
   pin_project! {
@@ -124,6 +134,7 @@ pub mod make {
       }
   }
 
+  #[cfg(feature = "tower-layer")]
   #[derive(Debug)]
   /// A Tower layer that instruments make-service targets with spans.
   pub struct MakeLayer<T, R, G = fn(&T) -> tracing::Span>
@@ -133,7 +144,7 @@ pub mod make {
     /// Function or span cloned into each make-service wrapper.
     get_span: G,
     /// Preserve the target and request type parameters without storing either value.
-    _p:       PhantomData<fn(T, R)>,
+    _p:       MakeMarker<T, R>,
   }
 
   #[cfg(feature = "tower-layer")]

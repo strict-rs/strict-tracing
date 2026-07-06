@@ -7,8 +7,8 @@
 //! re-exported in the top-level `filter` module. Therefore, this documentation
 //! primarily concerns the internal implementation details. For the user-facing
 //! public API documentation, see the individual public types in this module, as
-//! well as the, see the `Layer` trait documentation's [per-layer filtering
-//! section]][1].
+//! well as the `Layer` trait documentation's [per-layer filtering
+//! section][1].
 //!
 //! ## How does per-layer filtering work?
 //!
@@ -27,6 +27,8 @@
 //!
 //! [1]: crate::layer#per-layer-filtering
 //! [`Filter`]: crate::layer::Filter
+//! [`Layer`]: crate::layer::Layer
+//! [`Filtered`]: crate::filter::Filtered
 use crate::{
     filter::LevelFilter,
     layer::{self, Context, Layer},
@@ -1157,19 +1159,20 @@ impl FilterState {
 
     /// Adds a callsite interest value to the current per-layer filter pass.
     fn add_interest(&self, interest: Interest) {
-        if let Ok(mut current_interest) = self.interest.try_borrow_mut() {
-            if let Some(existing_interest) = current_interest.as_mut() {
-                if (existing_interest.is_always() && !interest.is_always())
-                    || (existing_interest.is_never() && !interest.is_never())
-                {
-                    *existing_interest = Interest::sometimes();
-                }
-                // If the two interests are the same, do nothing. If the current
-                // interest is `sometimes`, stay sometimes.
-            } else {
-                *current_interest = Some(interest);
-            }
+        let Ok(mut current_interest) = self.interest.try_borrow_mut() else {
+            return;
+        };
+        let Some(existing_interest) = current_interest.as_mut() else {
+            *current_interest = Some(interest);
+            return;
+        };
+        if (existing_interest.is_always() && !interest.is_always())
+            || (existing_interest.is_never() && !interest.is_never())
+        {
+            *existing_interest = Interest::sometimes();
         }
+        // If the two interests are the same, do nothing. If the current
+        // interest is `sometimes`, stay sometimes.
     }
 
     /// Returns whether any per-layer filter enabled the current event.
@@ -1332,5 +1335,479 @@ impl fmt::Debug for FmtBitset {
             }
         }
         set.finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::layer::Filter as _;
+    use alloc::{boxed::Box, format, sync::Arc, vec, vec::Vec};
+    use core::any::{Any, TypeId};
+    use parking_lot::Mutex;
+    use strict_test_support::{TestFailure, ensure, ensure_contains, ensure_eq, ensure_ok, ensure_some};
+    use tracing_core::callsite::Callsite;
+    use tracing_core::event::Event;
+    use tracing_core::metadata::Kind;
+    use tracing_core::span::{Attributes, Id, Record};
+    use tracing_core::Level;
+
+    /// Callsite used by layer-filter metadata fixtures.
+    struct LayerFilterCallsite;
+
+    /// Shared callsite used by layer-filter metadata fixtures.
+    static LAYER_FILTER_CALLSITE: LayerFilterCallsite = LayerFilterCallsite;
+
+    /// Metadata used for direct layer-filter calls.
+    static LAYER_FILTER_META: Metadata<'static> = tracing_core::metadata! {
+        name: "layer_filter_test",
+        target: "layer_filter_target",
+        level: Level::INFO,
+        fields: &["answer"],
+        callsite: &LAYER_FILTER_CALLSITE,
+        kind: Kind::EVENT,
+    };
+
+    impl Callsite for LayerFilterCallsite {
+        fn set_interest(&self, _: Interest) {}
+
+        fn metadata(&self) -> &Metadata<'_> {
+            &LAYER_FILTER_META
+        }
+    }
+
+    /// Test layer used for `Filtered` accessor and downcast assertions.
+    #[derive(Debug)]
+    struct AccessLayer {
+        /// Marker value exposed through accessor tests.
+        name: &'static str,
+    }
+
+    impl<S> Layer<S> for AccessLayer
+    where
+        S: Subscriber,
+    {
+        fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
+            if id == TypeId::of::<Self>() {
+                return Some(self);
+            }
+            None
+        }
+    }
+
+    /// Shared filter hook call log.
+    type CallLog = Arc<Mutex<Vec<&'static str>>>;
+
+    /// Filter whose hook return values and call log are controlled by tests.
+    #[derive(Clone, Debug)]
+    struct RecordingFilter {
+        /// Return value for `enabled`.
+        enabled: bool,
+        /// Return value for `event_enabled`.
+        event_enabled: bool,
+        /// Return value for `callsite_enabled`.
+        interest: Interest,
+        /// Return value for `max_level_hint`.
+        max_level_hint: Option<LevelFilter>,
+        /// Shared hook call log.
+        calls: CallLog,
+    }
+
+    impl RecordingFilter {
+        /// Creates a recording filter for wrapper-forwarding tests.
+        fn new(calls: CallLog) -> Self {
+            Self {
+                enabled: false,
+                event_enabled: false,
+                interest: Interest::never(),
+                max_level_hint: Some(LevelFilter::WARN),
+                calls,
+            }
+        }
+
+        /// Records that a named hook was called.
+        fn record(&self, hook: &'static str) {
+            self.calls.lock().push(hook);
+        }
+    }
+
+    impl<S> layer::Filter<S> for RecordingFilter {
+        fn enabled(&self, _meta: &Metadata<'_>, _cx: &Context<'_, S>) -> SubscriberResult<bool> {
+            self.record("enabled");
+            Ok(self.enabled)
+        }
+
+        fn callsite_enabled(&self, _meta: &'static Metadata<'static>) -> SubscriberResult<Interest> {
+            self.record("callsite_enabled");
+            Ok(self.interest)
+        }
+
+        fn max_level_hint(&self) -> SubscriberResult<Option<LevelFilter>> {
+            self.record("max_level_hint");
+            Ok(self.max_level_hint)
+        }
+
+        fn event_enabled(&self, _event: &Event<'_>, _cx: &Context<'_, S>) -> SubscriberResult<bool> {
+            self.record("event_enabled");
+            Ok(self.event_enabled)
+        }
+
+        fn on_new_span(
+            &self,
+            _attrs: &Attributes<'_>,
+            _id: Id,
+            _ctx: Context<'_, S>,
+        ) -> SubscriberResult<()> {
+            self.record("on_new_span");
+            Ok(())
+        }
+
+        fn on_record(
+            &self,
+            _id: Id,
+            _values: &Record<'_>,
+            _ctx: Context<'_, S>,
+        ) -> SubscriberResult<()> {
+            self.record("on_record");
+            Ok(())
+        }
+
+        fn on_enter(&self, _id: Id, _ctx: Context<'_, S>) -> SubscriberResult<()> {
+            self.record("on_enter");
+            Ok(())
+        }
+
+        fn on_exit(&self, _id: Id, _ctx: Context<'_, S>) -> SubscriberResult<()> {
+            self.record("on_exit");
+            Ok(())
+        }
+
+        fn on_close(&self, _id: Id, _ctx: Context<'_, S>) -> SubscriberResult<()> {
+            self.record("on_close");
+            Ok(())
+        }
+    }
+
+    /// Runs a callback with span/event fixtures for filter hook forwarding tests.
+    fn with_instrumentation_fixtures<R>(
+        f: impl FnOnce(&Event<'_>, &Attributes<'_>, &Record<'_>, Id) -> Result<R, TestFailure>,
+    ) -> Result<R, TestFailure> {
+        let values = LAYER_FILTER_META.fields().value_set_all(&[]);
+        let event = Event::new(&LAYER_FILTER_META, &values);
+        let attrs = Attributes::new(&LAYER_FILTER_META, &values);
+        let record = Record::new(&values);
+        let span_id = ensure_some(Id::try_from_u64(1), "span id is nonzero")?;
+        f(&event, &attrs, &record, span_id)
+    }
+
+    /// Exercises all forwarding hooks on a wrapped filter.
+    fn exercise_forwarding_filter<F>(
+        filter: &F,
+        calls: &CallLog,
+        label: &'static str,
+    ) -> Result<(), TestFailure>
+    where
+        F: layer::Filter<registry::Registry>,
+    {
+        with_instrumentation_fixtures(|event, attrs, record, span_id| {
+            let context = Context::<registry::Registry>::none();
+            ensure(
+                !ensure_ok(filter.enabled(&LAYER_FILTER_META, &context), label)?,
+                "forwarded enabled result",
+            )?;
+            ensure(
+                ensure_ok(filter.callsite_enabled(&LAYER_FILTER_META), label)?.is_never(),
+                "forwarded callsite interest",
+            )?;
+            ensure(
+                ensure_ok(filter.max_level_hint(), label)? == Some(LevelFilter::WARN),
+                "forwarded max-level hint",
+            )?;
+            ensure(
+                !ensure_ok(filter.event_enabled(event, &context), label)?,
+                "forwarded event_enabled result",
+            )?;
+            ensure_ok(filter.on_new_span(attrs, span_id, context.clone()), label)?;
+            ensure_ok(filter.on_record(span_id, record, context.clone()), label)?;
+            ensure_ok(filter.on_enter(span_id, context.clone()), label)?;
+            ensure_ok(filter.on_exit(span_id, context.clone()), label)?;
+            ensure_ok(filter.on_close(span_id, context), label)?;
+
+            let expected = vec![
+                "enabled",
+                "callsite_enabled",
+                "max_level_hint",
+                "event_enabled",
+                "on_new_span",
+                "on_record",
+                "on_enter",
+                "on_exit",
+                "on_close",
+            ];
+            let actual = calls.lock().clone();
+            ensure(actual == expected, "all filter hooks were forwarded")
+        })
+    }
+
+    #[test]
+    fn filter_id_and_filter_map_track_disabled_filters() -> Result<(), TestFailure> {
+        let first = FilterId::new(0);
+        let second = FilterId::new(1);
+        let overflow = FilterId::new(64);
+        ensure(
+            FilterId::disabled().and(first).0 == first.0,
+            "disabled combines by yielding the other filter",
+        )?;
+        ensure(
+            FilterId::disabled().0 == overflow.0,
+            "overflowing filter slots produce the disabled sentinel",
+        )?;
+        ensure(
+            FilterId::none().and(first).0 == first.0,
+            "none combines without adding disabled bits",
+        )?;
+        ensure(
+            first.and(second).0 == 3,
+            "distinct filter IDs combine into a shared mask",
+        )?;
+
+        let disabled_debug = format!("{:?}", FilterId::disabled());
+        ensure_contains(&disabled_debug, "DISABLED", "disabled debug is named explicitly")?;
+        let first_binary = format!("{first:b}");
+        ensure_contains(&first_binary, "FilterId", "binary formatting names the ID type")?;
+        let first_alternate = format!("{first:#?}");
+        ensure_contains(&first_alternate, "bits", "alternate debug includes raw bits")?;
+
+        let mut map = FilterMap::new();
+        ensure(map.is_enabled(first), "fresh maps treat the first filter as enabled")?;
+        ensure(map.is_enabled(second), "fresh maps treat the second filter as enabled")?;
+        ensure(map.any_enabled(), "fresh maps have at least one enabled filter")?;
+
+        map = map.set(first, false);
+        ensure(!map.is_enabled(first), "disabling a filter records its bit")?;
+        ensure(map.is_enabled(second), "disabling one filter leaves another enabled")?;
+        ensure(map.any_enabled(), "one disabled filter does not disable the whole stack")?;
+
+        map = map.set(first, true);
+        ensure(map.is_enabled(first), "re-enabling a filter clears its bit")?;
+        let before_disabled_sentinel = map;
+        map = map.set(FilterId::disabled(), false);
+        ensure(map == before_disabled_sentinel, "disabled sentinel does not change the map")?;
+        let map_debug = format!("{map:?}");
+        ensure_contains(&map_debug, "FilterMap", "map debug names the type")?;
+        let map_alternate = format!("{map:#?}");
+        ensure_contains(&map_alternate, "bits", "alternate map debug includes raw bits")?;
+        let map_binary = format!("{map:b}");
+        ensure_contains(&map_binary, "bits", "binary map formatting includes raw bits")
+    }
+
+    #[test]
+    fn filter_state_combines_interests_and_consumes_disabled_callbacks() -> Result<(), TestFailure> {
+        let state = FilterState {
+            enabled: Cell::new(FilterMap::new()),
+            interest: RefCell::new(None),
+        };
+        state.add_interest(Interest::always());
+        {
+            let first_interest = *ensure_ok(state.interest.try_borrow(), "first interest borrow")?;
+            ensure(
+                first_interest.is_some_and(Interest::is_always),
+                "first interest is recorded exactly",
+            )
+        }?;
+        state.add_interest(Interest::never());
+        let combined_interest = *ensure_ok(state.interest.try_borrow(), "combined interest borrow")?;
+        ensure(
+            combined_interest.is_some_and(Interest::is_sometimes),
+            "conflicting interests become dynamic",
+        )?;
+
+        let filter = FilterId::new(0);
+        state.set(filter, false);
+        let mut callback_ran = false;
+        ensure_ok(
+            state.did_enable(filter, || {
+                callback_ran = true;
+                Ok(())
+            }),
+            "skipping disabled callback succeeds",
+        )?;
+        ensure(!callback_ran, "disabled filters do not run callbacks")?;
+        ensure(
+            state.filter_map().is_enabled(filter),
+            "consuming a disabled callback clears its filter bit",
+        )?;
+
+        let disabled = ensure_ok(state.and(filter, || Ok(false)), "second pass returns")?;
+        ensure(!disabled, "second pass can disable an enabled filter")?;
+        ensure(
+            !state.filter_map().is_enabled(filter),
+            "second pass disabling records the filter bit",
+        )?;
+
+        let mut skipped_second_pass = true;
+        let disabled_again = ensure_ok(
+            state.and(filter, || {
+                skipped_second_pass = false;
+                Ok(true)
+            }),
+            "second pass short-circuits disabled filters",
+        )?;
+        ensure(!disabled_again, "previously disabled filters stay disabled")?;
+        ensure(skipped_second_pass, "disabled filters skip later second-pass callbacks")?;
+
+        state.set(filter, true);
+        let enabled = ensure_ok(state.and(filter, || Ok(true)), "re-enabled second pass returns")?;
+        ensure(enabled, "re-enabled filters can pass the second pass")?;
+        ensure(
+            state.filter_map().is_enabled(filter),
+            "enabled second pass leaves the filter bit clear",
+        )
+    }
+
+    #[test]
+    fn thread_local_filter_state_reports_and_clears_global_disablement() -> Result<(), TestFailure> {
+        FILTERING.with(|filtering| {
+            filtering.enabled.set(FilterMap { bits: u64::MAX });
+        });
+        ensure(
+            !FilterState::event_enabled(),
+            "event_enabled reports false when every filter disabled the event",
+        )?;
+        FILTERING.with(|filtering| {
+            ensure(
+                filtering.enabled.get() == FilterMap::new(),
+                "global disablement clears the thread-local map",
+            )
+        })?;
+
+        FILTERING.with(|filtering| {
+            filtering.add_interest(Interest::sometimes());
+        });
+        let interest = ensure_some(
+            FilterState::take_interest(),
+            "thread-local interest is available to the registry",
+        )?;
+        ensure(interest.is_sometimes(), "thread-local interest is preserved")?;
+        ensure(
+            FilterState::take_interest().is_none(),
+            "taking thread-local interest consumes it",
+        )?;
+        FilterState::clear_enabled();
+        ensure(FilterState::event_enabled(), "cleared filter state enables later events")
+    }
+
+    #[test]
+    fn filtered_accessors_debug_and_downcast_expose_public_parts() -> Result<(), TestFailure> {
+        type TestFiltered = Filtered<AccessLayer, LevelFilter, registry::Registry>;
+
+        let mut filtered = TestFiltered::new(AccessLayer { name: "inner" }, LevelFilter::INFO);
+        ensure_eq(&filtered.inner().name, &"inner", "inner accessor exposes the layer")?;
+        ensure_eq(filtered.filter(), &LevelFilter::INFO, "filter accessor exposes the filter")?;
+        *filtered.filter_mut() = LevelFilter::WARN;
+        ensure_eq(filtered.filter(), &LevelFilter::WARN, "filter_mut updates the filter")?;
+        filtered.inner_mut().name = "changed";
+        ensure_eq(&filtered.inner().name, &"changed", "inner_mut updates the layer")?;
+
+        let debug = format!("{filtered:?}");
+        ensure_contains(&debug, "Filtered", "debug output names the wrapper")?;
+        ensure_contains(&debug, "filter", "debug output includes the filter")?;
+        ensure_contains(&debug, "layer", "debug output includes the inner layer")?;
+
+        ensure(
+            Layer::<registry::Registry>::downcast_ref_by_id(&filtered, TypeId::of::<TestFiltered>()).is_some(),
+            "filtered layer downcasts to its wrapper type",
+        )?;
+        ensure(
+            Layer::<registry::Registry>::downcast_ref_by_id(&filtered, TypeId::of::<AccessLayer>()).is_some(),
+            "filtered layer downcasts to the inner layer",
+        )?;
+        ensure(
+            Layer::<registry::Registry>::downcast_ref_by_id(&filtered, TypeId::of::<LevelFilter>()).is_some(),
+            "filtered layer downcasts to the filter",
+        )?;
+        ensure(
+            Layer::<registry::Registry>::downcast_ref_by_id(&filtered, TypeId::of::<MagicPlfDowncastMarker>())
+                .is_some(),
+            "filtered layer exposes the per-layer-filter marker",
+        )?;
+        ensure(
+            Layer::<registry::Registry>::downcast_ref_by_id(&filtered, TypeId::of::<usize>()).is_none(),
+            "unrelated downcasts are rejected",
+        )?;
+        ensure(
+            is_plf_downcast_marker(TypeId::of::<MagicPlfDowncastMarker>()),
+            "marker type ID is recognized",
+        )?;
+        ensure(
+            !is_plf_downcast_marker(TypeId::of::<AccessLayer>()),
+            "unrelated type ID is not treated as a marker",
+        )?;
+        ensure(
+            layer_has_plf::<_, registry::Registry>(&filtered),
+            "filtered layers are detected as having per-layer filtering",
+        )
+    }
+
+    #[test]
+    fn box_arc_and_some_option_filters_forward_to_inner_filter() -> Result<(), TestFailure> {
+        let boxed_calls = Arc::new(Mutex::new(Vec::new()));
+        let boxed: Box<dyn layer::Filter<registry::Registry> + Send + Sync> =
+            Box::new(RecordingFilter::new(Arc::clone(&boxed_calls)));
+        exercise_forwarding_filter(&boxed, &boxed_calls, "boxed filter forwards")?;
+
+        let arc_calls = Arc::new(Mutex::new(Vec::new()));
+        let arc: Arc<dyn layer::Filter<registry::Registry> + Send + Sync> =
+            Arc::new(RecordingFilter::new(Arc::clone(&arc_calls)));
+        exercise_forwarding_filter(&arc, &arc_calls, "arc filter forwards")?;
+
+        let option_calls = Arc::new(Mutex::new(Vec::new()));
+        let option = Some(RecordingFilter::new(Arc::clone(&option_calls)));
+        exercise_forwarding_filter(&option, &option_calls, "some option filter forwards")
+    }
+
+    #[test]
+    fn none_option_filter_allows_without_inner_filter() -> Result<(), TestFailure> {
+        let filter: Option<RecordingFilter> = None;
+        with_instrumentation_fixtures(|event, attrs, record, span_id| {
+            let context = Context::<registry::Registry>::none();
+            ensure(
+                ensure_ok(filter.enabled(&LAYER_FILTER_META, &context), "none option enabled")?,
+                "missing optional filters allow metadata",
+            )?;
+            ensure(
+                ensure_ok(
+                    layer::Filter::<registry::Registry>::callsite_enabled(&filter, &LAYER_FILTER_META),
+                    "none option interest",
+                )?
+                .is_always(),
+                "missing optional filters are always interested",
+            )?;
+            ensure(
+                ensure_ok(
+                    layer::Filter::<registry::Registry>::callsite_enabled(&filter, &LAYER_FILTER_META),
+                    "none option repeated interest",
+                )?
+                .is_always(),
+                "missing optional filters keep reporting always interest",
+            )?;
+            ensure(
+                ensure_ok(
+                    layer::Filter::<registry::Registry>::max_level_hint(&filter),
+                    "none option max level",
+                )?
+                .is_none(),
+                "missing optional filters do not report a max-level hint",
+            )?;
+            ensure(
+                ensure_ok(filter.event_enabled(event, &context), "none option event")?,
+                "missing optional filters allow events",
+            )?;
+            ensure_ok(filter.on_new_span(attrs, span_id, context.clone()), "none option span")?;
+            ensure_ok(filter.on_record(span_id, record, context.clone()), "none option record")?;
+            ensure_ok(filter.on_enter(span_id, context.clone()), "none option enter")?;
+            ensure_ok(filter.on_exit(span_id, context.clone()), "none option exit")?;
+            ensure_ok(filter.on_close(span_id, context), "none option close")
+        })
     }
 }

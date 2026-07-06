@@ -16,9 +16,6 @@ use tracing::Level;
 use tracing::field::Field;
 use tracing::field::Visit;
 use tracing::subscriber::with_default;
-use tracing::{
-  self,
-};
 use tracing_core::Subscriber;
 use tracing_core::span;
 use tracing_core::subscriber::SubscriberResult;
@@ -47,9 +44,9 @@ struct RecordedFields {
 }
 
 impl Visit for RecordedFields {
-  fn record_u64(&mut self, field: &Field, value: u64) {
+  fn record_u64(&mut self, field: &Field, field_value: u64) {
     if field.name() == "hello" {
-      self.hello = Some(value);
+      self.hello = Some(field_value);
     }
   }
 

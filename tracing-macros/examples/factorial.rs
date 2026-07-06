@@ -2,10 +2,8 @@
 #![deny(rust_2018_idioms)]
 
 use tracing::Level;
+use tracing::subscriber;
 use tracing::subscriber::SetGlobalDefaultError;
-use tracing::subscriber::{
-  self,
-};
 use tracing_macros::dbg;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::fmt;

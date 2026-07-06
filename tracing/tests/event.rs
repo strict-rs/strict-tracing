@@ -23,9 +23,9 @@ mod tests {
   use tracing::field::debug;
   use tracing::field::display;
   use tracing::info;
+  use tracing::level_filters::STATIC_MAX_LEVEL;
   use tracing::subscriber::with_default;
   use tracing::trace;
-  use tracing::warn;
   use tracing_mock::*;
 
   macro_rules! event_without_message {
@@ -34,14 +34,16 @@ mod tests {
       #[test]
       fn $name() -> Result<(), TestFailure> {
         let (subscriber, handle) = subscriber::mock()
-          .event(
-            expect::event().with_fields(
-              expect::field("answer")
-                .with_value(&42)
-                .and(expect::field("to_question").with_value(&"life, the universe, and everything"))
-                .only(),
-            ),
-          )
+          .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
+            builder.event(
+              expect::event().with_fields(
+                expect::field("answer")
+                  .with_value(&42)
+                  .and(expect::field("to_question").with_value(&"life, the universe, and everything"))
+                  .only(),
+              ),
+            )
+          })
           .only()
           .run_with_handle();
 
@@ -69,9 +71,11 @@ mod tests {
   #[test]
   fn event_with_message() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .event(expect::event().with_fields(
-        expect::field("message").with_value(&debug_value(format_args!("hello from my tracing::event! yak shaved = {:?}", true))),
-      ))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::DEBUG), |builder| {
+        builder.event(expect::event().with_fields(
+          expect::field("message").with_value(&debug_value(format_args!("hello from my tracing::event! yak shaved = {:?}", true))),
+        ))
+      })
       .only()
       .run_with_handle();
 
@@ -87,15 +91,17 @@ mod tests {
   #[test]
   fn message_without_delims() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .event(
-        expect::event().with_fields(
-          expect::field("answer")
-            .with_value(&42)
-            .and(expect::field("question").with_value(&"life, the universe, and everything"))
-            .and(expect::msg(format_args!("hello from my event! tricky? {:?}!", true)))
-            .only(),
-        ),
-      )
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::DEBUG), |builder| {
+        builder.event(
+          expect::event().with_fields(
+            expect::field("answer")
+              .with_value(&42)
+              .and(expect::field("question").with_value(&"life, the universe, and everything"))
+              .and(expect::msg(format_args!("hello from my event! tricky? {:?}!", true)))
+              .only(),
+          ),
+        )
+      })
       .only()
       .run_with_handle();
 
@@ -112,15 +118,17 @@ mod tests {
   #[test]
   fn string_message_without_delims() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .event(
-        expect::event().with_fields(
-          expect::field("answer")
-            .with_value(&42)
-            .and(expect::field("question").with_value(&"life, the universe, and everything"))
-            .and(expect::msg(format_args!("hello from my event")))
-            .only(),
-        ),
-      )
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::DEBUG), |builder| {
+        builder.event(
+          expect::event().with_fields(
+            expect::field("answer")
+              .with_value(&42)
+              .and(expect::field("question").with_value(&"life, the universe, and everything"))
+              .and(expect::msg(format_args!("hello from my event")))
+              .only(),
+          ),
+        )
+      })
       .only()
       .run_with_handle();
 
@@ -137,23 +145,25 @@ mod tests {
   #[test]
   fn one_with_everything() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .event(
-        expect::event()
-          .with_fields(
-            expect::field("message")
-              .with_value(&debug_value(format_args!(
-                "{:#x} make me one with{what:.>20}",
-                4_277_009_102_u64,
-                what = "everything"
-              )))
-              .and(expect::field("foo").with_value(&666))
-              .and(expect::field("bar").with_value(&false))
-              .and(expect::field("like_a_butterfly").with_value(&42.0))
-              .only(),
-          )
-          .at_level(Level::ERROR)
-          .with_target("whatever"),
-      )
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::ERROR), |builder| {
+        builder.event(
+          expect::event()
+            .with_fields(
+              expect::field("message")
+                .with_value(&debug_value(format_args!(
+                  "{:#x} make me one with{what:.>20}",
+                  4_277_009_102_u64,
+                  what = "everything"
+                )))
+                .and(expect::field("foo").with_value(&666))
+                .and(expect::field("bar").with_value(&false))
+                .and(expect::field("like_a_butterfly").with_value(&42.0))
+                .only(),
+            )
+            .at_level(Level::ERROR)
+            .with_target("whatever"),
+        )
+      })
       .only()
       .run_with_handle();
 
@@ -174,7 +184,9 @@ mod tests {
   #[test]
   fn moved_field() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .event(expect::event().with_fields(expect::field("foo").with_value(&display("hello from my event")).only()))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
+        builder.event(expect::event().with_fields(expect::field("foo").with_value(&display("hello from my event")).only()))
+      })
       .only()
       .run_with_handle();
     with_default(subscriber, || {
@@ -190,14 +202,16 @@ mod tests {
   #[test]
   fn dotted_field_name() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .event(
-        expect::event().with_fields(
-          expect::field("foo.bar")
-            .with_value(&true)
-            .and(expect::field("foo.baz").with_value(&false))
-            .only(),
-        ),
-      )
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
+        builder.event(
+          expect::event().with_fields(
+            expect::field("foo.bar")
+              .with_value(&true)
+              .and(expect::field("foo.baz").with_value(&false))
+              .only(),
+          ),
+        )
+      })
       .only()
       .run_with_handle();
     with_default(subscriber, || {
@@ -212,7 +226,9 @@ mod tests {
   #[test]
   fn borrowed_field() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .event(expect::event().with_fields(expect::field("foo").with_value(&display("hello from my event")).only()))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
+        builder.event(expect::event().with_fields(expect::field("foo").with_value(&display("hello from my event")).only()))
+      })
       .only()
       .run_with_handle();
     with_default(subscriber, || {
@@ -243,15 +259,18 @@ mod tests {
       x: 3.234, y: -1.223
     };
     let (subscriber, handle) = subscriber::mock()
-      .event(
-        expect::event().with_fields(
-          expect::field("x")
-            .with_value(&debug(3.234))
-            .and(expect::field("y").with_value(&debug(-1.223)))
-            .only(),
-        ),
-      )
-      .event(expect::event().with_fields(expect::field("position").with_value(&debug(&expected_pos))))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::DEBUG), |builder| {
+        builder
+          .event(
+            expect::event().with_fields(
+              expect::field("x")
+                .with_value(&debug(3.234))
+                .and(expect::field("y").with_value(&debug(-1.223)))
+                .only(),
+            ),
+          )
+          .event(expect::event().with_fields(expect::field("position").with_value(&debug(&expected_pos))))
+      })
       .only()
       .run_with_handle();
 
@@ -270,7 +289,9 @@ mod tests {
   #[test]
   fn display_shorthand() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .event(expect::event().with_fields(expect::field("my_field").with_value(&display("hello world")).only()))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder.event(expect::event().with_fields(expect::field("my_field").with_value(&display("hello world")).only()))
+      })
       .only()
       .run_with_handle();
     with_default(subscriber, || {
@@ -285,7 +306,9 @@ mod tests {
   #[test]
   fn debug_shorthand() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .event(expect::event().with_fields(expect::field("my_field").with_value(&debug("hello world")).only()))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder.event(expect::event().with_fields(expect::field("my_field").with_value(&debug("hello world")).only()))
+      })
       .only()
       .run_with_handle();
     with_default(subscriber, || {
@@ -300,14 +323,16 @@ mod tests {
   #[test]
   fn both_shorthands() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .event(
-        expect::event().with_fields(
-          expect::field("display_field")
-            .with_value(&display("hello world"))
-            .and(expect::field("debug_field").with_value(&debug("hello world")))
-            .only(),
-        ),
-      )
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder.event(
+          expect::event().with_fields(
+            expect::field("display_field")
+              .with_value(&display("hello world"))
+              .and(expect::field("debug_field").with_value(&debug("hello world")))
+              .only(),
+          ),
+        )
+      })
       .only()
       .run_with_handle();
     with_default(subscriber, || {
@@ -318,6 +343,17 @@ mod tests {
     Ok(())
   }
 
+  // The event carries `parent: foo.id()`, but `foo` is a TRACE span and the
+  // event is itself TRACE; a `max_level_*` cap that disables TRACE compiles both
+  // out, so the explicit-parent scenario cannot run. Gate the whole test on
+  // TRACE remaining statically enabled.
+  #[cfg(not(any(
+    feature = "max_level_off",
+    feature = "max_level_error",
+    feature = "max_level_warn",
+    feature = "max_level_info",
+    feature = "max_level_debug"
+  )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
   fn explicit_child() -> Result<(), TestFailure> {
@@ -336,9 +372,25 @@ mod tests {
     Ok(())
   }
 
+  // `foo` is a TRACE parent span while the five child events span TRACE..ERROR.
+  // Under a cap that disables TRACE (but not the higher child levels), `foo` is
+  // compiled out, so `foo.id()` is `None` and the surviving events become roots
+  // instead of explicit children of `foo` — a shape and subset change. Gate the
+  // whole test on TRACE remaining statically enabled.
+  #[cfg(not(any(
+    feature = "max_level_off",
+    feature = "max_level_error",
+    feature = "max_level_warn",
+    feature = "max_level_info",
+    feature = "max_level_debug"
+  )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
   fn explicit_child_at_levels() -> Result<(), TestFailure> {
+    // `warn!` is used only here; keep its import inside this cfg-gated test so a
+    // `max_level_*` cap that removes the test does not orphan the import.
+    use tracing::warn;
+
     let (subscriber, handle) = subscriber::mock()
       .new_span(expect::span().named("foo"))
       .event(expect::event().with_ancestry(expect::has_explicit_parent("foo")))
@@ -366,15 +418,17 @@ mod tests {
   #[test]
   fn option_values() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .event(
-        expect::event().with_fields(
-          expect::field("some_str")
-            .with_value(&"yes")
-            .and(expect::field("some_bool").with_value(&true))
-            .and(expect::field("some_u64").with_value(&42_u64))
-            .only(),
-        ),
-      )
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder.event(
+          expect::event().with_fields(
+            expect::field("some_str")
+              .with_value(&"yes")
+              .and(expect::field("some_bool").with_value(&true))
+              .and(expect::field("some_u64").with_value(&42_u64))
+              .only(),
+          ),
+        )
+      })
       .only()
       .run_with_handle();
 
@@ -403,15 +457,17 @@ mod tests {
   #[test]
   fn option_ref_values() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .event(
-        expect::event().with_fields(
-          expect::field("some_str")
-            .with_value(&"yes")
-            .and(expect::field("some_bool").with_value(&true))
-            .and(expect::field("some_u64").with_value(&42_u64))
-            .only(),
-        ),
-      )
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder.event(
+          expect::event().with_fields(
+            expect::field("some_str")
+              .with_value(&"yes")
+              .and(expect::field("some_bool").with_value(&true))
+              .and(expect::field("some_u64").with_value(&42_u64))
+              .only(),
+          ),
+        )
+      })
       .only()
       .run_with_handle();
 
@@ -440,15 +496,17 @@ mod tests {
   #[test]
   fn option_ref_mut_values() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .event(
-        expect::event().with_fields(
-          expect::field("some_str")
-            .with_value(&"yes")
-            .and(expect::field("some_bool").with_value(&true))
-            .and(expect::field("some_u64").with_value(&42_u64))
-            .only(),
-        ),
-      )
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder.event(
+          expect::event().with_fields(
+            expect::field("some_str")
+              .with_value(&"yes")
+              .and(expect::field("some_bool").with_value(&true))
+              .and(expect::field("some_u64").with_value(&42_u64))
+              .only(),
+          ),
+        )
+      })
       .only()
       .run_with_handle();
 
@@ -477,8 +535,11 @@ mod tests {
   #[test]
   fn string_field() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .event(expect::event().with_fields(expect::field("my_string").with_value(&"hello").only()))
-      .event(expect::event().with_fields(expect::field("my_string").with_value(&"hello world!").only()))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
+        builder
+          .event(expect::event().with_fields(expect::field("my_string").with_value(&"hello").only()))
+          .event(expect::event().with_fields(expect::field("my_string").with_value(&"hello world!").only()))
+      })
       .only()
       .run_with_handle();
     with_default(subscriber, || {
@@ -496,32 +557,8 @@ mod tests {
     Ok(())
   }
 
-  #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
-  #[test]
-  fn constant_field_name() -> Result<(), TestFailure> {
-    let expect_event = || {
-      expect::event().with_fields(
-        expect::field("foo")
-          .with_value(&"bar")
-          .and(expect::field("constant string").with_value(&"also works"))
-          .and(expect::field("foo.bar").with_value(&"baz"))
-          .and(expect::field("message").with_value(&debug(format_args!("quux"))))
-          .only(),
-      )
-    };
-    let (subscriber, handle) = subscriber::mock()
-      .event(expect_event())
-      .event(expect_event())
-      .event(expect_event())
-      .event(expect_event())
-      .event(expect_event())
-      .event(expect_event())
-      .event(expect_event())
-      .event(expect_event())
-      .only()
-      .run_with_handle();
-
-    with_default(subscriber, || {
+  macro_rules! emit_constant_field_name_events {
+    () => {{
       const FOO: &str = "foo";
       tracing::event!(
         Level::INFO,
@@ -587,6 +624,39 @@ mod tests {
           "{}",
           "quux"
       );
+    }};
+  }
+
+  #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+  #[test]
+  fn constant_field_name() -> Result<(), TestFailure> {
+    let expect_event = || {
+      expect::event().with_fields(
+        expect::field("foo")
+          .with_value(&"bar")
+          .and(expect::field("constant string").with_value(&"also works"))
+          .and(expect::field("foo.bar").with_value(&"baz"))
+          .and(expect::field("message").with_value(&debug(format_args!("quux"))))
+          .only(),
+      )
+    };
+    let (subscriber, handle) = subscriber::mock()
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
+        builder
+          .event(expect_event())
+          .event(expect_event())
+          .event(expect_event())
+          .event(expect_event())
+          .event(expect_event())
+          .event(expect_event())
+          .event(expect_event())
+          .event(expect_event())
+      })
+      .only()
+      .run_with_handle();
+
+    with_default(subscriber, || {
+      emit_constant_field_name_events!();
     });
 
     ensure_ok(handle.finished(), "mock expectations should finish")?;
@@ -597,7 +667,9 @@ mod tests {
   #[test]
   fn keyword_ident_in_field_name() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .event(expect::event().with_fields(expect::field("crate").with_value(&"tracing")))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::ERROR), |builder| {
+        builder.event(expect::event().with_fields(expect::field("crate").with_value(&"tracing")))
+      })
       .only()
       .run_with_handle();
 
@@ -610,7 +682,9 @@ mod tests {
   #[test]
   fn raw_ident_in_field_name() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .event(expect::event().with_fields(expect::field("this.type").with_value(&"Value")))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::ERROR), |builder| {
+        builder.event(expect::event().with_fields(expect::field("this.type").with_value(&"Value")))
+      })
       .only()
       .run_with_handle();
 

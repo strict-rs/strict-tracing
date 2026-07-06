@@ -4,11 +4,9 @@
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
+use std::io;
 use std::io::Write as _;
 use std::io::stdout;
-use std::io::{
-  self,
-};
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::AtomicUsize;
@@ -23,11 +21,9 @@ use tracing::field::Field;
 use tracing::field::Visit;
 use tracing::info;
 use tracing::span;
+use tracing::subscriber;
 use tracing::subscriber::Subscriber;
 use tracing::subscriber::SubscriberResult;
-use tracing::subscriber::{
-  self,
-};
 use tracing::warn;
 
 /// Shared counters keyed by tracing field name.
@@ -49,24 +45,27 @@ struct Count<'a> {
 }
 
 impl Visit for Count<'_> {
-  fn record_i64(&mut self, field: &Field, value: i64) {
-    if let Some(counter) = self.counters.get(field.name()) {
-      if let Ok(amount) = usize::try_from(value) {
-        let _previous = counter.fetch_add(amount, Ordering::Release);
-      } else {
-        let magnitude = value.unsigned_abs();
-        if let Ok(checked_amount) = usize::try_from(magnitude) {
-          let _previous = counter.fetch_sub(checked_amount, Ordering::Release);
-        }
-      }
+  fn record_i64(&mut self, field: &Field, field_value: i64) {
+    let Some(counter) = self.counters.get(field.name()) else {
+      return;
+    };
+
+    if let Ok(increment) = usize::try_from(field_value) {
+      let _previous = counter.fetch_add(increment, Ordering::Release);
+      return;
+    }
+
+    let magnitude = field_value.unsigned_abs();
+    if let Ok(decrement) = usize::try_from(magnitude) {
+      let _previous = counter.fetch_sub(decrement, Ordering::Release);
     }
   }
 
-  fn record_u64(&mut self, field: &Field, value: u64) {
+  fn record_u64(&mut self, field: &Field, field_value: u64) {
     if let Some(counter) = self.counters.get(field.name())
-      && let Ok(amount) = usize::try_from(value)
+      && let Ok(increment) = usize::try_from(field_value)
     {
-      let _previous = counter.fetch_add(amount, Ordering::Release);
+      let _previous = counter.fetch_add(increment, Ordering::Release);
     }
   }
 
@@ -203,11 +202,11 @@ fn main() -> Result<(), Box<dyn Error>> {
 
   subscriber::set_global_default(subscriber)?;
 
-  let mut foo: u64 = 2;
-  span!(Level::TRACE, "my_great_span", foo_count = &foo).in_scope(|| {
-    foo = foo.saturating_add(1);
+  let mut foo_count: u64 = 2;
+  span!(Level::TRACE, "my_great_span", foo_count = &foo_count).in_scope(|| {
+    foo_count = foo_count.saturating_add(1);
     info!(yak_shaved = true, yak_count = 1, "hi from inside my span");
-    span!(Level::TRACE, "my other span", foo_count = &foo, baz_count = 5).in_scope(|| {
+    span!(Level::TRACE, "my other span", foo_count = &foo_count, baz_count = 5).in_scope(|| {
       warn!(yak_shaved = false, yak_count = -1, "failed to shave yak");
     });
   });

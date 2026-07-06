@@ -440,3 +440,115 @@ impl fmt::Display for Expect {
     }
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_contains;
+  use strict_test_support::ensure_some;
+
+  use super::Expect;
+  use crate::expect;
+
+  #[test]
+  fn clone_and_close_span_accessors_only_accept_matching_expectations() -> Result<(), TestFailure> {
+    let copied_reference = Expect::CloneSpan(expect::span().named("cloned_span"));
+    let lifecycle_end = Expect::CloseSpan(expect::span().named("closed_span"));
+    let event = Expect::Event(expect::event());
+
+    ensure(
+      copied_reference.clone_span().is_some(),
+      "clone-span accessor exposes clone expectations",
+    )?;
+    ensure(
+      copied_reference.close_span().is_none(),
+      "clone-span accessor rejects close expectations",
+    )?;
+    ensure(
+      lifecycle_end.close_span().is_some(),
+      "close-span accessor exposes close expectations",
+    )?;
+    ensure(
+      lifecycle_end.clone_span().is_none(),
+      "close-span accessor rejects clone expectations",
+    )?;
+    ensure(event.clone_span().is_none(), "clone-span accessor rejects event expectations")?;
+    ensure(event.close_span().is_none(), "close-span accessor rejects event expectations")
+  }
+
+  #[test]
+  fn display_and_mismatch_messages_describe_every_expectation_variant() -> Result<(), TestFailure> {
+    ensure_expectation_text(
+      &Expect::Event(expect::event().with_fields(expect::field("message").with_value(&"event message"))),
+      &["event"],
+      &["expected event", "but instead observed replacement"],
+    )?;
+    ensure_expectation_text(
+      &Expect::FollowsFrom {
+        consequence: expect::span().named("consequence_span"),
+        cause:       expect::span().named("cause_span"),
+      },
+      &["consequence", "consequence_span", "follow cause", "cause_span"],
+      &["expected consequence", "consequence_span", "cause_span", "observed replacement"],
+    )?;
+    ensure_expectation_text(&Expect::Enter(expect::span().named("entered_span")), &["enter", "entered_span"], &[
+      "expected to enter", "entered_span", "observed replacement",
+    ])?;
+    ensure_expectation_text(&Expect::Exit(expect::span().named("exited_span")), &["exit", "exited_span"], &[
+      "expected to exit", "exited_span", "observed replacement",
+    ])?;
+    ensure_expectation_text(
+      &Expect::CloneSpan(expect::span().named("cloned_span")),
+      &["clone", "cloned_span"],
+      &["expected to clone", "cloned_span", "observed replacement"],
+    )?;
+    ensure_expectation_text(
+      &Expect::CloseSpan(expect::span().named("closed_span")),
+      &["close", "closed_span"],
+      &["expected to close", "closed_span", "observed replacement"],
+    )?;
+    ensure_expectation_text(
+      &Expect::Visit(
+        expect::span().named("recorded_span"),
+        expect::field("answer").with_value(&42_i64).into(),
+      ),
+      &["recorded_span", "record", "answer"],
+      &["expected", "recorded_span", "record", "answer", "observed replacement"],
+    )?;
+    ensure_expectation_text(
+      &Expect::NewSpan(
+        expect::span()
+          .named("new_span")
+          .with_fields(expect::field("mode").with_value(&"fast")),
+      ),
+      &["new_span", "mode"],
+      &["expected", "new_span", "observed replacement"],
+    )?;
+    ensure_expectation_text(&Expect::OnRegisterDispatch, &["on_register_dispatch"], &[
+      "expected on_register_dispatch",
+      "observed replacement",
+    ])?;
+    ensure_expectation_text(&Expect::Nothing, &["nothing else"], &[
+      "expected nothing else", "observed replacement",
+    ])
+  }
+
+  fn ensure_expectation_text(expectation: &Expect, display_fragments: &[&str], error_fragments: &[&str]) -> Result<(), TestFailure> {
+    let display = format!("{expectation}");
+    for fragment in display_fragments {
+      ensure_contains(&display, fragment, "expectation display includes configured fragment")?;
+    }
+
+    let expectation_error = ensure_some(
+      expectation.bad("expect-tests", format_args!("observed replacement")).err(),
+      "mismatch helper returns an error",
+    )?;
+    let rendered_error = expectation_error.to_string();
+    for fragment in error_fragments {
+      ensure_contains(&rendered_error, fragment, "mismatch error includes configured fragment")?;
+    }
+
+    Ok(())
+  }
+}

@@ -639,3 +639,80 @@ impl fmt::Debug for ExpectedEvent {
     debug.finish()
   }
 }
+
+#[cfg(test)]
+mod tests {
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_ok;
+  use tracing::subscriber::with_default;
+
+  use crate::ancestry::ExpectedAncestry;
+  use crate::expect;
+  use crate::subscriber;
+
+  #[test]
+  fn event_metadata_and_fields_accept_matching_event() -> Result<(), TestFailure> {
+    let event = expect::event()
+      .with_target("mock_event_target")
+      .at_level(tracing::Level::INFO)
+      .with_fields(expect::field("answer").with_value(&42_i64));
+    let (subscriber, handle) = subscriber::mock().event(event).only().run_with_handle();
+
+    with_default(subscriber, || {
+      tracing::info!(target: "mock_event_target", answer = 42_i64, "event metadata and fields match");
+    });
+
+    ensure_ok(handle.finished(), "matching event metadata and fields finish cleanly")
+  }
+
+  #[test]
+  fn event_metadata_mismatch_is_reported_by_finished() -> Result<(), TestFailure> {
+    let event = expect::event().at_level(tracing::Level::WARN);
+    let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
+
+    with_default(subscriber, || {
+      tracing::info!("event level does not match");
+    });
+
+    ensure(handle.finished().is_err(), "event level mismatch is reported")
+  }
+
+  #[test]
+  fn event_contextual_parent_ancestry_matches_entered_span() -> Result<(), TestFailure> {
+    let event = expect::event().with_ancestry(ExpectedAncestry::HasContextualParent(expect::span().named("parent_span")));
+    let (subscriber, handle) = subscriber::mock()
+      .new_span("parent_span")
+      .enter("parent_span")
+      .event(event)
+      .exit("parent_span")
+      .only()
+      .run_with_handle();
+
+    with_default(subscriber, || {
+      let parent_span = tracing::info_span!("parent_span");
+      let _guard = parent_span.enter();
+      tracing::info!("inside parent");
+    });
+
+    ensure_ok(handle.finished(), "event ancestry matches the contextual parent span")
+  }
+
+  #[test]
+  fn event_ancestry_mismatch_is_reported_by_finished() -> Result<(), TestFailure> {
+    let event = expect::event().with_ancestry(ExpectedAncestry::IsContextualRoot);
+    let (subscriber, handle) = subscriber::mock()
+      .new_span("parent_span")
+      .enter("parent_span")
+      .event(event)
+      .run_with_handle();
+
+    with_default(subscriber, || {
+      let parent_span = tracing::info_span!("parent_span");
+      let _guard = parent_span.enter();
+      tracing::info!("inside parent");
+    });
+
+    ensure(handle.finished().is_err(), "event ancestry mismatch is reported")
+  }
+}

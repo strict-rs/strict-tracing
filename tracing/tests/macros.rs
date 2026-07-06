@@ -14,11 +14,9 @@ mod tests {
   use ::core::option::Option;
   use ::core::result::Result;
   use ::std::convert::From as _;
+  use ::std::fmt;
   use ::std::fmt::Display;
   use ::std::fmt::Formatter;
-  use ::std::fmt::{
-    self,
-  };
   use ::std::string::String;
   use ::std::write;
   use strict_test_support::TestFailure;

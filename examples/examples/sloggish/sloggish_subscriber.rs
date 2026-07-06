@@ -13,10 +13,8 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt;
+use std::io;
 use std::io::Write;
-use std::io::{
-  self,
-};
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::thread;
@@ -192,8 +190,8 @@ impl fmt::Display for DebugValue<'_> {
 }
 
 impl Visit for Span {
-  fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-    let rendered_value = format!("{}", DebugValue(value));
+  fn record_debug(&mut self, field: &Field, field_value: &dyn fmt::Debug) {
+    let rendered_value = format!("{}", DebugValue(field_value));
     self.fields.push(SpanField {
       name:  field.name(),
       value: rendered_value,
@@ -237,8 +235,8 @@ impl EventFields<'_> {
 }
 
 impl Visit for EventFields<'_> {
-  fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-    self.record_display(field, DebugValue(value));
+  fn record_debug(&mut self, field: &Field, field_value: &dyn fmt::Debug) {
+    self.record_display(field, DebugValue(field_value));
   }
 }
 
@@ -366,17 +364,11 @@ impl Subscriber for SloggishSubscriber {
       let plan = if visual_stack.contains(&span_id) {
         None
       } else {
-        let indent_level = if let Some(parent_position) = visual_stack
+        let indent_level = visual_stack
           .iter()
           .position(|active_id| maybe_parent.is_some_and(|parent_id| *active_id == parent_id))
-        {
-          let retained_len = parent_position.saturating_add(1);
-          visual_stack.truncate(retained_len);
-          retained_len
-        } else {
-          visual_stack.clear();
-          0
-        };
+          .map_or(0, |parent_position| parent_position.saturating_add(1));
+        visual_stack.truncate(indent_level);
         visual_stack.push(span_id);
         Some(SpanPrintPlan {
           indent_level,

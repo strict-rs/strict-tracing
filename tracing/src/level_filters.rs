@@ -124,7 +124,7 @@ const fn select_max_level(
   off: FeatureState,
   error: FeatureState,
   warn: FeatureState,
-  info: FeatureState,
+  info_feature: FeatureState,
   debug: FeatureState,
   trace: FeatureState,
 ) -> LevelFilter {
@@ -132,7 +132,7 @@ const fn select_max_level(
     LevelFilter::TRACE
   } else if debug.is_enabled() {
     LevelFilter::DEBUG
-  } else if info.is_enabled() {
+  } else if info_feature.is_enabled() {
     LevelFilter::INFO
   } else if warn.is_enabled() {
     LevelFilter::WARN

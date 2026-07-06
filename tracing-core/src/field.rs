@@ -40,10 +40,12 @@
 //!
 //! To address `Value`'s limitations, `tracing` offers experimental support for
 //! the [`valuable`] crate, which provides object-safe inspection of structured
-//! values. User-defined types can implement the [`valuable::Valuable`] trait,
-//! and be recorded as a `tracing` field by calling their [`as_value`] method.
-//! If the [`Subscriber`] also supports the `valuable` crate, it can
-//! then visit those types fields as structured values using `valuable`.
+//! values. User-defined types can implement the `valuable::Valuable` trait,
+//! and be recorded as a `tracing` field by calling their `as_value` method.
+//! If the `Subscriber` also supports the `valuable` crate, it can
+//! then visit those types fields as structured values using `valuable`. The
+//! `valuable` integration is available only with the unstable `valuable`
+//! feature.
 //!
 //! <pre class="ignore" style="white-space:normal;font:inherit;">
 //!     <strong>Note</strong>: <code>valuable</code> support is an
@@ -85,19 +87,16 @@
 //! tracing::info!(current_user = user.as_value());
 //! ```
 //!
-//! Alternatively, the [`valuable()`] function may be used to convert a type
-//! implementing [`Valuable`] into a `tracing` field value.
+//! Alternatively, the `valuable()` function may be used to convert a type
+//! implementing `Valuable` into a `tracing` field value.
 //!
 //! When the `valuable` feature is enabled, the [`Visit`] trait will include an
-//! optional [`record_value`] method. `Visit` implementations that wish to
+//! optional `record_value` method. `Visit` implementations that wish to
 //! record `valuable` values can implement this method with custom behavior.
-//! If a visitor does not implement `record_value`, the [`valuable::Value`] will
+//! If a visitor does not implement `record_value`, the `valuable::Value` will
 //! be forwarded to the visitor's [`record_debug`] method.
 //!
 //! [`valuable`]: https://crates.io/crates/valuable
-//! [`as_value`]: valuable::Valuable::as_value
-//! [`Subscriber`]: crate::Subscriber
-//! [`record_value`]: Visit::record_value
 //! [`record_debug`]: Visit::record_debug
 //!
 //! [span]: super::span
@@ -114,10 +113,8 @@ use alloc::boxed::Box;
 use alloc::string::String;
 use core::borrow::Borrow;
 use core::convert::identity;
+use core::fmt;
 use core::fmt::Write as _;
-use core::fmt::{
-  self,
-};
 use core::hash::Hash;
 use core::hash::Hasher;
 use core::num::Wrapping;
@@ -131,6 +128,7 @@ use crate::callsite;
 use crate::metadata::Kind;
 use crate::metadata::Level;
 use crate::metadata::Metadata;
+use crate::metadata::SourceLocation;
 use crate::sealed::Sealed;
 use crate::subscriber::Interest;
 
@@ -186,11 +184,14 @@ pub struct ValueSet<'a> {
   fields: &'a FieldSet,
 }
 
+/// Pairs a [`Field`] with its optionally-recorded [`Value`].
+type FieldValuePair<'a> = (&'a Field, Option<&'a (dyn Value + 'a)>);
+
 /// Storage strategy for values associated with a field set.
 enum Values<'a> {
   /// A set of field-value pairs. Fields may be for the wrong field set, some
   /// fields may be missing, and fields may be in any order.
-  Explicit(&'a [(&'a Field, Option<&'a (dyn Value + 'a)>)]),
+  Explicit(&'a [FieldValuePair<'a>]),
   /// A list of values corresponding exactly to the fields in a `FieldSet`.
   All(&'a [Option<&'a (dyn Value + 'a)>]),
 }
@@ -222,10 +223,8 @@ pub struct Iter {
 /// A simple visitor that writes to a string might be implemented like so:
 /// ```
 /// # extern crate tracing_core as tracing;
+/// use std::fmt;
 /// use std::fmt::Write;
-/// use std::fmt::{
-///   self,
-/// };
 ///
 /// use tracing::field::Field;
 /// use tracing::field::Value;
@@ -235,8 +234,8 @@ pub struct Iter {
 /// }
 ///
 /// impl<'a> Visit for StringVisitor<'a> {
-///   fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-///     let _ignored = write!(self.string, "{} = {:?}; ", field.name(), value);
+///   fn record_debug(&mut self, field: &Field, field_value: &dyn fmt::Debug) {
+///     let _ignored = write!(self.string, "{} = {:?}; ", field.name(), field_value);
 ///   }
 /// }
 /// ```
@@ -266,15 +265,15 @@ pub struct Iter {
 /// }
 ///
 /// impl Visit for SumVisitor {
-///   fn record_i64(&mut self, _field: &Field, value: i64) {
-///     self.sum += value;
+///   fn record_i64(&mut self, _field: &Field, field_value: i64) {
+///     self.sum += field_value;
 ///   }
 ///
-///   fn record_u64(&mut self, _field: &Field, value: u64) {
-///     self.sum += value as i64;
+///   fn record_u64(&mut self, _field: &Field, field_value: u64) {
+///     self.sum += field_value as i64;
 ///   }
 ///
-///   fn record_debug(&mut self, _field: &Field, _value: &dyn fmt::Debug) {
+///   fn record_debug(&mut self, _field: &Field, _field_value: &dyn fmt::Debug) {
 ///     // Do nothing
 ///   }
 /// }
@@ -304,48 +303,48 @@ pub trait Visit {
   /// [`valuable`]: https://docs.rs/valuable
   #[cfg(all(tracing_unstable, feature = "valuable"))]
   #[cfg_attr(docsrs, doc(cfg(all(tracing_unstable, feature = "valuable"))))]
-  fn record_value(&mut self, field: &Field, value: valuable::Value<'_>) {
-    self.record_debug(field, &value)
+  fn record_value(&mut self, field: &Field, field_value: valuable::Value<'_>) {
+    self.record_debug(field, &field_value)
   }
 
   /// Visit a double-precision floating point value.
-  fn record_f64(&mut self, field: &Field, value: f64) {
-    self.record_debug(field, &value);
+  fn record_f64(&mut self, field: &Field, field_value: f64) {
+    self.record_debug(field, &field_value);
   }
 
   /// Visit a signed 64-bit integer value.
-  fn record_i64(&mut self, field: &Field, value: i64) {
-    self.record_debug(field, &value);
+  fn record_i64(&mut self, field: &Field, field_value: i64) {
+    self.record_debug(field, &field_value);
   }
 
   /// Visit an unsigned 64-bit integer value.
-  fn record_u64(&mut self, field: &Field, value: u64) {
-    self.record_debug(field, &value);
+  fn record_u64(&mut self, field: &Field, field_value: u64) {
+    self.record_debug(field, &field_value);
   }
 
   /// Visit a signed 128-bit integer value.
-  fn record_i128(&mut self, field: &Field, value: i128) {
-    self.record_debug(field, &value);
+  fn record_i128(&mut self, field: &Field, field_value: i128) {
+    self.record_debug(field, &field_value);
   }
 
   /// Visit an unsigned 128-bit integer value.
-  fn record_u128(&mut self, field: &Field, value: u128) {
-    self.record_debug(field, &value);
+  fn record_u128(&mut self, field: &Field, field_value: u128) {
+    self.record_debug(field, &field_value);
   }
 
   /// Visit a boolean value.
-  fn record_bool(&mut self, field: &Field, value: bool) {
-    self.record_debug(field, &value);
+  fn record_bool(&mut self, field: &Field, field_value: bool) {
+    self.record_debug(field, &field_value);
   }
 
   /// Visit a string value.
-  fn record_str(&mut self, field: &Field, value: &str) {
-    self.record_debug(field, &value);
+  fn record_str(&mut self, field: &Field, field_value: &str) {
+    self.record_debug(field, &field_value);
   }
 
   /// Visit a byte slice.
-  fn record_bytes(&mut self, field: &Field, value: &[u8]) {
-    self.record_debug(field, &HexBytes(value));
+  fn record_bytes(&mut self, field: &Field, field_value: &[u8]) {
+    self.record_debug(field, &HexBytes(field_value));
   }
 
   /// Records a type implementing `Error`.
@@ -358,12 +357,12 @@ pub trait Visit {
   /// </div>
   #[cfg(feature = "std")]
   #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
-  fn record_error(&mut self, field: &Field, value: &(dyn Error + 'static)) {
-    self.record_debug(field, &DisplayValue(value));
+  fn record_error(&mut self, field: &Field, field_value: &(dyn Error + 'static)) {
+    self.record_debug(field, &DisplayValue(field_value));
   }
 
   /// Visit a value implementing `fmt::Debug`.
-  fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug);
+  fn record_debug(&mut self, field: &Field, field_value: &dyn fmt::Debug);
 }
 
 /// A field value of an erased type.
@@ -395,20 +394,20 @@ pub struct DebugValue<T: fmt::Debug>(T);
   clippy::single_call_fn,
   reason = "public field wrapper is used directly by tracing macros and downstream instrumentation"
 )]
-pub const fn display<T>(value: T) -> DisplayValue<T>
+pub const fn display<T>(inner: T) -> DisplayValue<T>
 where
   T: fmt::Display,
 {
-  DisplayValue(value)
+  DisplayValue(inner)
 }
 
 /// Wraps a type implementing `fmt::Debug` as a `Value` that can be
 /// recorded using its `Debug` implementation.
-pub const fn debug<T>(value: T) -> DebugValue<T>
+pub const fn debug<T>(inner: T) -> DebugValue<T>
 where
   T: fmt::Debug,
 {
-  DebugValue(value)
+  DebugValue(inner)
 }
 
 /// Wraps a type implementing [`Valuable`] as a `Value` that
@@ -448,14 +447,14 @@ impl fmt::Debug for HexBytes<'_> {
 // ===== impl Visit =====
 
 impl Visit for fmt::DebugStruct<'_, '_> {
-  fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-    let _builder = self.field(field.name(), value);
+  fn record_debug(&mut self, field: &Field, field_value: &dyn fmt::Debug) {
+    let _builder = self.field(field.name(), field_value);
   }
 }
 
 impl Visit for fmt::DebugMap<'_, '_> {
-  fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-    let _builder = self.entry(&format_args!("{field}"), value);
+  fn record_debug(&mut self, field: &Field, field_value: &dyn fmt::Debug) {
+    let _builder = self.entry(&format_args!("{field}"), field_value);
   }
 }
 
@@ -463,8 +462,8 @@ impl<F> Visit for F
 where
   F: FnMut(&Field, &dyn fmt::Debug),
 {
-  fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
-    (self)(field, value);
+  fn record_debug(&mut self, field: &Field, field_value: &dyn fmt::Debug) {
+    (self)(field, field_value);
   }
 }
 
@@ -576,14 +575,14 @@ macro_rules! impl_value {
 
 #[inline]
 /// Converts `usize` values into the `u64` visitor representation.
-fn usize_to_u64(value: usize) -> u64 {
-  u64::try_from(value).unwrap_or(u64::MAX)
+fn usize_to_u64(raw: usize) -> u64 {
+  u64::try_from(raw).unwrap_or(u64::MAX)
 }
 
 #[inline]
 /// Converts `isize` values into the `i64` visitor representation.
-fn isize_to_i64(value: isize) -> i64 {
-  i64::try_from(value).unwrap_or_else(|_error| if value.is_negative() { i64::MIN } else { i64::MAX })
+fn isize_to_i64(raw: isize) -> i64 {
+  i64::try_from(raw).unwrap_or_else(|_error| if raw.is_negative() { i64::MIN } else { i64::MAX })
 }
 
 impl_values! {
@@ -731,9 +730,7 @@ impl fmt::Debug for dyn Value {
       "field::Value",
       "tracing_core::field",
       Level::TRACE,
-      None,
-      None,
-      None,
+      &SourceLocation::empty(),
       &FieldSet::new(&[], crate::identify_callsite!(&NULL_CALLSITE)),
       Kind::EVENT,
     );
@@ -751,8 +748,8 @@ impl fmt::Debug for dyn Value {
     };
 
     let mut res = Ok(());
-    self.record(&FIELD, &mut |_: &Field, val: &dyn fmt::Debug| {
-      res = write!(f, "{val:?}");
+    self.record(&FIELD, &mut |_: &Field, field_value: &dyn fmt::Debug| {
+      res = write!(f, "{field_value:?}");
     });
     res
   }
@@ -842,8 +839,8 @@ impl<T: Value> Sealed for Option<T> {}
 
 impl<T: Value> Value for Option<T> {
   fn record(&self, key: &Field, visitor: &mut dyn Visit) {
-    if let Some(value) = self.as_ref() {
-      value.record(key, visitor);
+    if let Some(inner) = self.as_ref() {
+      inner.record(key, visitor);
     }
   }
 }
@@ -1104,6 +1101,36 @@ impl Iterator for Iter {
 
 // ===== impl ValueSet =====
 
+/// Records the explicit field-value pairs in `values` that belong to `my_callsite` into
+/// `visitor`, skipping pairs from other callsites and pairs without a recorded value.
+#[allow(
+  clippy::single_call_fn,
+  reason = "splits ValueSet::record's per-storage-strategy loop below the nesting ceiling"
+)]
+fn record_explicit_fields(values: &[FieldValuePair<'_>], my_callsite: callsite::Identifier, visitor: &mut dyn Visit) {
+  for &(field, field_value) in values {
+    if field.callsite() == my_callsite
+      && let Some(recorded_value) = field_value
+    {
+      recorded_value.record(field, visitor);
+    }
+  }
+}
+
+/// Records the positional `values` paired with the definitions in `fields` into `visitor`,
+/// skipping entries without a recorded value.
+#[allow(
+  clippy::single_call_fn,
+  reason = "splits ValueSet::record's per-storage-strategy loop below the nesting ceiling"
+)]
+fn record_all_fields(fields: &FieldSet, values: &[Option<&(dyn Value + '_)>], visitor: &mut dyn Visit) {
+  for (field, field_value) in fields.iter().zip(values.iter()) {
+    if let Some(recorded_value) = *field_value {
+      recorded_value.record(&field, visitor);
+    }
+  }
+}
+
 impl ValueSet<'_> {
   /// Returns an [`Identifier`] that uniquely identifies the [`Callsite`]
   /// defining the fields this `ValueSet` refers to.
@@ -1121,24 +1148,8 @@ impl ValueSet<'_> {
   /// [visitor]: Visit
   pub fn record(&self, visitor: &mut dyn Visit) {
     match self.values {
-      Values::Explicit(values) => {
-        let my_callsite = self.callsite();
-        for &(field, field_value) in values {
-          if field.callsite() != my_callsite {
-            continue;
-          }
-          if let Some(recorded_value) = field_value {
-            recorded_value.record(field, visitor);
-          }
-        }
-      }
-      Values::All(values) => {
-        for (field, field_value) in self.fields.iter().zip(values.iter()) {
-          if let Some(recorded_value) = *field_value {
-            recorded_value.record(&field, visitor);
-          }
-        }
-      }
+      Values::Explicit(values) => record_explicit_fields(values, self.callsite(), visitor),
+      Values::All(values) => record_all_fields(self.fields, values, visitor),
     }
   }
 
@@ -1210,18 +1221,22 @@ impl fmt::Display for ValueSet<'_> {
 /// Private compatibility traits for historical `ValueSet` construction bounds.
 mod private {
   use super::Borrow;
-  use super::Field;
-  use super::Value;
+  use super::FieldValuePair;
 
   /// Restrictions on `ValueSet` lengths were removed in #2508 but this type remains for backwards
   /// compatibility.
-  pub trait ValidLen<'a>: Borrow<[(&'a Field, Option<&'a (dyn Value + 'a)>)]> {}
+  pub trait ValidLen<'a>: Borrow<[FieldValuePair<'a>]> {}
 
-  impl<'a, const N: usize> ValidLen<'a> for [(&'a Field, Option<&'a (dyn Value + 'a)>); N] {}
+  impl<'a, const N: usize> ValidLen<'a> for [FieldValuePair<'a>; N] {}
 }
 
 #[cfg(test)]
 mod test {
+  use alloc::format;
+  use alloc::string::String;
+  use core::num::NonZeroI16;
+  use core::num::NonZeroU16;
+
   use strict_test_support::TestFailure;
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
@@ -1342,9 +1357,7 @@ mod test {
     }
     impl Visit for MyVisitor {
       fn record_debug(&mut self, field: &Field, _: &dyn fmt::Debug) {
-        if field.callsite() != TEST_META_1.callsite() {
-          self.saw_foreign_callsite = true;
-        }
+        self.saw_foreign_callsite = self.saw_foreign_callsite || field.callsite() != TEST_META_1.callsite();
       }
     }
 
@@ -1369,11 +1382,9 @@ mod test {
     }
     impl Visit for MyVisitor {
       fn record_debug(&mut self, field: &Field, _: &dyn fmt::Debug) {
-        if field.name() == "bar" {
-          self.saw_bar = true;
-        } else {
-          self.saw_other = true;
-        }
+        let is_bar = field.name() == "bar";
+        self.saw_bar = self.saw_bar || is_bar;
+        self.saw_other = self.saw_other || !is_bar;
       }
     }
 
@@ -1453,9 +1464,7 @@ mod test {
       }
 
       fn record_debug(&mut self, field: &Field, _value: &dyn fmt::Debug) {
-        if field.name() != "foo" {
-          self.saw_other = true;
-        }
+        self.saw_other = self.saw_other || field.name() != "foo";
       }
     }
 
@@ -1516,5 +1525,274 @@ mod test {
     ensure(visitor.first_matches == Some(true), "first byte field records bytes")?;
     ensure(visitor.second_matches == Some(true), "second byte field records bytes")?;
     ensure(!visitor.saw_other, "only byte fields are recorded")
+  }
+
+  #[test]
+  fn field_set_lookup_iteration_display_and_debug_are_stable() -> Result<(), TestFailure> {
+    let fields = TEST_META_1.fields();
+    let (first_field, second_field, third_field) = test_fields(fields)?;
+    let mut iter = fields.iter();
+
+    let first_iterated = ensure_some(iter.next(), "first iterated field exists")?;
+    let second_iterated = ensure_some(iter.next(), "second iterated field exists")?;
+    let third_iterated = ensure_some(iter.next(), "third iterated field exists")?;
+
+    ensure_eq(&fields.len(), &3_usize, "field set reports the number of fields")?;
+    ensure(!fields.is_empty(), "field set with fields is not empty")?;
+    ensure(fields.field("missing").is_none(), "missing field lookup returns none")?;
+    ensure(fields.contains(&first_field), "field set contains its first field")?;
+    ensure(fields.contains(&second_field), "field set contains its second field")?;
+    ensure(fields.contains(&third_field), "field set contains its third field")?;
+    ensure(first_iterated == first_field, "iterator yields first field in declaration order")?;
+    ensure(second_iterated == second_field, "iterator yields second field in declaration order")?;
+    ensure(third_iterated == third_field, "iterator yields third field in declaration order")?;
+    ensure(iter.next().is_none(), "iterator terminates after declared fields")?;
+
+    let display = format!("{fields}");
+    let debug = format!("{fields:?}");
+    ensure(display.contains("foo"), "field set display includes the first field")?;
+    ensure(display.contains("bar"), "field set display includes the second field")?;
+    ensure(debug.contains("FieldSet"), "field set debug names the type")?;
+    ensure(debug.contains("baz"), "field set debug includes field names")
+  }
+
+  #[test]
+  fn field_set_identity_distinguishes_callsite_and_names() -> Result<(), TestFailure> {
+    let fields = TEST_META_1.fields();
+    let same_fields = FieldSet::new(&["foo", "bar", "baz"], fields.callsite());
+    let different_callsite = TEST_META_2.fields();
+
+    ensure(fields == &same_fields, "field sets with the same callsite and names compare equal")?;
+    ensure(fields != different_callsite, "field sets from different callsites compare unequal")
+  }
+
+  #[test]
+  fn fake_field_is_never_contained_by_its_field_set() -> Result<(), TestFailure> {
+    let fields = TEST_META_1.fields();
+    let fake_field = fields.fake_field();
+
+    ensure_eq(&fake_field.index(), &usize::MAX, "fake field uses sentinel index")?;
+    ensure(!fields.contains(&fake_field), "fake field is not a declared field")?;
+
+    let values: &[Option<&dyn Value>] = &[];
+    let valueset = fields.value_set_all(values);
+    ensure(!valueset.contains(&fake_field), "value sets reject fake fields")
+  }
+
+  #[test]
+  fn value_set_all_records_only_present_positional_values() -> Result<(), TestFailure> {
+    struct PositionalVisitor {
+      visited: u8,
+    }
+
+    impl Visit for PositionalVisitor {
+      fn record_debug(&mut self, field: &Field, _value: &dyn fmt::Debug) {
+        let bit = match field.name() {
+          "foo" => 0b001,
+          "bar" => 0b010,
+          "baz" => 0b100,
+          _other => 0,
+        };
+        self.visited |= bit;
+      }
+    }
+
+    let fields = TEST_META_1.fields();
+    let (first_field, second_field, third_field) = test_fields(fields)?;
+    let first_value: &dyn Value = &1_i64;
+    let third_value: &dyn Value = &3_i64;
+    let ignored_value: &dyn Value = &99_i64;
+    let values = [Some(first_value), None, Some(third_value), Some(ignored_value)];
+    let valueset = fields.value_set_all(&values);
+    let mut visitor = PositionalVisitor {
+      visited: 0
+    };
+
+    valueset.record(&mut visitor);
+
+    ensure_eq(&valueset.len(), &2_usize, "only present positional values count toward length")?;
+    ensure(!valueset.is_empty(), "present positional values make the value set non-empty")?;
+    ensure(valueset.contains(&first_field), "first positional field is present")?;
+    ensure(!valueset.contains(&second_field), "missing positional field is absent")?;
+    ensure(valueset.contains(&third_field), "third positional field is present")?;
+    ensure(visitor.visited & 0b001 != 0, "first positional value is recorded")?;
+    ensure(visitor.visited & 0b010 == 0, "missing positional value is skipped")?;
+    ensure(visitor.visited & 0b100 != 0, "third positional value is recorded")
+  }
+
+  #[test]
+  fn value_set_display_and_debug_render_recorded_fields() -> Result<(), TestFailure> {
+    let fields = TEST_META_1.fields();
+    let (first_field, second_field, third_field) = test_fields(fields)?;
+    let first_value: &dyn Value = &1_i64;
+    let second_value: &dyn Value = &"two";
+    let third_value: &dyn Value = &true;
+    let values = [
+      (&first_field, Some(first_value)),
+      (&second_field, Some(second_value)),
+      (&third_field, Some(third_value)),
+    ];
+    let valueset = fields.value_set(&values);
+
+    let display = format!("{valueset}");
+    let debug = format!("{valueset:?}");
+
+    ensure(display.contains("foo"), "value set display includes field names")?;
+    ensure(display.contains('1'), "value set display includes numeric values")?;
+    ensure(display.contains("two"), "value set display includes string values")?;
+    ensure(debug.contains("ValueSet"), "value set debug names the type")?;
+    ensure(debug.contains("baz"), "value set debug includes recorded fields")
+  }
+
+  #[test]
+  fn display_debug_arguments_and_dyn_value_formatting_are_stable() -> Result<(), TestFailure> {
+    struct RenderVisitor {
+      first:  String,
+      second: String,
+      third:  String,
+      other:  String,
+    }
+
+    impl Visit for RenderVisitor {
+      fn record_debug(&mut self, field: &Field, field_value: &dyn fmt::Debug) {
+        let rendered = format!("{field_value:?}");
+        let slot = match field.name() {
+          "foo" => &mut self.first,
+          "bar" => &mut self.second,
+          "baz" => &mut self.third,
+          _other => &mut self.other,
+        };
+        *slot = rendered;
+      }
+    }
+
+    let fields = TEST_META_1.fields();
+    let (first_field, second_field, third_field) = test_fields(fields)?;
+    let display_value = display(42_i64);
+    let debug_value = debug("tag");
+    let debug_rendered = format!("{:?}", debug("tag"));
+    let argument_value = format_args!("arg {}", 7_i64);
+    let mut visitor = RenderVisitor {
+      first:  String::new(),
+      second: String::new(),
+      third:  String::new(),
+      other:  String::new(),
+    };
+
+    display_value.record(&first_field, &mut visitor);
+    debug_value.record(&second_field, &mut visitor);
+    argument_value.record(&third_field, &mut visitor);
+
+    let dyn_numeric: &dyn Value = &42_i64;
+    let byte_slice: &[u8] = &[0, 15, 255];
+    let dyn_bytes: &dyn Value = &byte_slice;
+
+    ensure(visitor.first == "42", "display value records display output")?;
+    ensure(visitor.second == "\"tag\"", "debug value records debug output")?;
+    ensure(visitor.third == "arg 7", "format arguments record formatted output")?;
+    ensure(visitor.other.is_empty(), "only declared fields were recorded")?;
+    ensure(
+      debug_rendered == "\"tag\"",
+      "debug wrapper debug output forwards to the inner value",
+    )?;
+    ensure(format!("{dyn_numeric:?}") == "42", "dyn value debug formats primitive values")?;
+    ensure(format!("{dyn_numeric}") == "42", "dyn value display delegates to debug formatting")?;
+    ensure(format!("{dyn_bytes:?}") == "[00 0f ff]", "dyn value debug renders bytes as hex")
+  }
+
+  #[derive(Debug, Default)]
+  struct TypedVisitor {
+    i64_records:   usize,
+    last_i64:      i64,
+    u64_records:   usize,
+    last_u64:      u64,
+    i128_records:  usize,
+    last_i128:     i128,
+    u128_records:  usize,
+    last_u128:     u128,
+    bool_value:    Option<bool>,
+    f64_records:   usize,
+    last_f64:      f64,
+    debug_records: usize,
+  }
+
+  impl Visit for TypedVisitor {
+    fn record_i64(&mut self, _field: &Field, field_value: i64) {
+      self.i64_records = self.i64_records.saturating_add(1);
+      self.last_i64 = field_value;
+    }
+
+    fn record_u64(&mut self, _field: &Field, field_value: u64) {
+      self.u64_records = self.u64_records.saturating_add(1);
+      self.last_u64 = field_value;
+    }
+
+    fn record_i128(&mut self, _field: &Field, field_value: i128) {
+      self.i128_records = self.i128_records.saturating_add(1);
+      self.last_i128 = field_value;
+    }
+
+    fn record_u128(&mut self, _field: &Field, field_value: u128) {
+      self.u128_records = self.u128_records.saturating_add(1);
+      self.last_u128 = field_value;
+    }
+
+    fn record_bool(&mut self, _field: &Field, field_value: bool) {
+      self.bool_value = Some(field_value);
+    }
+
+    fn record_f64(&mut self, _field: &Field, field_value: f64) {
+      self.f64_records = self.f64_records.saturating_add(1);
+      self.last_f64 = field_value;
+    }
+
+    fn record_debug(&mut self, _field: &Field, _field_value: &dyn fmt::Debug) {
+      self.debug_records = self.debug_records.saturating_add(1);
+    }
+  }
+
+  #[test]
+  fn option_wrapping_and_primitive_values_forward_to_typed_visitors() -> Result<(), TestFailure> {
+    let fields = TEST_META_1.fields();
+    let (first_field, second_field, third_field) = test_fields(fields)?;
+    let mut visitor = TypedVisitor::default();
+    let some_value = Some(-5_i64);
+    let none_value = None::<i64>;
+    let wrapped_value = Wrapping(13_i64);
+
+    some_value.record(&first_field, &mut visitor);
+    none_value.record(&first_field, &mut visitor);
+    wrapped_value.record(&first_field, &mut visitor);
+    9_u8.record(&second_field, &mut visitor);
+    NonZeroU16::MIN.record(&second_field, &mut visitor);
+    17_usize.record(&second_field, &mut visitor);
+    (-3_i8).record(&first_field, &mut visitor);
+    NonZeroI16::MIN.record(&first_field, &mut visitor);
+    19_u128.record(&second_field, &mut visitor);
+    (-23_i128).record(&first_field, &mut visitor);
+    true.record(&third_field, &mut visitor);
+    1.5_f32.record(&third_field, &mut visitor);
+    2.5_f64.record(&third_field, &mut visitor);
+
+    ensure_eq(
+      &visitor.i64_records,
+      &4_usize,
+      "some, wrapping, signed, and nonzero signed values record as i64",
+    )?;
+    ensure_eq(
+      &visitor.last_i64,
+      &i64::from(NonZeroI16::MIN.get()),
+      "nonzero signed integers use their stored value",
+    )?;
+    ensure_eq(&visitor.u64_records, &3_usize, "unsigned primitive values record as u64")?;
+    ensure_eq(&visitor.last_u64, &17_u64, "usize converts into a u64 record")?;
+    ensure_eq(&visitor.u128_records, &1_usize, "u128 records through the u128 visitor")?;
+    ensure_eq(&visitor.last_u128, &19_u128, "u128 value is preserved")?;
+    ensure_eq(&visitor.i128_records, &1_usize, "i128 records through the i128 visitor")?;
+    ensure_eq(&visitor.last_i128, &-23_i128, "i128 value is preserved")?;
+    ensure(visitor.bool_value == Some(true), "bool records through the bool visitor")?;
+    ensure_eq(&visitor.f64_records, &2_usize, "f32 and f64 both record through the f64 visitor")?;
+    ensure_eq(&visitor.last_f64, &2.5_f64, "f64 value is preserved")?;
+    ensure_eq(&visitor.debug_records, &0_usize, "typed primitive paths avoid the debug fallback")
   }
 }

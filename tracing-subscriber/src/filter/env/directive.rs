@@ -270,11 +270,7 @@ impl<'a> Iterator for DirectiveParts<'a> {
                 }
                 (DirectivePartState::Base | DirectivePartState::Bracketed, ',') => {
                     let directive = self.source.get(self.start..position);
-                    if let Some(next_start) = position.checked_add(token.len_utf8()) {
-                        self.start = next_start;
-                    } else {
-                        self.start = self.source.len();
-                    }
+                    self.start = position.checked_add(token.len_utf8()).unwrap_or(self.source.len());
                     return directive;
                 }
                 _ => {}
@@ -379,6 +375,159 @@ fn push_field_match(
     Ok(())
 }
 
+/// Advances parsing from the initial directive state.
+#[allow(
+    clippy::single_call_fn,
+    reason = "directive parser state machine names the start-state transition separately from token dispatch"
+)]
+fn transition_start_state(position: usize, token: char) -> Result<DirectiveParseState, ParseError> {
+    if token == '[' {
+        return Ok(DirectiveParseState::Span {
+            span_start: after_char(position, token)?,
+        });
+    }
+    if !['-', ':', '_'].contains(&token) && !token.is_alphanumeric() {
+        return Err(ParseError::new());
+    }
+    Ok(DirectiveParseState::LevelOrTarget { start: position })
+}
+
+/// Advances parsing while a level or target prefix is being read.
+#[allow(
+    clippy::single_call_fn,
+    reason = "directive parser state machine names the ambiguous level-or-target transition"
+)]
+fn transition_level_or_target_state(
+    directive: &mut Directive,
+    start: usize,
+    source: &str,
+    position: usize,
+    token: char,
+) -> Result<DirectiveParseState, ParseError> {
+    match token {
+        '=' => {
+            directive.target = Some(directive_part(source, start, position)?.to_owned());
+            Ok(DirectiveParseState::Level {
+                level_start: after_char(position, token)?,
+            })
+        }
+        '[' => {
+            directive.target = Some(directive_part(source, start, position)?.to_owned());
+            Ok(DirectiveParseState::Span {
+                span_start: after_char(position, token)?,
+            })
+        }
+        ',' => {
+            let (level, target) = parse_level_or_target(directive_part_from(source, start)?)?;
+            directive.level = level;
+            directive.target = target;
+            Ok(DirectiveParseState::Complete)
+        }
+        _ => Ok(DirectiveParseState::LevelOrTarget { start }),
+    }
+}
+
+/// Advances parsing after an explicit target has been read.
+#[allow(
+    clippy::single_call_fn,
+    reason = "directive parser state machine names the explicit target-to-level transition"
+)]
+fn transition_target_state(position: usize, token: char) -> Result<DirectiveParseState, ParseError> {
+    if token == '=' {
+        return Ok(DirectiveParseState::Level {
+            level_start: after_char(position, token)?,
+        });
+    }
+    Err(ParseError::new())
+}
+
+/// Advances parsing while a span name is being read.
+#[allow(
+    clippy::single_call_fn,
+    reason = "directive parser state machine names span-name parsing and field-block entry"
+)]
+fn transition_span_state(
+    directive: &mut Directive,
+    span_start: usize,
+    source: &str,
+    position: usize,
+    token: char,
+) -> Result<DirectiveParseState, ParseError> {
+    match token {
+        ']' => {
+            directive.in_span = Some(directive_part(source, span_start, position)?.to_owned());
+            Ok(DirectiveParseState::Target)
+        }
+        '{' => {
+            let span = directive_part(source, span_start, position)?;
+            directive.in_span = (!span.is_empty()).then(|| span.to_owned());
+            Ok(DirectiveParseState::Field {
+                field_start: after_char(position, token)?,
+            })
+        }
+        _ => Ok(DirectiveParseState::Span { span_start }),
+    }
+}
+
+/// Advances parsing while a field matcher is being read.
+#[allow(
+    clippy::single_call_fn,
+    reason = "directive parser state machine names field matcher accumulation and separator handling"
+)]
+fn transition_field_state(
+    directive: &mut Directive,
+    field_start: usize,
+    source: &str,
+    position: usize,
+    token: char,
+    regex: bool,
+) -> Result<DirectiveParseState, ParseError> {
+    match token {
+        '}' => {
+            push_field_match(directive, source, field_start, position, regex)?;
+            Ok(DirectiveParseState::Fields)
+        }
+        ',' => {
+            push_field_match(directive, source, field_start, position, regex)?;
+            Ok(DirectiveParseState::Field {
+                field_start: after_char(position, token)?,
+            })
+        }
+        _ => Ok(DirectiveParseState::Field { field_start }),
+    }
+}
+
+/// Advances parsing after at least one field matcher has been read.
+#[allow(
+    clippy::single_call_fn,
+    reason = "directive parser state machine names post-field-block closure validation"
+)]
+const fn transition_fields_state(token: char) -> Result<DirectiveParseState, ParseError> {
+    if token == ']' {
+        return Ok(DirectiveParseState::Target);
+    }
+    Err(ParseError::new())
+}
+
+/// Advances parsing while an explicit level is being read.
+#[allow(
+    clippy::single_call_fn,
+    reason = "directive parser state machine names explicit level parsing completion"
+)]
+fn transition_level_state(
+    directive: &mut Directive,
+    level_start: usize,
+    source: &str,
+    position: usize,
+    token: char,
+) -> Result<DirectiveParseState, ParseError> {
+    if token == ',' {
+        directive.level = parse_level(directive_part(source, level_start, position)?)?;
+        return Ok(DirectiveParseState::Complete);
+    }
+    Ok(DirectiveParseState::Level { level_start })
+}
+
 /// Advances the directive parser by one character.
 #[allow(
     clippy::single_call_fn,
@@ -392,96 +541,16 @@ fn transition_parse_state(
     token: char,
     regex: bool,
 ) -> Result<DirectiveParseState, ParseError> {
-    use DirectiveParseState::{
-        Complete, Field, Fields, Level, LevelOrTarget, Span, Start, Target,
-    };
+  use DirectiveParseState::{Complete, Field, Fields, Level, LevelOrTarget, Span, Start, Target};
 
-    match parse_state {
-        Start => {
-            if token == '[' {
-                Ok(Span {
-                    span_start: after_char(position, token)?,
-                })
-            } else if !['-', ':', '_'].contains(&token) && !token.is_alphanumeric() {
-                Err(ParseError::new())
-            } else {
-                Ok(LevelOrTarget { start: position })
-            }
-        }
-        LevelOrTarget { start } => match token {
-            '=' => {
-                directive.target = Some(directive_part(source, start, position)?.to_owned());
-                Ok(Level {
-                    level_start: after_char(position, token)?,
-                })
-            }
-            '[' => {
-                directive.target = Some(directive_part(source, start, position)?.to_owned());
-                Ok(Span {
-                    span_start: after_char(position, token)?,
-                })
-            }
-            ',' => {
-                let (level, target) =
-                    parse_level_or_target(directive_part_from(source, start)?)?;
-                directive.level = level;
-                directive.target = target;
-                Ok(Complete)
-            }
-            _ => Ok(parse_state),
-        },
-        Target => {
-            if token == '=' {
-                Ok(Level {
-                    level_start: after_char(position, token)?,
-                })
-            } else {
-                Err(ParseError::new())
-            }
-        }
-        Span { span_start } => match token {
-            ']' => {
-                directive.in_span =
-                    Some(directive_part(source, span_start, position)?.to_owned());
-                Ok(Target)
-            }
-            '{' => {
-                let span = directive_part(source, span_start, position)?;
-                directive.in_span = (!span.is_empty()).then(|| span.to_owned());
-                Ok(Field {
-                    field_start: after_char(position, token)?,
-                })
-            }
-            _ => Ok(parse_state),
-        },
-        Field { field_start } => match token {
-            '}' => {
-                push_field_match(directive, source, field_start, position, regex)?;
-                Ok(Fields)
-            }
-            ',' => {
-                push_field_match(directive, source, field_start, position, regex)?;
-                Ok(Field {
-                    field_start: after_char(position, token)?,
-                })
-            }
-            _ => Ok(parse_state),
-        },
-        Fields => {
-            if token == ']' {
-                Ok(Target)
-            } else {
-                Err(ParseError::new())
-            }
-        }
-        Level { level_start } => {
-            if token == ',' {
-                directive.level = parse_level(directive_part(source, level_start, position)?)?;
-                Ok(Complete)
-            } else {
-                Ok(parse_state)
-            }
-        }
+  match parse_state {
+        Start => transition_start_state(position, token),
+        LevelOrTarget { start } => transition_level_or_target_state(directive, start, source, position, token),
+        Target => transition_target_state(position, token),
+        Span { span_start } => transition_span_state(directive, span_start, source, position, token),
+        Field { field_start } => transition_field_state(directive, field_start, source, position, token, regex),
+        Fields => transition_fields_state(token),
+        Level { level_start } => transition_level_state(directive, level_start, source, position, token),
         Complete => Err(ParseError::new()),
     }
 }
@@ -596,9 +665,7 @@ impl fmt::Display for Directive {
             let mut field_matches = self.fields.iter();
             if let Some(first_field_match) = field_matches.next() {
                 write!(f, "{{{first_field_match}")?;
-                for next_field_match in field_matches {
-                    write!(f, ",{next_field_match}")?;
-                }
+                field_matches.try_for_each(|next_field_match| write!(f, ",{next_field_match}"))?;
                 f.write_str("}")?;
             }
 
@@ -772,28 +839,94 @@ mod test {
         Ok(())
     }
 
-    #[test]
-    fn directive_ordering_by_target_len() -> Result<(), TestFailure> {
-        // TODO(eliza): it would be nice to have a property-based test for this
-        // instead.
-        let mut dirs = expect_parse(
-            "foo::bar=debug,foo::bar::baz=trace,foo=info,a_really_long_name_with_no_colons=warn",
-        )?;
+    /// Parses `input`, sorts the directives, and checks the resulting target ordering.
+    fn ensure_directive_target_order(
+        input: &str,
+        expected: &[&str],
+        message: &'static str,
+    ) -> Result<(), TestFailure> {
+        let mut dirs = expect_parse(input)?;
         dirs.sort_unstable();
-
-        let expected = vec![
-            "a_really_long_name_with_no_colons",
-            "foo::bar::baz",
-            "foo::bar",
-            "foo",
-        ];
         let sorted = dirs
             .iter()
             .map(|directive| directive.target.as_deref())
             .collect::<Vec<_>>();
+        let expected_targets = expected.iter().copied().map(Some).collect::<Vec<_>>();
+        ensure(sorted == expected_targets, message)
+    }
 
-        ensure(
-            sorted == expected.into_iter().map(Some).collect::<Vec<_>>(),
+    /// Parses `input` and checks it yields the six-entry crate/level directive expectation.
+    fn ensure_parses_level_directives(input: &str) -> Result<(), TestFailure> {
+        let dirs = parse_directives(input);
+        ensure_directives(
+            &dirs,
+            &[
+                DirectiveExpectation {
+                    target: Some("crate1::mod1"),
+                    level: LevelFilter::ERROR,
+                    in_span: None,
+                },
+                DirectiveExpectation {
+                    target: Some("crate1::mod2"),
+                    level: LevelFilter::WARN,
+                    in_span: None,
+                },
+                DirectiveExpectation {
+                    target: Some("crate1::mod2::mod3"),
+                    level: LevelFilter::INFO,
+                    in_span: None,
+                },
+                DirectiveExpectation {
+                    target: Some("crate2"),
+                    level: LevelFilter::DEBUG,
+                    in_span: None,
+                },
+                DirectiveExpectation {
+                    target: Some("crate3"),
+                    level: LevelFilter::TRACE,
+                    in_span: None,
+                },
+                DirectiveExpectation {
+                    target: Some("crate3::mod2::mod1"),
+                    level: LevelFilter::OFF,
+                    in_span: None,
+                },
+            ],
+        )
+    }
+
+    /// Parses `input` and checks the case-insensitive ralith directive expectation.
+    fn ensure_parses_ralith_case_insensitive(input: &str) -> Result<(), TestFailure> {
+        let dirs = parse_directives(input);
+        ensure_directives(
+            &dirs,
+            &[
+                DirectiveExpectation {
+                    target: Some("common"),
+                    level: LevelFilter::INFO,
+                    in_span: None,
+                },
+                DirectiveExpectation {
+                    target: Some("server"),
+                    level: LevelFilter::DEBUG,
+                    in_span: None,
+                },
+            ],
+        )
+    }
+
+    #[test]
+    fn directive_ordering_by_target_len() -> Result<(), TestFailure> {
+        // TODO(eliza): it would be nice to have a property-based test for this
+        // instead.
+        ensure_directive_target_order(
+            "foo::bar=debug,foo::bar::baz=trace,foo=info,a_really_long_name_with_no_colons=warn",
+            &[
+                "a_really_long_name_with_no_colons",
+                "foo::bar::baz",
+                "foo::bar",
+                "foo",
+            ],
             "directives sort by descending target length",
         )
     }
@@ -801,17 +934,9 @@ mod test {
     fn directive_ordering_by_span() -> Result<(), TestFailure> {
         // TODO(eliza): it would be nice to have a property-based test for this
         // instead.
-        let mut dirs = expect_parse("bar[span]=trace,foo=debug,baz::quux=info,a[span]=warn")?;
-        dirs.sort_unstable();
-
-        let expected = vec!["baz::quux", "bar", "foo", "a"];
-        let sorted = dirs
-            .iter()
-            .map(|directive| directive.target.as_deref())
-            .collect::<Vec<_>>();
-
-        ensure(
-            sorted == expected.into_iter().map(Some).collect::<Vec<_>>(),
+        ensure_directive_target_order(
+            "bar[span]=trace,foo=debug,baz::quux=info,a[span]=warn",
+            &["baz::quux", "bar", "foo", "a"],
             "directives sort by span specificity",
         )
     }
@@ -850,19 +975,9 @@ mod test {
     fn directive_ordering_by_field_num() -> Result<(), TestFailure> {
         // TODO(eliza): it would be nice to have a property-based test for this
         // instead.
-        let mut dirs = expect_parse(
-            "b[{foo,bar}]=info,c[{baz,quuux,quuux}]=debug,a[{foo}]=warn,bar[{field}]=trace,foo=debug,baz::quux=info"
-        )?;
-        dirs.sort_unstable();
-
-        let expected = vec!["baz::quux", "bar", "foo", "c", "b", "a"];
-        let sorted = dirs
-            .iter()
-            .map(|directive| directive.target.as_deref())
-            .collect::<Vec<_>>();
-
-        ensure(
-            sorted == expected.into_iter().map(Some).collect::<Vec<_>>(),
+        ensure_directive_target_order(
+            "b[{foo,bar}]=info,c[{baz,quuux,quuux}]=debug,a[{foo}]=warn,bar[{field}]=trace,foo=debug,baz::quux=info",
+            &["baz::quux", "bar", "foo", "c", "b", "a"],
             "directives sort by field count",
         )
     }
@@ -889,42 +1004,12 @@ mod test {
 
     #[test]
     fn parse_directives_ralith_uc() -> Result<(), TestFailure> {
-        let dirs = parse_directives("common=INFO,server=DEBUG");
-        ensure_directives(
-            &dirs,
-            &[
-                DirectiveExpectation {
-                    target: Some("common"),
-                    level: LevelFilter::INFO,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("server"),
-                    level: LevelFilter::DEBUG,
-                    in_span: None,
-                },
-            ],
-        )
+        ensure_parses_ralith_case_insensitive("common=INFO,server=DEBUG")
     }
 
     #[test]
     fn parse_directives_ralith_mixed() -> Result<(), TestFailure> {
-        let dirs = parse_directives("common=iNfo,server=dEbUg");
-        ensure_directives(
-            &dirs,
-            &[
-                DirectiveExpectation {
-                    target: Some("common"),
-                    level: LevelFilter::INFO,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("server"),
-                    level: LevelFilter::DEBUG,
-                    in_span: None,
-                },
-            ],
-        )
+        ensure_parses_ralith_case_insensitive("common=iNfo,server=dEbUg")
     }
 
     #[test]
@@ -959,130 +1044,25 @@ mod test {
 
     #[test]
     fn parse_level_directives() -> Result<(), TestFailure> {
-        let dirs = parse_directives(
+        ensure_parses_level_directives(
             "crate1::mod1=error,crate1::mod2=warn,crate1::mod2::mod3=info,\
              crate2=debug,crate3=trace,crate3::mod2::mod1=off",
-        );
-        ensure_directives(
-            &dirs,
-            &[
-                DirectiveExpectation {
-                    target: Some("crate1::mod1"),
-                    level: LevelFilter::ERROR,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("crate1::mod2"),
-                    level: LevelFilter::WARN,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("crate1::mod2::mod3"),
-                    level: LevelFilter::INFO,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("crate2"),
-                    level: LevelFilter::DEBUG,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("crate3"),
-                    level: LevelFilter::TRACE,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("crate3::mod2::mod1"),
-                    level: LevelFilter::OFF,
-                    in_span: None,
-                },
-            ],
         )
     }
 
     #[test]
     fn parse_uppercase_level_directives() -> Result<(), TestFailure> {
-        let dirs = parse_directives(
+        ensure_parses_level_directives(
             "crate1::mod1=ERROR,crate1::mod2=WARN,crate1::mod2::mod3=INFO,\
              crate2=DEBUG,crate3=TRACE,crate3::mod2::mod1=OFF",
-        );
-        ensure_directives(
-            &dirs,
-            &[
-                DirectiveExpectation {
-                    target: Some("crate1::mod1"),
-                    level: LevelFilter::ERROR,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("crate1::mod2"),
-                    level: LevelFilter::WARN,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("crate1::mod2::mod3"),
-                    level: LevelFilter::INFO,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("crate2"),
-                    level: LevelFilter::DEBUG,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("crate3"),
-                    level: LevelFilter::TRACE,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("crate3::mod2::mod1"),
-                    level: LevelFilter::OFF,
-                    in_span: None,
-                },
-            ],
         )
     }
 
     #[test]
     fn parse_numeric_level_directives() -> Result<(), TestFailure> {
-        let dirs = parse_directives(
+        ensure_parses_level_directives(
             "crate1::mod1=1,crate1::mod2=2,crate1::mod2::mod3=3,crate2=4,\
              crate3=5,crate3::mod2::mod1=0",
-        );
-        ensure_directives(
-            &dirs,
-            &[
-                DirectiveExpectation {
-                    target: Some("crate1::mod1"),
-                    level: LevelFilter::ERROR,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("crate1::mod2"),
-                    level: LevelFilter::WARN,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("crate1::mod2::mod3"),
-                    level: LevelFilter::INFO,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("crate2"),
-                    level: LevelFilter::DEBUG,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("crate3"),
-                    level: LevelFilter::TRACE,
-                    in_span: None,
-                },
-                DirectiveExpectation {
-                    target: Some("crate3::mod2::mod1"),
-                    level: LevelFilter::OFF,
-                    in_span: None,
-                },
-            ],
         )
     }
 

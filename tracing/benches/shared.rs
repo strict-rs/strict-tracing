@@ -1,10 +1,8 @@
 //! Shared helpers for `tracing` benchmarks.
 
 use core::num::NonZeroU64;
+use std::fmt;
 use std::fmt::Write;
-use std::fmt::{
-  self,
-};
 use std::hint::black_box;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
@@ -143,8 +141,8 @@ impl Drop for Visitor<'_> {
 }
 
 impl field::Visit for Visitor<'_> {
-  fn record_debug(&mut self, _field: &field::Field, value: &dyn fmt::Debug) {
-    let _value = black_box(value);
+  fn record_debug(&mut self, _field: &field::Field, field_value: &dyn fmt::Debug) {
+    let _field_value = black_box(field_value);
     self.local_fields = self.local_fields.saturating_add(1);
   }
 }

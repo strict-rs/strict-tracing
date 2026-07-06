@@ -5,10 +5,8 @@
 use std::fmt;
 
 use tracing_core::Event;
+use tracing_core::span;
 use tracing_core::span::Attributes;
-use tracing_core::span::{
-  self,
-};
 
 use crate::failure::ExpectationError;
 use crate::failure::ExpectationResult;
@@ -162,11 +160,11 @@ impl HasAncestry for &Attributes<'_> {
 /// | No         | -            | No              | `IsExplicitRoot`      |
 /// +------------+--------------+-----------------+---------------------+
 pub(crate) fn get_ancestry(
-  item: &impl HasAncestry,
+  traced_item: &impl HasAncestry,
   lookup_current: impl FnOnce() -> Option<span::Id>,
   actual_span: impl FnOnce(&span::Id) -> Option<ActualSpan>,
 ) -> ExpectationResult<ActualAncestry> {
-  if item.is_contextual() {
+  if traced_item.is_contextual() {
     lookup_current().map_or(Ok(ActualAncestry::IsContextualRoot), |parent_id| {
       let parent_id_value = parent_id.into_u64();
       actual_span(&parent_id).map_or_else(
@@ -178,10 +176,10 @@ pub(crate) fn get_ancestry(
         |contextual_parent_span| Ok(ActualAncestry::HasContextualParent(contextual_parent_span)),
       )
     })
-  } else if item.is_root() {
+  } else if traced_item.is_root() {
     Ok(ActualAncestry::IsExplicitRoot)
   } else {
-    let Some(parent_id) = item.parent() else {
+    let Some(parent_id) = traced_item.parent() else {
       return Err(ExpectationError::from_args(format_args!(
         "tracing-mock: is_contextual=false is_root=false but no explicit parent found. This is a bug!"
       )));

@@ -1,8 +1,8 @@
 //! Pretty human-readable event and field formatters.
 
 use super::{
-    span, ErrorSourceList, EscapeGuard, FmtLevel, Format, FormatEvent,
-    FormatFields, FormatTime, MakeVisitor, RecordFields, Writer,
+    span, ErrorSourceList, EscapeGuard, Format, FormatEvent, FormatFields,
+    FormatTime, MakeVisitor, RecordFields, Writer,
 };
 use crate::{
     field::{VisitFmt, VisitOutput},
@@ -106,6 +106,10 @@ use super::{DebugValue, FmtThreadId};
 ///   2022-02-15T18:44:24.535765Z <font color="#4E9A06"> INFO</font> <font color="#4E9A06"><b>fmt_pretty</b></font><font color="#4E9A06">: yak shaving completed, </font><font color="#4E9A06"><b>all_yaks_shaved</b></font><font color="#4E9A06">: false</font>
 ///     <font color="#AAAAAA"><i>at</i></font> examples/examples/fmt-pretty.rs:19 <font color="#AAAAAA"><i>on</i></font> main
 /// </pre>
+///
+/// [`Full`]: crate::fmt::format::Full
+/// [`Compact`]: crate::fmt::format::Compact
+/// [`Json`]: crate::fmt::format::Json
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Pretty {
     /// Whether the event's source location is displayed.
@@ -114,7 +118,7 @@ pub struct Pretty {
 
 /// The [visitor] produced by [`Pretty`]'s [`MakeVisitor`] implementation.
 ///
-/// [visitor]: field::Visit
+/// [visitor]: crate::field::Visit
 /// [`MakeVisitor`]: crate::field::MakeVisitor
 #[derive(Debug)]
 pub struct PrettyVisitor<'a> {
@@ -197,6 +201,7 @@ impl<T> Format<Pretty, T> {
         dimmed: &Style,
     ) -> fmt::Result {
         let displays_thread = self.display.thread_name() || self.display.thread_id();
+        let thread_name_separator = if self.display.thread_id() { " " } else { "" };
 
         if let (Some(file), true, true) = (
             meta.file(),
@@ -222,9 +227,7 @@ impl<T> Format<Pretty, T> {
                 && let Some(name) = current_thread.name()
             {
                 write!(writer, "{name}")?;
-                if self.display.thread_id() {
-                    writer.write_char(' ')?;
-                }
+                writer.write_str(thread_name_separator)?;
             }
             if self.display.thread_id() {
                 write!(writer, "{}", FmtThreadId::new(current_thread.id()))?;
@@ -352,7 +355,7 @@ where
             write!(
                 writer,
                 "{} ",
-                FmtLevel::new(meta.level(), writer.has_ansi_escapes())
+                super::fmt_level(meta.level(), &writer)
             )?;
         }
 
@@ -503,15 +506,15 @@ impl<'a> PrettyVisitor<'a> {
         Self { style: *style, ..self }
     }
 
-    /// Writes `value` with the field separator required by this visitor state.
-    fn write_padded(&mut self, value: impl fmt::Display) {
+    /// Writes `fragment` with the field separator required by this visitor state.
+    fn write_padded(&mut self, fragment: impl fmt::Display) {
         let padding = if self.is_empty {
             self.is_empty = false;
             ""
         } else {
             ", "
         };
-        self.result = write!(self.writer, "{padding}{value}");
+        self.result = write!(self.writer, "{padding}{fragment}");
     }
 
     /// Returns bold styling when ANSI support is enabled for this writer.
@@ -525,27 +528,27 @@ impl<'a> PrettyVisitor<'a> {
 }
 
 impl Visit for PrettyVisitor<'_> {
-    fn record_str(&mut self, field: &Field, value: &str) {
+    fn record_str(&mut self, field: &Field, field_value: &str) {
         if self.result.is_err() {
             return;
         }
 
         if field.name() == "message" {
-            self.record_debug(field, &format_args!("{value}"));
+            self.record_debug(field, &format_args!("{field_value}"));
         } else {
-            self.record_debug(field, &value);
+            self.record_debug(field, &field_value);
         }
     }
 
-    fn record_error(&mut self, field: &Field, value: &(dyn Error + 'static)) {
+    fn record_error(&mut self, field: &Field, field_value: &(dyn Error + 'static)) {
         let sanitize = self.writer.sanitizes_ansi_escapes();
-        if let Some(source) = value.source() {
+        if let Some(source) = field_value.source() {
             let bold = self.bold();
             self.record_debug(
                 field,
                 &format_args!(
                     "{}, {}{}.sources{}: {}",
-                    EscapeGuard::new(format_args!("{value}"), sanitize),
+                    EscapeGuard::new(format_args!("{field_value}"), sanitize),
                     bold.prefix(),
                     field,
                     bold.infix(self.style),
@@ -555,12 +558,12 @@ impl Visit for PrettyVisitor<'_> {
         } else {
             self.record_debug(
                 field,
-                &EscapeGuard::new(format_args!("{value}"), sanitize),
+                &EscapeGuard::new(format_args!("{field_value}"), sanitize),
             );
         }
     }
 
-    fn record_debug(&mut self, field: &Field, value: &dyn Debug) {
+    fn record_debug(&mut self, field: &Field, field_value: &dyn Debug) {
         if self.result.is_err() {
             return;
         }
@@ -571,7 +574,7 @@ impl Visit for PrettyVisitor<'_> {
                 self.write_padded(format_args!(
                     "{}{}",
                     self.style.prefix(),
-                    EscapeGuard::new(DebugValue(value), self.writer.sanitizes_ansi_escapes())
+                    EscapeGuard::new(DebugValue(field_value), self.writer.sanitizes_ansi_escapes())
                 ));
             }
             // Skip fields that are actually log metadata that have already been handled
@@ -584,7 +587,7 @@ impl Visit for PrettyVisitor<'_> {
                     bold.prefix(),
                     field_name,
                     bold.infix(self.style),
-                    DebugValue(value)
+                    DebugValue(field_value)
                 ));
             }
         }

@@ -57,8 +57,7 @@ This directory contains a collection of examples that demonstrate the use of the
      instrumented.
   + `echo`: Demonstrates a `tracing`-instrumented variant of Tokio's `echo` example.
 - **tracing-flame**:
-  + `inferno-flame`: Demonstrates the use of `tracing-flame` to generate a flamegraph
-     from spans.
+  + `inferno-flame`: Demonstrates the use of `tracing-flame` to capture span timings as a folded stack file (`tracing-flame.folded` by default), then render it into a flamegraph SVG with inferno's standalone CLI: `inferno-flamegraph < tracing-flame.folded > flamegraph.svg`.
 - **tracing-tower**:
   + `tower-client`: Demonstrates the use of `tracing-tower` to instrument a
     simple `tower` HTTP/1.1 client.

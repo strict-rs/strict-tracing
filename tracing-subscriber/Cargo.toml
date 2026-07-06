@@ -27,7 +27,7 @@ rust-version.workspace = true
 default = ["smallvec", "fmt", "ansi", "tracing-log", "std"]
 alloc = []
 std = ["alloc", "tracing-core/std", "parking_lot"]
-env-filter = ["matchers", "once_cell", "tracing", "std", "thread_local", "dep:regex-automata"]
+env-filter = ["matchers", "tracing", "std", "thread_local", "dep:regex-automata"]
 fmt = ["registry", "std", "chrono"]
 ansi = ["fmt", "nu-ansi-term"]
 registry = ["sharded-slab", "thread_local", "std"]
@@ -49,7 +49,6 @@ matchers = { workspace = true, optional = true }
 # required to have matchers::BuildError implement std::error::Error
 regex-automata = { workspace = true, optional = true }
 smallvec = { workspace = true, optional = true }
-once_cell = { workspace = true, optional = true }
 
 # fmt
 tracing-log = { workspace = true, optional = true, features = ["log-tracer", "std"] }
@@ -92,6 +91,20 @@ maintenance = { status = "experimental" }
 [package.metadata.docs.rs]
 all-features = true
 rustdoc-args = ["--cfg", "docsrs"]
+
+# `regex-automata` has no direct path reference in this crate: it is pulled in
+# only so `matchers::BuildError` implements `std::error::Error` (see the
+# dependency comment above), so cargo-machete cannot see that it is required.
+[package.metadata.cargo-machete]
+ignored = ["regex-automata"]
+
+# cargo-udeps does not analyze doctests: `regex-automata` is required only via
+# the `matchers::BuildError: std::error::Error` bound (no direct reference), and
+# the `time` dev-dependency's `macros` feature is exercised only in the
+# `src/fmt/time/time_crate.rs` doctests.
+[package.metadata.cargo-udeps.ignore]
+normal = ["regex-automata"]
+development = ["time"]
 
 [[bench]]
 name = "filter"

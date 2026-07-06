@@ -138,17 +138,40 @@ mod tests {
     use super::ChronoLocal;
     use super::ChronoUtc;
 
-    #[test]
-    fn test_chrono_format_time_utc_default() -> Result<(), TestFailure> {
+    /// Formats time with `timer` and checks the default output is a valid RFC 3339 timestamp.
+    fn ensure_default_rfc3339<T: FormatTime>(
+        timer: &T,
+        write_message: &'static str,
+        rfc_message: &'static str,
+    ) -> Result<(), TestFailure> {
         let mut buf = String::new();
         let mut dst: Writer<'_> = Writer::new(&mut buf);
-        ensure_ok(
-            FormatTime::format_time(&ChronoUtc::default(), &mut dst),
-            "default UTC chrono formatter writes time",
-        )?;
         // e.g. `buf` contains "2023-08-18T19:05:08.662499+00:00"
+        ensure_ok(timer.format_time(&mut dst), write_message)?;
+        ensure(chrono::DateTime::parse_from_rfc3339(&buf).is_ok(), rfc_message)
+    }
+
+    /// Formats time with `timer` and checks the output parses under the custom format string.
+    fn ensure_custom_format<T: FormatTime>(
+        timer: &T,
+        write_message: &'static str,
+        format_message: &'static str,
+    ) -> Result<(), TestFailure> {
+        let mut buf = String::new();
+        let mut dst: Writer<'_> = Writer::new(&mut buf);
+        // e.g. `buf` contains "Wed Aug 23 15:53:23 2023"
+        ensure_ok(timer.format_time(&mut dst), write_message)?;
         ensure(
-            chrono::DateTime::parse_from_rfc3339(&buf).is_ok(),
+            chrono::NaiveDateTime::parse_from_str(&buf, "%a %b %e %T %Y").is_ok(),
+            format_message,
+        )
+    }
+
+    #[test]
+    fn test_chrono_format_time_utc_default() -> Result<(), TestFailure> {
+        ensure_default_rfc3339(
+            &ChronoUtc::default(),
+            "default UTC chrono formatter writes time",
             "default UTC chrono formatter emits RFC3339",
         )
     }
@@ -158,30 +181,18 @@ mod tests {
         let fmt = ChronoUtc {
             format: Arc::new(ChronoFmtType::Custom("%a %b %e %T %Y".to_owned())),
         };
-        let mut buf = String::new();
-        let mut dst: Writer<'_> = Writer::new(&mut buf);
-        ensure_ok(
-            FormatTime::format_time(&fmt, &mut dst),
+        ensure_custom_format(
+            &fmt,
             "custom UTC chrono formatter writes time",
-        )?;
-        // e.g. `buf` contains "Wed Aug 23 15:53:23 2023"
-        ensure(
-            chrono::NaiveDateTime::parse_from_str(&buf, "%a %b %e %T %Y").is_ok(),
             "custom UTC chrono formatter emits configured format",
         )
     }
 
     #[test]
     fn test_chrono_format_time_local_default() -> Result<(), TestFailure> {
-        let mut buf = String::new();
-        let mut dst: Writer<'_> = Writer::new(&mut buf);
-        ensure_ok(
-            FormatTime::format_time(&ChronoLocal::default(), &mut dst),
+        ensure_default_rfc3339(
+            &ChronoLocal::default(),
             "default local chrono formatter writes time",
-        )?;
-        // e.g. `buf` contains "2023-08-18T14:59:08.662499-04:00".
-        ensure(
-            chrono::DateTime::parse_from_rfc3339(&buf).is_ok(),
             "default local chrono formatter emits RFC3339",
         )
     }
@@ -191,15 +202,9 @@ mod tests {
         let fmt = ChronoLocal {
             format: Arc::new(ChronoFmtType::Custom("%a %b %e %T %Y".to_owned())),
         };
-        let mut buf = String::new();
-        let mut dst: Writer<'_> = Writer::new(&mut buf);
-        ensure_ok(
-            FormatTime::format_time(&fmt, &mut dst),
+        ensure_custom_format(
+            &fmt,
             "custom local chrono formatter writes time",
-        )?;
-        // e.g. `buf` contains "Wed Aug 23 15:55:46 2023".
-        ensure(
-            chrono::NaiveDateTime::parse_from_str(&buf, "%a %b %e %T %Y").is_ok(),
             "custom local chrono formatter emits configured format",
         )
     }

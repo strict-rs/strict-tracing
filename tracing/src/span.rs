@@ -328,10 +328,8 @@ pub use tracing_core::span::Id;
 pub use tracing_core::span::Record;
 
 use crate::Metadata;
+use crate::dispatcher;
 use crate::dispatcher::Dispatch;
-use crate::dispatcher::{
-  self,
-};
 use crate::field;
 use crate::sealed::Sealed;
 
@@ -356,8 +354,10 @@ pub struct Span {
   inner: Option<Inner>,
   /// Metadata describing the span.
   ///
-  /// This might be `Some` even if `inner` is `None`, in the case that the
-  /// span is disabled but the metadata is needed for `log` support.
+  /// This is `Some` for every span constructed from a known callsite, even when `inner` is
+  /// `None` because the span is disabled: the retained metadata preserves the span's callsite
+  /// identity for `PartialEq`/`Hash` and feeds `log` records when the `log` feature is enabled.
+  /// Only the null span constructed by [`Span::none`] carries no metadata.
   meta:  Option<&'static Metadata<'static>>,
 }
 
@@ -518,11 +518,18 @@ impl Span {
   /// Constructs a new disabled span with the given `Metadata`.
   ///
   /// This should be used when a span is constructed from a known callsite,
-  /// but the subscriber indicates that it is disabled.
+  /// but the span is disabled — whether by the current subscriber's filter or
+  /// by the [static max level].
+  ///
+  /// The returned span retains its metadata, so it keeps the callsite
+  /// identity used by `Span`'s `PartialEq` and `Hash` implementations and is
+  /// not equal to the [`Span::none`] null span.
   ///
   /// Entering, exiting, and recording values on this span will not notify the
   /// `Subscriber` but _may_ record log messages if the `log` feature flag is
   /// enabled.
+  ///
+  /// [static max level]: crate::level_filters
   #[allow(
     clippy::single_call_fn,
     reason = "public disabled-span constructor represents subscriber-disabled callsites"
@@ -653,8 +660,12 @@ impl Span {
   /// * To enter a span for a synchronous section of code within an async block or function, prefer
   ///   [`Span::in_scope`]. Since `in_scope` takes a synchronous closure and exits the span when the
   ///   closure returns, the span will always be exited before the next await point. For example:
-  ///   ``` # use tracing::info_span; # async fn some_other_async_function(_: ()) {} async fn
-  ///   my_async_function() { let span = info_span!("my_async_function");
+  ///
+  ///   ```
+  ///   # use tracing::info_span;
+  ///   # async fn some_other_async_function(_: ()) {}
+  ///   async fn my_async_function() {
+  ///       let span = info_span!("my_async_function");
   ///
   ///       let some_value = span.in_scope(|| {
   ///           // run some synchronous code inside the span...
@@ -1134,7 +1145,8 @@ impl Span {
     self.field(field).is_some()
   }
 
-  /// Records that the field described by `field` has the value `value`.
+  /// Records that the field described by `field_name` has the value
+  /// `field_value`.
   ///
   /// This may be used with [`field::Empty`] to declare fields whose values
   /// are not known when the span is created, and record them later:
@@ -1211,11 +1223,11 @@ impl Span {
   ///
   /// [`field::Empty`]: super::field::Empty
   /// [`Metadata`]: super::Metadata
-  pub fn record<Q: field::AsField + ?Sized, V: field::Value>(&self, field_name: &Q, value: V) -> &Self {
+  pub fn record<Q: field::AsField + ?Sized, V: field::Value>(&self, field_name: &Q, field_value: V) -> &Self {
     if let Some(meta) = self.meta
       && let Some(field) = field_name.as_field(meta)
     {
-      let value_ref: &dyn field::Value = &value;
+      let value_ref: &dyn field::Value = &field_value;
       let values = [(&field, Some(value_ref))];
       let value_set = meta.fields().value_set(&values);
       let _span = self.record_all(&value_set);
@@ -1272,8 +1284,15 @@ impl Span {
   /// rather than constructed by `Span::none`, this method will return
   /// `false`, while `is_disabled` will return `true`.
   ///
+  /// Spans constructed by the [`span!`] macros always retain their callsite
+  /// [`Metadata`], even when they are disabled by the [static max level], so
+  /// `is_none` returns `false` for them in every feature configuration.
+  ///
   /// [`Span::none`]: Span::none()
   /// [`is_disabled`]: Span::is_disabled()
+  /// [`span!`]: crate::span!
+  /// [`Metadata`]: crate::Metadata
+  /// [static max level]: crate::level_filters
   #[inline]
   #[must_use]
   pub const fn is_none(&self) -> bool {
@@ -1352,34 +1371,37 @@ impl Span {
   #[cfg(feature = "log")]
   #[inline]
   fn log(&self, target: &str, level: log::Level, message: fmt::Arguments<'_>) {
-    if let Some(meta) = self.meta
-      && level_to_log!(*meta.level()) <= log::max_level()
-    {
-      let logger = log::logger();
-      let log_meta = log::Metadata::builder().level(level).target(target).build();
-      if logger.enabled(&log_meta) {
-        if let Some(ref inner) = self.inner {
-          logger.log(
-            &log::Record::builder()
-              .metadata(log_meta)
-              .module_path(meta.module_path())
-              .file(meta.file())
-              .line(meta.line())
-              .args(format_args!("{} span={}", message, inner.id.into_u64()))
-              .build(),
-          );
-        } else {
-          logger.log(
-            &log::Record::builder()
-              .metadata(log_meta)
-              .module_path(meta.module_path())
-              .file(meta.file())
-              .line(meta.line())
-              .args(message)
-              .build(),
-          );
-        }
-      }
+    let Some(meta) = self.meta else {
+      return;
+    };
+    if level_to_log!(*meta.level()) > log::max_level() {
+      return;
+    }
+    let logger = log::logger();
+    let log_meta = log::Metadata::builder().level(level).target(target).build();
+    if !logger.enabled(&log_meta) {
+      return;
+    }
+    if let Some(ref inner) = self.inner {
+      logger.log(
+        &log::Record::builder()
+          .metadata(log_meta)
+          .module_path(meta.module_path())
+          .file(meta.file())
+          .line(meta.line())
+          .args(format_args!("{} span={}", message, inner.id.into_u64()))
+          .build(),
+      );
+    } else {
+      logger.log(
+        &log::Record::builder()
+          .metadata(log_meta)
+          .module_path(meta.module_path())
+          .file(meta.file())
+          .line(meta.line())
+          .args(message)
+          .build(),
+      );
     }
   }
 
@@ -1393,17 +1415,45 @@ impl Span {
   }
 }
 
+/// Spans are compared by callsite identity plus runtime span state.
+///
+/// Two spans that carry [`Metadata`] are equal when they originate from the same callsite *and*
+/// agree on their runtime state: enabled spans must share the same subscriber-assigned [`Id`],
+/// while disabled spans (which have no `Id`) are equal on the callsite alone, because the
+/// subscriber retains no state that could distinguish them. Spans without metadata —
+/// [`Span::none`] and the empty handle returned by [`Span::current`] outside of any span — are
+/// all the single "no span" value and are equal to each other, but never equal to a span that
+/// carries metadata.
+///
+/// Every span constructed by the [`span!`] macros retains its callsite metadata even when it is
+/// disabled statically or by the subscriber, so this relation does not change with the enabled
+/// feature set. (Upstream `tracing` kept the metadata of statically disabled macro spans only
+/// when the `log` feature was enabled, which let span equality flip with the dependency graph;
+/// this fork resolves that inconsistency in favor of stable callsite identity.)
+///
+/// [`Metadata`]: crate::Metadata
+/// [`span!`]: crate::span!
 impl PartialEq for Span {
   fn eq(&self, other: &Self) -> bool {
     match (self.meta, other.meta) {
       (Some(this), Some(that)) => this.callsite() == that.callsite() && self.inner == other.inner,
+      (None, None) => self.inner == other.inner,
       _ => false,
     }
   }
 }
 
+/// Span equality partitions spans by callsite identity and runtime state, so it is reflexive
+/// for every span — including disabled and null spans — and `Span` upholds the full `Eq`
+/// contract.
+impl Eq for Span {}
+
+/// Spans hash exactly the identity that `PartialEq` compares: the callsite of their metadata
+/// (if any) followed by their runtime state. Equal spans therefore always produce equal hashes,
+/// making `Span` usable as a key in hashed collections.
 impl Hash for Span {
   fn hash<H: Hasher>(&self, hasher: &mut H) {
+    self.meta.map(Metadata::callsite).hash(hasher);
     self.inner.hash(hasher);
   }
 }

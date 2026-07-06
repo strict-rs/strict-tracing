@@ -36,7 +36,7 @@ impl fmt::Display for FooError {
   reason = "keeps the outer span separate from the nested failing operation"
 )]
 #[tracing::instrument]
-fn do_something(foo: &str) -> Result<&'static str, impl Error + Send + Sync + 'static + use<>> {
+fn do_something(greeting: &str) -> Result<&'static str, impl Error + Send + Sync + 'static + use<>> {
   do_another_thing(42, false)
 }
 

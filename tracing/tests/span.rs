@@ -8,21 +8,49 @@ mod tests {
   // we have a standard library. The behaviour being tested should be the same
   // with the standard lib disabled.
 
+  use std::collections::HashMap;
   use std::convert::identity;
   use std::thread;
 
   use strict_test_support::TestFailure;
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
+  use strict_test_support::ensure_some;
+  use tracing::__macro_support::MacroCallsite;
   use tracing::Level;
+  use tracing::Metadata;
   use tracing::Span;
   use tracing::error_span;
   use tracing::field::Empty;
+  use tracing::field::Value;
   use tracing::field::debug;
   use tracing::field::display;
+  use tracing::level_filters::STATIC_MAX_LEVEL;
+  use tracing::metadata::Kind;
   use tracing::record_all;
+  use tracing::span::Id;
   use tracing::subscriber::with_default;
   use tracing_mock::*;
+
+  static MANUAL_ROOT_CALLSITE: MacroCallsite = MacroCallsite::new(&MANUAL_ROOT_METADATA);
+  static MANUAL_ROOT_METADATA: Metadata<'static> = tracing::metadata! {
+      name: "manual_root",
+      target: module_path!(),
+      level: Level::INFO,
+      fields: &["request", "late"],
+      callsite: &MANUAL_ROOT_CALLSITE,
+      kind: Kind::SPAN,
+  };
+
+  static MANUAL_CHILD_CALLSITE: MacroCallsite = MacroCallsite::new(&MANUAL_CHILD_METADATA);
+  static MANUAL_CHILD_METADATA: Metadata<'static> = tracing::metadata! {
+      name: "manual_child",
+      target: module_path!(),
+      level: Level::INFO,
+      fields: &[],
+      callsite: &MANUAL_CHILD_CALLSITE,
+      kind: Kind::SPAN,
+  };
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
@@ -56,10 +84,22 @@ mod tests {
     })
   }
 
+  // Two same-callsite TRACE spans differ only by their runtime ids. Under a
+  // `max_level_*` cap that disables TRACE both spans are disabled and retain
+  // only their (shared) callsite identity, so they genuinely coincide and the
+  // inequality no longer holds. Gate the test on TRACE remaining statically
+  // enabled.
+  #[cfg(not(any(
+    feature = "max_level_off",
+    feature = "max_level_error",
+    feature = "max_level_warn",
+    feature = "max_level_info",
+    feature = "max_level_debug"
+  )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
   fn handles_to_different_spans_with_the_same_metadata_are_not_equal() -> Result<(), TestFailure> {
-    // Every time time this function is called, it will return a _new
+    // Every time this function is called, it will return a _new
     // instance_ of a span with the same metadata, name, and fields.
     fn make_span() -> Span {
       tracing::span!(Level::TRACE, "foo", bar = 1_u64, baz = false)
@@ -70,6 +110,294 @@ mod tests {
       let foo2 = make_span();
 
       ensure(foo1 != foo2, "different span instances with identical metadata are not equal")
+    })
+  }
+
+  #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+  #[test]
+  fn null_spans_are_the_same_value() -> Result<(), TestFailure> {
+    // `Span::none()` and its clones are the single identity-less "no span"
+    // value, in every feature configuration.
+    let first_null_span = Span::none();
+    let second_null_span = Span::none();
+
+    ensure(
+      first_null_span == second_null_span,
+      "independently constructed null spans are equal",
+    )?;
+    ensure(first_null_span == first_null_span.clone(), "a null span is equal to its own clone")
+  }
+
+  #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+  #[test]
+  fn disabled_spans_keep_callsite_identity() -> Result<(), TestFailure> {
+    // With no subscriber installed, macro-constructed spans are disabled in
+    // every feature configuration, but they still retain their callsite
+    // metadata: their identity is the callsite, not the (absent) runtime id.
+    fn make_disabled_span() -> Span {
+      tracing::span!(Level::TRACE, "identity")
+    }
+
+    let first_disabled = make_disabled_span();
+    let second_disabled = make_disabled_span();
+    let other_callsite = tracing::span!(Level::TRACE, "identity");
+
+    ensure(first_disabled == second_disabled, "disabled spans from the same callsite are equal")?;
+    ensure(
+      first_disabled == first_disabled.clone(),
+      "a disabled span is equal to its own clone",
+    )?;
+    ensure(
+      first_disabled != other_callsite,
+      "disabled spans from different callsites are not equal",
+    )?;
+    ensure(
+      first_disabled != Span::none(),
+      "a disabled macro span keeps its identity and is not the null span",
+    )
+  }
+
+  #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+  #[test]
+  fn or_current_substitutes_current_only_for_disabled_spans() -> Result<(), TestFailure> {
+    let (subscriber, handle) = subscriber::mock()
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::ERROR), |builder| {
+        builder
+          .enter(expect::span().named("outer_or_current"))
+          .clone_span(expect::span().named("outer_or_current"))
+          .enter(expect::span().named("outer_or_current"))
+          .event(
+            expect::event()
+              .with_ancestry(expect::has_contextual_parent("outer_or_current"))
+              .at_level(Level::ERROR),
+          )
+          .exit(expect::span().named("outer_or_current"))
+          .enter(expect::span().named("requested_or_current"))
+          .event(
+            expect::event()
+              .with_ancestry(expect::has_contextual_parent("requested_or_current"))
+              .at_level(Level::ERROR),
+          )
+          .exit(expect::span().named("requested_or_current"))
+      })
+      .run_with_handle();
+
+    with_default(subscriber, || {
+      let outer = tracing::error_span!("outer_or_current");
+      let _outer_guard = outer.enter();
+
+      Span::none().or_current().in_scope(|| {
+        tracing::error!("disabled span inherits the current span");
+      });
+
+      tracing::error_span!("requested_or_current").or_current().in_scope(|| {
+        tracing::error!("enabled span keeps its own identity");
+      });
+    });
+
+    ensure_ok(handle.finished(), "or_current expectations should finish")
+  }
+
+  #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+  #[test]
+  fn current_span_returns_null_without_a_tracked_current_span() -> Result<(), TestFailure> {
+    let current = Span::current();
+
+    ensure(current.is_none(), "current span without a subscriber is null")?;
+    ensure(current.metadata().is_none(), "current null span has no metadata")
+  }
+
+  #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+  #[test]
+  fn current_span_clones_the_entered_span_from_the_subscriber() -> Result<(), TestFailure> {
+    let (subscriber, handle) = subscriber::mock()
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
+        builder
+          .enter(expect::span().named("current_direct"))
+          .clone_span(expect::span().named("current_direct"))
+          .exit(expect::span().named("current_direct"))
+      })
+      .run_with_handle();
+
+    with_default(subscriber, || -> Result<(), TestFailure> {
+      let span = tracing::info_span!("current_direct");
+      let _guard = span.enter();
+      let current = Span::current();
+
+      if !STATIC_MAX_LEVEL.enables(Level::INFO) {
+        return ensure(current.is_none(), "statically disabled INFO span cannot become current");
+      }
+
+      ensure(!current.is_none(), "current span is enabled while an INFO span is entered")?;
+      ensure(
+        current.metadata().is_some_and(|metadata| metadata.name() == "current_direct"),
+        "current span preserves the entered span metadata",
+      )
+    })?;
+
+    ensure_ok(handle.finished(), "current span expectations should finish")
+  }
+
+  #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+  #[test]
+  fn manual_span_constructors_preserve_root_and_explicit_parent_ancestry() -> Result<(), TestFailure> {
+    let (subscriber, handle) = subscriber::mock()
+      .new_span(
+        expect::span()
+          .named("manual_root")
+          .with_ancestry(expect::is_explicit_root())
+          .with_fields(expect::field("request").with_value(&"alpha").only()),
+      )
+      .new_span(
+        expect::span()
+          .named("manual_child")
+          .with_ancestry(expect::has_explicit_parent("manual_root")),
+      )
+      .enter(expect::span().named("manual_child"))
+      .exit(expect::span().named("manual_child"))
+      .enter(expect::span().named("manual_root"))
+      .exit(expect::span().named("manual_root"))
+      .close_span(expect::span().named("manual_child"))
+      .close_span(expect::span().named("manual_root"))
+      .only()
+      .run_with_handle();
+
+    with_default(subscriber, || -> Result<(), TestFailure> {
+      let request = ensure_some(
+        MANUAL_ROOT_METADATA.fields().field("request"),
+        "manual root metadata defines the request field",
+      )?;
+      let request_value = "alpha";
+      let request_value_ref: &dyn Value = &request_value;
+      let root_values = [(&request, Some(request_value_ref))];
+      let root_value_set = MANUAL_ROOT_METADATA.fields().value_set(&root_values);
+      let root = Span::new_root(&MANUAL_ROOT_METADATA, &root_value_set);
+      let root_id = ensure_some(root.id(), "manual root span should have a subscriber id")?;
+
+      let child_value_set = MANUAL_CHILD_METADATA.fields().value_set(&[]);
+      let child = Span::child_of(root_id, &MANUAL_CHILD_METADATA, &child_value_set);
+
+      child.in_scope(|| {});
+      root.in_scope(|| {});
+
+      Ok(())
+    })?;
+
+    ensure_ok(handle.finished(), "manual constructor expectations should finish")
+  }
+
+  #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+  #[test]
+  fn metadata_field_lookup_distinguishes_disabled_spans_from_null_spans() -> Result<(), TestFailure> {
+    let disabled = Span::new_disabled(&MANUAL_ROOT_METADATA);
+    let request = ensure_some(disabled.field("request"), "disabled span exposes metadata fields")?;
+
+    ensure(request.name() == "request", "field lookup returns the requested field")?;
+    ensure(disabled.has_field("late"), "disabled span reports declared late field")?;
+    ensure(!disabled.has_field("missing"), "disabled span rejects undeclared field")?;
+    ensure(
+      disabled.metadata().is_some_and(|metadata| metadata.name() == "manual_root"),
+      "disabled span retains metadata",
+    )?;
+
+    let null = Span::none();
+    ensure(null.field("request").is_none(), "null span has no fields")?;
+    ensure(!null.has_field("request"), "null span rejects every field")?;
+    ensure(null.metadata().is_none(), "null span has no metadata")
+  }
+
+  #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+  #[test]
+  fn span_debug_reports_enabled_disabled_and_null_state() -> Result<(), TestFailure> {
+    let (subscriber, handle) = subscriber::mock()
+      .new_span(expect::span().named("manual_root"))
+      .close_span(expect::span().named("manual_root"))
+      .only()
+      .run_with_handle();
+
+    with_default(subscriber, || -> Result<(), TestFailure> {
+      let value_set = MANUAL_ROOT_METADATA.fields().value_set(&[]);
+      let enabled = Span::new(&MANUAL_ROOT_METADATA, &value_set);
+      let enabled_debug = format!("{enabled:?}");
+      ensure(enabled_debug.contains("manual_root"), "enabled span debug includes its name")?;
+      ensure(enabled_debug.contains("id"), "enabled span debug includes its subscriber id")?;
+
+      let disabled_debug = format!("{:?}", Span::new_disabled(&MANUAL_ROOT_METADATA));
+      ensure(disabled_debug.contains("manual_root"), "disabled span debug includes its name")?;
+      ensure(disabled_debug.contains("disabled"), "disabled span debug reports disabled state")?;
+
+      let null_debug = format!("{:?}", Span::none());
+      ensure(null_debug.contains("none"), "null span debug reports the null state")
+    })?;
+
+    ensure_ok(handle.finished(), "span debug expectations should finish")
+  }
+
+  #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+  #[test]
+  fn option_id_conversions_follow_enabled_and_entered_span_state() -> Result<(), TestFailure> {
+    let (subscriber, handle) = subscriber::mock()
+      .new_span(expect::span().named("manual_root"))
+      .enter(expect::span().named("manual_root"))
+      .exit(expect::span().named("manual_root"))
+      .close_span(expect::span().named("manual_root"))
+      .only()
+      .run_with_handle();
+
+    with_default(subscriber, || -> Result<(), TestFailure> {
+      let value_set = MANUAL_ROOT_METADATA.fields().value_set(&[]);
+      let span = Span::new(&MANUAL_ROOT_METADATA, &value_set);
+      let span_id = ensure_some(span.id(), "enabled span has an id")?;
+      let span_ref_id: Option<&Id> = Option::from(&span);
+      let span_owned_id: Option<Id> = Option::from(&span);
+      ensure(span_ref_id.is_some(), "enabled span converts by reference to an id")?;
+      ensure(span_owned_id == Some(span_id), "enabled span converts to its copied id")?;
+
+      let entered = span.entered();
+      let entered_id = ensure_some(entered.id(), "entered span exposes its id")?;
+      let entered_ref_id: Option<&Id> = Option::from(&entered);
+      let entered_owned_id: Option<Id> = Option::from(&entered);
+      ensure(entered_ref_id.is_some(), "entered span converts by reference to an id")?;
+      ensure(entered_owned_id == Some(entered_id), "entered span converts to its copied id")?;
+      ensure(entered.has_field("request"), "entered span derefs to the underlying span")?;
+
+      let exited = entered.exit();
+      let exited_id: Option<Id> = Option::from(exited);
+      ensure(exited_id == Some(span_id), "exited entered span returns the original span id")?;
+
+      let null_span = Span::none();
+      let null_ref_id: Option<&Id> = Option::from(&null_span);
+      let null_owned_id: Option<Id> = Option::from(Span::none());
+      ensure(null_ref_id.is_none(), "null span has no id by reference")?;
+      ensure(null_owned_id.is_none(), "null span has no owned id")
+    })?;
+
+    ensure_ok(handle.finished(), "option id expectations should finish")
+  }
+
+  #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+  #[test]
+  fn spans_are_findable_hash_map_keys() -> Result<(), TestFailure> {
+    // Whether the span is enabled by the mock subscriber or statically
+    // disabled by a max-level feature, a span and the null span are distinct
+    // map keys, and both are found again through freshly created handles.
+    with_default(subscriber::mock().run(), || {
+      let mut span_names = HashMap::new();
+      let keyed_span = tracing::span!(Level::TRACE, "keyed");
+      let lookup_handle = keyed_span.clone();
+
+      let _replaced_span = span_names.insert(keyed_span, "keyed");
+      let _replaced_null = span_names.insert(Span::none(), "null");
+
+      ensure(span_names.len() == 2, "a macro span and the null span are distinct keys")?;
+      ensure(
+        span_names.get(&lookup_handle) == Some(&"keyed"),
+        "a span is found under a clone of its handle",
+      )?;
+      ensure(
+        span_names.get(&Span::none()) == Some(&"null"),
+        "the null span is found under a fresh null handle",
+      )
     })
   }
 
@@ -88,7 +416,8 @@ mod tests {
 
     let foo = with_default(subscriber1, || {
       let foo = tracing::span!(Level::TRACE, "foo");
-      foo.in_scope(|| {});
+      let guard = foo.enter();
+      drop(guard);
       foo
     });
     // Even though we enter subscriber 2's context, the subscriber that
@@ -121,7 +450,8 @@ mod tests {
     // tagged the span should see the enter/exit.
     thread::spawn(move || {
       with_default(subscriber::mock().run(), || {
-        foo.in_scope(|| {});
+        let guard = foo.enter();
+        drop(guard);
       });
     })
     .join()
@@ -132,9 +462,12 @@ mod tests {
   #[test]
   fn dropping_a_span_closes_span() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .enter(expect::span().named("foo"))
-      .exit(expect::span().named("foo"))
-      .close_span(expect::span().named("foo"))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder
+          .enter(expect::span().named("foo"))
+          .exit(expect::span().named("foo"))
+          .close_span(expect::span().named("foo"))
+      })
       .only()
       .run_with_handle();
     with_default(subscriber, || {
@@ -147,6 +480,17 @@ mod tests {
     Ok(())
   }
 
+  // A TRACE span wraps a DEBUG event: a `max_level_*` cap that disables TRACE
+  // removes the span's enter/exit/close notifications while (some caps) still
+  // deliver the event, changing the delivered subset. Gate the test on TRACE
+  // remaining statically enabled.
+  #[cfg(not(any(
+    feature = "max_level_off",
+    feature = "max_level_error",
+    feature = "max_level_warn",
+    feature = "max_level_info",
+    feature = "max_level_debug"
+  )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
   fn span_closes_after_event() -> Result<(), TestFailure> {
@@ -167,6 +511,17 @@ mod tests {
     Ok(())
   }
 
+  // TRACE spans wrap a DEBUG event: a `max_level_*` cap that disables TRACE
+  // removes the span notifications while (some caps) still deliver the event,
+  // changing the delivered subset. Gate the test on TRACE remaining statically
+  // enabled.
+  #[cfg(not(any(
+    feature = "max_level_off",
+    feature = "max_level_error",
+    feature = "max_level_warn",
+    feature = "max_level_info",
+    feature = "max_level_debug"
+  )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
   fn new_span_after_event() -> Result<(), TestFailure> {
@@ -191,6 +546,17 @@ mod tests {
     Ok(())
   }
 
+  // A DEBUG event precedes a TRACE span: a `max_level_*` cap that disables TRACE
+  // removes the span notifications while (some caps) still deliver the event,
+  // changing the delivered subset. Gate the test on TRACE remaining statically
+  // enabled.
+  #[cfg(not(any(
+    feature = "max_level_off",
+    feature = "max_level_error",
+    feature = "max_level_warn",
+    feature = "max_level_info",
+    feature = "max_level_debug"
+  )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
   fn event_outside_of_span() -> Result<(), TestFailure> {
@@ -213,7 +579,11 @@ mod tests {
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
   fn cloning_a_span_calls_clone_span() -> Result<(), TestFailure> {
-    let (subscriber, handle) = subscriber::mock().clone_span(expect::span().named("foo")).run_with_handle();
+    let (subscriber, handle) = subscriber::mock()
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder.clone_span(expect::span().named("foo"))
+      })
+      .run_with_handle();
     with_default(subscriber, || {
       let span = tracing::span!(Level::TRACE, "foo");
       // Allow the "redundant" `.clone` since it is used to call into the `.clone_span` hook.
@@ -225,6 +595,17 @@ mod tests {
     Ok(())
   }
 
+  // TRACE span clone/close notifications wrap a DEBUG event: a `max_level_*` cap
+  // that disables TRACE removes the clone/close while (some caps) still deliver
+  // the event, changing the delivered subset. Gate the test on TRACE remaining
+  // statically enabled.
+  #[cfg(not(any(
+    feature = "max_level_off",
+    feature = "max_level_error",
+    feature = "max_level_warn",
+    feature = "max_level_info",
+    feature = "max_level_debug"
+  )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
   fn close_span_when_exiting_dispatchers_context() -> Result<(), TestFailure> {
@@ -249,12 +630,15 @@ mod tests {
   #[test]
   fn clone_and_close_span_always_go_to_the_subscriber_that_tagged_the_span() -> Result<(), TestFailure> {
     let (subscriber1, handle1) = subscriber::mock()
-      .enter(expect::span().named("foo"))
-      .exit(expect::span().named("foo"))
-      .clone_span(expect::span().named("foo"))
-      .enter(expect::span().named("foo"))
-      .exit(expect::span().named("foo"))
-      .close_span(expect::span().named("foo"))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder
+          .enter(expect::span().named("foo"))
+          .exit(expect::span().named("foo"))
+          .clone_span(expect::span().named("foo"))
+          .enter(expect::span().named("foo"))
+          .exit(expect::span().named("foo"))
+          .close_span(expect::span().named("foo"))
+      })
       .run_with_handle();
     let subscriber2 = subscriber::mock().only().run();
 
@@ -280,9 +664,12 @@ mod tests {
   #[test]
   fn span_closes_when_exited() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .enter(expect::span().named("foo"))
-      .exit(expect::span().named("foo"))
-      .close_span(expect::span().named("foo"))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder
+          .enter(expect::span().named("foo"))
+          .exit(expect::span().named("foo"))
+          .close_span(expect::span().named("foo"))
+      })
       .only()
       .run_with_handle();
     with_default(subscriber, || {
@@ -297,6 +684,17 @@ mod tests {
     Ok(())
   }
 
+  // A TRACE span wraps a DEBUG event: a `max_level_*` cap that disables TRACE
+  // removes the span's enter/exit/close notifications while (some caps) still
+  // deliver the event, changing the delivered subset. Gate the test on TRACE
+  // remaining statically enabled.
+  #[cfg(not(any(
+    feature = "max_level_off",
+    feature = "max_level_error",
+    feature = "max_level_warn",
+    feature = "max_level_info",
+    feature = "max_level_debug"
+  )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
   fn enter() -> Result<(), TestFailure> {
@@ -317,6 +715,17 @@ mod tests {
     Ok(())
   }
 
+  // A TRACE span wraps a DEBUG event: a `max_level_*` cap that disables TRACE
+  // removes the span's enter/exit/close notifications while (some caps) still
+  // deliver the event, changing the delivered subset. Gate the test on TRACE
+  // remaining statically enabled.
+  #[cfg(not(any(
+    feature = "max_level_off",
+    feature = "max_level_error",
+    feature = "max_level_warn",
+    feature = "max_level_info",
+    feature = "max_level_debug"
+  )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
   fn entered() -> Result<(), TestFailure> {
@@ -336,6 +745,17 @@ mod tests {
     Ok(())
   }
 
+  // A TRACE span wraps a DEBUG event: a `max_level_*` cap that disables TRACE
+  // removes the span's enter/exit/close notifications while (some caps) still
+  // deliver the event, changing the delivered subset. Gate the test on TRACE
+  // remaining statically enabled.
+  #[cfg(not(any(
+    feature = "max_level_off",
+    feature = "max_level_error",
+    feature = "max_level_warn",
+    feature = "max_level_info",
+    feature = "max_level_debug"
+  )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
   fn entered_api() -> Result<(), TestFailure> {
@@ -361,14 +781,17 @@ mod tests {
   #[test]
   fn moved_field() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(
-        expect::span()
-          .named("foo")
-          .with_fields(expect::field("bar").with_value(&display("hello from my span")).only()),
-      )
-      .enter(expect::span().named("foo"))
-      .exit(expect::span().named("foo"))
-      .close_span(expect::span().named("foo"))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder
+          .new_span(
+            expect::span()
+              .named("foo")
+              .with_fields(expect::field("bar").with_value(&display("hello from my span")).only()),
+          )
+          .enter(expect::span().named("foo"))
+          .exit(expect::span().named("foo"))
+          .close_span(expect::span().named("foo"))
+      })
       .only()
       .run_with_handle();
     with_default(subscriber, || {
@@ -385,11 +808,13 @@ mod tests {
   #[test]
   fn dotted_field_name() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(
-        expect::span()
-          .named("foo")
-          .with_fields(expect::field("fields.bar").with_value(&true).only()),
-      )
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder.new_span(
+          expect::span()
+            .named("foo")
+            .with_fields(expect::field("fields.bar").with_value(&true).only()),
+        )
+      })
       .only()
       .run_with_handle();
     with_default(subscriber, || {
@@ -404,14 +829,17 @@ mod tests {
   #[test]
   fn borrowed_field() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(
-        expect::span()
-          .named("foo")
-          .with_fields(expect::field("bar").with_value(&display("hello from my span")).only()),
-      )
-      .enter(expect::span().named("foo"))
-      .exit(expect::span().named("foo"))
-      .close_span(expect::span().named("foo"))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder
+          .new_span(
+            expect::span()
+              .named("foo")
+              .with_fields(expect::field("bar").with_value(&display("hello from my span")).only()),
+          )
+          .enter(expect::span().named("foo"))
+          .exit(expect::span().named("foo"))
+          .close_span(expect::span().named("foo"))
+      })
       .only()
       .run_with_handle();
 
@@ -445,19 +873,22 @@ mod tests {
       x: 3.234, y: -1.223
     };
     let (subscriber, handle) = subscriber::mock()
-      .new_span(
-        expect::span().named("foo").with_fields(
-          expect::field("x")
-            .with_value(&debug(3.234))
-            .and(expect::field("y").with_value(&debug(-1.223)))
-            .only(),
-        ),
-      )
-      .new_span(
-        expect::span()
-          .named("bar")
-          .with_fields(expect::field("position").with_value(&debug(&expected_pos)).only()),
-      )
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder
+          .new_span(
+            expect::span().named("foo").with_fields(
+              expect::field("x")
+                .with_value(&debug(3.234))
+                .and(expect::field("y").with_value(&debug(-1.223)))
+                .only(),
+            ),
+          )
+          .new_span(
+            expect::span()
+              .named("bar")
+              .with_fields(expect::field("position").with_value(&debug(&expected_pos)).only()),
+          )
+      })
       .run_with_handle();
 
     with_default(subscriber, || {
@@ -478,14 +909,16 @@ mod tests {
   #[test]
   fn float_values() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(
-        expect::span().named("foo").with_fields(
-          expect::field("x")
-            .with_value(&3.234)
-            .and(expect::field("y").with_value(&-1.223))
-            .only(),
-        ),
-      )
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder.new_span(
+          expect::span().named("foo").with_fields(
+            expect::field("x")
+              .with_value(&3.234)
+              .and(expect::field("y").with_value(&-1.223))
+              .only(),
+          ),
+        )
+      })
       .run_with_handle();
 
     with_default(subscriber, || {
@@ -561,18 +994,21 @@ mod tests {
   #[test]
   fn record_new_value_for_field() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(
-        expect::span().named("foo").with_fields(
-          expect::field("bar")
-            .with_value(&5)
-            .and(expect::field("baz").with_value(&false))
-            .only(),
-        ),
-      )
-      .record(expect::span().named("foo"), expect::field("baz").with_value(&true).only())
-      .enter(expect::span().named("foo"))
-      .exit(expect::span().named("foo"))
-      .close_span(expect::span().named("foo"))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder
+          .new_span(
+            expect::span().named("foo").with_fields(
+              expect::field("bar")
+                .with_value(&5)
+                .and(expect::field("baz").with_value(&false))
+                .only(),
+            ),
+          )
+          .record(expect::span().named("foo"), expect::field("baz").with_value(&true).only())
+          .enter(expect::span().named("foo"))
+          .exit(expect::span().named("foo"))
+          .close_span(expect::span().named("foo"))
+      })
       .only()
       .run_with_handle();
 
@@ -590,19 +1026,22 @@ mod tests {
   #[test]
   fn record_new_values_for_fields() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(
-        expect::span().named("foo").with_fields(
-          expect::field("bar")
-            .with_value(&4)
-            .and(expect::field("baz").with_value(&false))
-            .only(),
-        ),
-      )
-      .record(expect::span().named("foo"), expect::field("bar").with_value(&5).only())
-      .record(expect::span().named("foo"), expect::field("baz").with_value(&true).only())
-      .enter(expect::span().named("foo"))
-      .exit(expect::span().named("foo"))
-      .close_span(expect::span().named("foo"))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder
+          .new_span(
+            expect::span().named("foo").with_fields(
+              expect::field("bar")
+                .with_value(&4)
+                .and(expect::field("baz").with_value(&false))
+                .only(),
+            ),
+          )
+          .record(expect::span().named("foo"), expect::field("bar").with_value(&5).only())
+          .record(expect::span().named("foo"), expect::field("baz").with_value(&true).only())
+          .enter(expect::span().named("foo"))
+          .exit(expect::span().named("foo"))
+          .close_span(expect::span().named("foo"))
+      })
       .only()
       .run_with_handle();
 
@@ -625,18 +1064,21 @@ mod tests {
   #[test]
   fn record_all_macro_records_new_values_for_fields() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(expect::span().named("foo").with_fields(expect::field("bar")))
-      .record(
-        expect::span().named("foo"),
-        expect::field("bar")
-          .with_value(&5)
-          .and(expect::field("qux").with_value(&display("qux")))
-          .and(expect::field("quux").with_value(&debug("QuuX")))
-          .only(),
-      )
-      .enter(expect::span().named("foo"))
-      .exit(expect::span().named("foo"))
-      .close_span(expect::span().named("foo"))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder
+          .new_span(expect::span().named("foo").with_fields(expect::field("bar")))
+          .record(
+            expect::span().named("foo"),
+            expect::field("bar")
+              .with_value(&5)
+              .and(expect::field("qux").with_value(&display("qux")))
+              .and(expect::field("quux").with_value(&debug("QuuX")))
+              .only(),
+          )
+          .enter(expect::span().named("foo"))
+          .exit(expect::span().named("foo"))
+          .close_span(expect::span().named("foo"))
+      })
       .only()
       .run_with_handle();
 
@@ -654,19 +1096,22 @@ mod tests {
   #[test]
   fn record_all_macro_records_all_fields() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(expect::span().named("foo").with_fields(expect::field("bar")))
-      .record(
-        expect::span().named("foo"),
-        expect::field("bar")
-          .with_value(&5)
-          .and(expect::field("baz").with_value(&6))
-          .and(expect::field("qux").with_value(&display("qux")))
-          .and(expect::field("quux").with_value(&debug("QuuX")))
-          .only(),
-      )
-      .enter(expect::span().named("foo"))
-      .exit(expect::span().named("foo"))
-      .close_span(expect::span().named("foo"))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder
+          .new_span(expect::span().named("foo").with_fields(expect::field("bar")))
+          .record(
+            expect::span().named("foo"),
+            expect::field("bar")
+              .with_value(&5)
+              .and(expect::field("baz").with_value(&6))
+              .and(expect::field("qux").with_value(&display("qux")))
+              .and(expect::field("quux").with_value(&debug("QuuX")))
+              .only(),
+          )
+          .enter(expect::span().named("foo"))
+          .exit(expect::span().named("foo"))
+          .close_span(expect::span().named("foo"))
+      })
       .only()
       .run_with_handle();
 
@@ -684,19 +1129,22 @@ mod tests {
   #[test]
   fn record_all_macro_records_all_fields_different_order() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(expect::span().named("foo").with_fields(expect::field("bar")))
-      .record(
-        expect::span().named("foo"),
-        expect::field("bar")
-          .with_value(&5)
-          .and(expect::field("baz").with_value(&6))
-          .and(expect::field("qux").with_value(&display("qux")))
-          .and(expect::field("quux").with_value(&debug("QuuX")))
-          .only(),
-      )
-      .enter(expect::span().named("foo"))
-      .exit(expect::span().named("foo"))
-      .close_span(expect::span().named("foo"))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder
+          .new_span(expect::span().named("foo").with_fields(expect::field("bar")))
+          .record(
+            expect::span().named("foo"),
+            expect::field("bar")
+              .with_value(&5)
+              .and(expect::field("baz").with_value(&6))
+              .and(expect::field("qux").with_value(&display("qux")))
+              .and(expect::field("quux").with_value(&debug("QuuX")))
+              .only(),
+          )
+          .enter(expect::span().named("foo"))
+          .exit(expect::span().named("foo"))
+          .close_span(expect::span().named("foo"))
+      })
       .only()
       .run_with_handle();
 
@@ -714,11 +1162,14 @@ mod tests {
   #[test]
   fn record_all_macro_unknown_field() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(expect::span().named("foo").with_fields(expect::field("bar")))
-      .record(expect::span().named("foo"), field::ExpectedFields::default().only())
-      .enter(expect::span().named("foo"))
-      .exit(expect::span().named("foo"))
-      .close_span(expect::span().named("foo"))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder
+          .new_span(expect::span().named("foo").with_fields(expect::field("bar")))
+          .record(expect::span().named("foo"), field::ExpectedFields::default().only())
+          .enter(expect::span().named("foo"))
+          .exit(expect::span().named("foo"))
+          .close_span(expect::span().named("foo"))
+      })
       .only()
       .run_with_handle();
 
@@ -736,7 +1187,9 @@ mod tests {
   #[test]
   fn new_span_with_target_and_log_level() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(expect::span().named("foo").with_target("app_span").at_level(Level::DEBUG))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::DEBUG), |builder| {
+        builder.new_span(expect::span().named("foo").with_target("app_span").at_level(Level::DEBUG))
+      })
       .only()
       .run_with_handle();
 
@@ -752,7 +1205,9 @@ mod tests {
   #[test]
   fn explicit_root_span_is_root() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(expect::span().named("foo").with_ancestry(expect::is_explicit_root()))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder.new_span(expect::span().named("foo").with_ancestry(expect::is_explicit_root()))
+      })
       .only()
       .run_with_handle();
 
@@ -768,10 +1223,13 @@ mod tests {
   #[test]
   fn explicit_root_span_is_root_regardless_of_ctx() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(expect::span().named("foo"))
-      .enter(expect::span().named("foo"))
-      .new_span(expect::span().named("bar").with_ancestry(expect::is_explicit_root()))
-      .exit(expect::span().named("foo"))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder
+          .new_span(expect::span().named("foo"))
+          .enter(expect::span().named("foo"))
+          .new_span(expect::span().named("bar").with_ancestry(expect::is_explicit_root()))
+          .exit(expect::span().named("foo"))
+      })
       .only()
       .run_with_handle();
 
@@ -785,6 +1243,17 @@ mod tests {
     Ok(())
   }
 
+  // The child span carries `parent: foo.id()`, but both spans are TRACE; a
+  // `max_level_*` cap that disables TRACE compiles both out, so `foo.id()` is
+  // `None` and the explicit-parent scenario cannot run. Gate the test on TRACE
+  // remaining statically enabled.
+  #[cfg(not(any(
+    feature = "max_level_off",
+    feature = "max_level_error",
+    feature = "max_level_warn",
+    feature = "max_level_info",
+    feature = "max_level_debug"
+  )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
   fn explicit_child() -> Result<(), TestFailure> {
@@ -803,6 +1272,18 @@ mod tests {
     Ok(())
   }
 
+  // `foo` is a TRACE parent span while the five child spans span TRACE..ERROR.
+  // Under a cap that disables TRACE (but not the higher child levels), `foo` is
+  // compiled out, so `foo.id()` is `None` and the surviving child spans become
+  // roots instead of explicit children of `foo` — a shape and subset change.
+  // Gate the test on TRACE remaining statically enabled.
+  #[cfg(not(any(
+    feature = "max_level_off",
+    feature = "max_level_error",
+    feature = "max_level_warn",
+    feature = "max_level_info",
+    feature = "max_level_debug"
+  )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
   fn explicit_child_at_levels() -> Result<(), TestFailure> {
@@ -833,11 +1314,14 @@ mod tests {
   #[test]
   fn explicit_child_regardless_of_ctx() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(expect::span().named("foo"))
-      .new_span(expect::span().named("bar"))
-      .enter(expect::span().named("bar"))
-      .new_span(expect::span().named("baz").with_ancestry(expect::has_explicit_parent("foo")))
-      .exit(expect::span().named("bar"))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder
+          .new_span(expect::span().named("foo"))
+          .new_span(expect::span().named("bar"))
+          .enter(expect::span().named("bar"))
+          .new_span(expect::span().named("baz").with_ancestry(expect::has_explicit_parent("foo")))
+          .exit(expect::span().named("bar"))
+      })
       .only()
       .run_with_handle();
 
@@ -854,7 +1338,9 @@ mod tests {
   #[test]
   fn contextual_root() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(expect::span().named("foo").with_ancestry(expect::is_contextual_root()))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder.new_span(expect::span().named("foo").with_ancestry(expect::is_contextual_root()))
+      })
       .only()
       .run_with_handle();
 
@@ -870,10 +1356,13 @@ mod tests {
   #[test]
   fn contextual_child() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(expect::span().named("foo"))
-      .enter(expect::span().named("foo"))
-      .new_span(expect::span().named("bar").with_ancestry(expect::has_contextual_parent("foo")))
-      .exit(expect::span().named("foo"))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder
+          .new_span(expect::span().named("foo"))
+          .enter(expect::span().named("foo"))
+          .new_span(expect::span().named("bar").with_ancestry(expect::has_contextual_parent("foo")))
+          .exit(expect::span().named("foo"))
+      })
       .only()
       .run_with_handle();
 
@@ -891,11 +1380,13 @@ mod tests {
   #[test]
   fn display_shorthand() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(
-        expect::span()
-          .named("my_span")
-          .with_fields(expect::field("my_field").with_value(&display("hello world")).only()),
-      )
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder.new_span(
+          expect::span()
+            .named("my_span")
+            .with_fields(expect::field("my_field").with_value(&display("hello world")).only()),
+        )
+      })
       .only()
       .run_with_handle();
     with_default(subscriber, || {
@@ -910,11 +1401,13 @@ mod tests {
   #[test]
   fn debug_shorthand() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(
-        expect::span()
-          .named("my_span")
-          .with_fields(expect::field("my_field").with_value(&debug("hello world")).only()),
-      )
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder.new_span(
+          expect::span()
+            .named("my_span")
+            .with_fields(expect::field("my_field").with_value(&debug("hello world")).only()),
+        )
+      })
       .only()
       .run_with_handle();
     with_default(subscriber, || {
@@ -929,14 +1422,16 @@ mod tests {
   #[test]
   fn both_shorthands() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(
-        expect::span().named("my_span").with_fields(
-          expect::field("display_field")
-            .with_value(&display("hello world"))
-            .and(expect::field("debug_field").with_value(&debug("hello world")))
-            .only(),
-        ),
-      )
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder.new_span(
+          expect::span().named("my_span").with_fields(
+            expect::field("display_field")
+              .with_value(&display("hello world"))
+              .and(expect::field("debug_field").with_value(&debug("hello world")))
+              .only(),
+          ),
+        )
+      })
       .only()
       .run_with_handle();
     with_default(subscriber, || {
@@ -951,15 +1446,17 @@ mod tests {
   #[test]
   fn constant_field_name() -> Result<(), TestFailure> {
     let (subscriber, handle) = subscriber::mock()
-      .new_span(
-        expect::span().named("my_span").with_fields(
-          expect::field("foo")
-            .with_value(&"bar")
-            .and(expect::field("constant string").with_value(&"also works"))
-            .and(expect::field("foo.bar").with_value(&"baz"))
-            .only(),
-        ),
-      )
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
+        builder.new_span(
+          expect::span().named("my_span").with_fields(
+            expect::field("foo")
+              .with_value(&"bar")
+              .and(expect::field("constant string").with_value(&"also works"))
+              .and(expect::field("foo.bar").with_value(&"baz"))
+              .only(),
+          ),
+        )
+      })
       .only()
       .run_with_handle();
 
@@ -985,7 +1482,9 @@ mod tests {
     struct Foo;
 
     let (subscriber, handle) = subscriber::mock()
-      .new_span(expect::span().with_fields(expect::field("self").with_value(&debug(Foo)).only()))
+      .expect_when(STATIC_MAX_LEVEL.enables(Level::ERROR), |builder| {
+        builder.new_span(expect::span().with_fields(expect::field("self").with_value(&debug(Foo)).only()))
+      })
       .only()
       .run_with_handle();
 

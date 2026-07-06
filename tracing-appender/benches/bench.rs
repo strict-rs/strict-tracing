@@ -1,13 +1,9 @@
 //! Benchmarks for synchronous and non-blocking appenders.
 
+use std::io;
 use std::io::Write;
-use std::io::{
-  self,
-};
+use std::thread;
 use std::thread::JoinHandle;
-use std::thread::{
-  self,
-};
 use std::time::Instant;
 
 use criterion::Criterion;
@@ -50,6 +46,13 @@ impl Write for NoOpWriter {
   }
 }
 
+/// Emits the measured benchmark event `iters` times.
+fn record_events(iters: u64) {
+  for _ in 0..iters {
+    event!(Level::INFO, "event");
+  }
+}
+
 /// Registers synchronous writer benchmarks.
 #[allow(
   clippy::single_call_fn,
@@ -75,20 +78,12 @@ fn synchronous_benchmark(criterion: &mut Criterion) {
 
       handles.push(thread::spawn(move || {
         let subscriber = tracing_subscriber::fmt().with_writer(make_writer);
-        with_default(subscriber.finish(), || {
-          for _ in 0..iters {
-            event!(Level::INFO, "event");
-          }
-        });
+        with_default(subscriber.finish(), || record_events(iters));
       }));
 
       handles.push(thread::spawn(move || {
         let subscriber = tracing_subscriber::fmt().with_writer(cloned_make_writer);
-        with_default(subscriber.finish(), || {
-          for _ in 0..iters {
-            event!(Level::INFO, "event");
-          }
-        });
+        with_default(subscriber.finish(), || record_events(iters));
       }));
 
       for handle in handles {
@@ -129,20 +124,12 @@ fn non_blocking_benchmark(criterion: &mut Criterion) {
 
       handles.push(thread::spawn(move || {
         let subscriber = tracing_subscriber::fmt().with_writer(non_blocking);
-        with_default(subscriber.finish(), || {
-          for _ in 0..iters {
-            event!(Level::INFO, "event");
-          }
-        });
+        with_default(subscriber.finish(), || record_events(iters));
       }));
 
       handles.push(thread::spawn(move || {
         let subscriber = tracing_subscriber::fmt().with_writer(cloned_make_writer);
-        with_default(subscriber.finish(), || {
-          for _ in 0..iters {
-            event!(Level::INFO, "event");
-          }
-        });
+        with_default(subscriber.finish(), || record_events(iters));
       }));
 
       for handle in handles {

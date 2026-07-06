@@ -195,13 +195,8 @@ where
     let writer_thread = thread::spawn(move || {
       while let Ok(command) = receiver.recv() {
         match command {
-          WriterCommand::WriteLine(line) => {
-            let _write_result: io::Result<()> = writeln!(writer, "{line}");
-          }
-          WriterCommand::Flush(flush_complete) => {
-            let flush_result = writer.flush();
-            let _send_result: Result<(), mpsc::SendError<io::Result<()>>> = flush_complete.send(flush_result);
-          }
+          WriterCommand::WriteLine(line) => drop(writeln!(writer, "{line}")),
+          WriterCommand::Flush(flush_complete) => drop(flush_complete.send(writer.flush())),
         }
       }
     });
@@ -243,6 +238,12 @@ enum WriterCommand {
     mpsc::Sender<io::Result<()>>,
   ),
 }
+
+/// Flush guard used for file-backed flame layers.
+type FileFlushGuard = FlushGuard<BufWriter<File>>;
+
+/// Result returned when constructing a file-backed flame layer.
+type FileLayerResult<S> = Result<(FlameLayer<S, BufWriter<File>>, FileFlushGuard), FlameError>;
 
 /// A `Layer` that records span open/close events as folded flamegraph stack
 /// samples.
@@ -519,7 +520,7 @@ where
   /// # Errors
   ///
   /// Returns an error when the output file cannot be created.
-  pub fn with_file(path: impl AsRef<Path>) -> Result<(Self, FlushGuard<BufWriter<File>>), FlameError> {
+  pub fn with_file(path: impl AsRef<Path>) -> FileLayerResult<S> {
     let output_path = path.as_ref();
     let file = File::create(output_path).map_err(|source| FlameError::create_file(output_path.to_path_buf(), source))?;
     let writer = BufWriter::new(file);

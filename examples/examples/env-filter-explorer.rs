@@ -1,9 +1,7 @@
 //! Example binary for tracing workspace checks.
 
+use std::io;
 use std::io::Write;
-use std::io::{
-  self,
-};
 use std::sync::Arc;
 
 use ansi_to_tui::IntoText as _;
@@ -30,8 +28,8 @@ use tracing_subscriber::fmt::MakeWriter;
 ///
 /// The UI allows you to select a preset filter with the up/down arrow keys.
 const PRESET_FILTERS: &[&str] = &[
-  "trace", "debug", "info", "warn", "error", "[with_fields]", "[with_fields{foo}]", "[with_fields{bar}]", "[with_fields{foo=42}]",
-  "[with_fields{bar=bar}]", "[with_fields{foo=99}]", "[with_fields{bar=nope}]", "[with_fields{nonexistent}]", "other_crate=info",
+  "trace", "debug", "info", "warn", "error", "[with_fields]", "[with_fields{answer}]", "[with_fields{label}]", "[with_fields{answer=42}]",
+  "[with_fields{label=bar}]", "[with_fields{answer=99}]", "[with_fields{label=nope}]", "[with_fields{nonexistent}]", "other_crate=info",
   "other_crate=debug", "trace,other_crate=warn", "warn,other_crate=info",
 ];
 
@@ -230,8 +228,8 @@ fn simulate_logging() {
 
 /// Emits an event with named fields used by the filter presets.
 #[tracing::instrument]
-fn with_fields(foo: u32, bar: &'static str) {
-  tracing::info!(foo, bar, "This is an info message with fields");
+fn with_fields(answer: u32, label: &'static str) {
+  tracing::info!(answer, label, "This is an info message with fields");
 }
 
 /// Emits logs inside a trace-level span.

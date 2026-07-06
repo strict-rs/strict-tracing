@@ -861,15 +861,23 @@ impl<T, F, W> SubscriberBuilder<format::JsonFields, format::Format<format::Json,
 
 #[cfg(feature = "env-filter")]
 #[cfg_attr(docsrs, doc(cfg(feature = "env-filter")))]
+/// Reloading layer type used by [`SubscriberBuilder::with_filter_reloading`].
+type ReloadingEnvFilter<N, E, W> = ReloadLayer<EnvFilter, Formatter<N, E, W>>;
+
+#[cfg(feature = "env-filter")]
+#[cfg_attr(docsrs, doc(cfg(feature = "env-filter")))]
+/// Subscriber builder returned after enabling runtime filter reloading.
+type ReloadingSubscriberBuilder<N, E, W> = SubscriberBuilder<N, E, ReloadingEnvFilter<N, E, W>, W>;
+
+#[cfg(feature = "env-filter")]
+#[cfg_attr(docsrs, doc(cfg(feature = "env-filter")))]
 impl<N, E, W> SubscriberBuilder<N, E, EnvFilter, W>
 where
     Formatter<N, E, W>: tracing_core::Subscriber + 'static,
 {
     /// Configures the subscriber being built to allow filter reloading at
     /// runtime.
-    pub fn with_filter_reloading(
-        self,
-    ) -> SubscriberBuilder<N, E, ReloadLayer<EnvFilter, Formatter<N, E, W>>, W> {
+    pub fn with_filter_reloading(self) -> ReloadingSubscriberBuilder<N, E, W> {
         let (filter, _) = ReloadLayer::new(self.filter);
         SubscriberBuilder {
             filter,

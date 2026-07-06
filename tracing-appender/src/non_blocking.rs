@@ -441,8 +441,8 @@ impl ErrorCounter {
     // `fetch_add`, because we don't want to wrap on overflow. Instead, we
     // need to ensure that saturating addition is performed.
     loop {
-      let val = curr.saturating_add(1);
-      match self.0.compare_exchange(curr, val, Ordering::AcqRel, Ordering::Acquire) {
+      let incremented = curr.saturating_add(1);
+      match self.0.compare_exchange(curr, incremented, Ordering::AcqRel, Ordering::Acquire) {
         Ok(_) => return,
         Err(actual) => curr = actual,
       }
@@ -453,16 +453,15 @@ impl ErrorCounter {
 #[cfg(test)]
 mod test {
   use std::sync::mpsc;
+  use std::thread;
   use std::thread::JoinHandle;
-  use std::thread::{
-    self,
-  };
   use std::time::Duration;
 
   use strict_test_support::TestFailure;
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
+  use strict_test_support::ensure_some;
   use tracing::subscriber;
 
   use super::*;
@@ -616,9 +615,7 @@ mod test {
       let writer = NonBlocking::clone(&non_blocking);
       join_handles.push(thread::spawn(move || {
         let subscriber = tracing_subscriber::fmt().with_writer(writer);
-        subscriber::with_default(subscriber.finish(), || {
-          tracing::event!(tracing::Level::INFO, "Hello");
-        });
+        subscriber::with_default(subscriber.finish(), || tracing::event!(tracing::Level::INFO, "Hello"));
         Ok(())
       }));
     }
@@ -636,5 +633,165 @@ mod test {
 
     ensure_eq(&hello_count, &THREAD_COUNT, "all writer threads emit one line")?;
     ensure_eq(&error_count.dropped_lines(), &0, "multi-threaded writes do not drop lines")
+  }
+
+  #[test]
+  fn failed_worker_writer_reports_stored_spawn_error() -> Result<(), TestFailure> {
+    let (mut non_blocking, guard) = NonBlocking::create_failed(1, true, io::ErrorKind::PermissionDenied);
+
+    let error = ensure_some(
+      non_blocking.write_all(b"not written").err(),
+      "failed worker writer returns an error",
+    )?;
+    ensure(
+      error.kind() == io::ErrorKind::PermissionDenied,
+      "failed worker writer preserves the spawn error kind",
+    )?;
+    ensure_eq(
+      &non_blocking.error_counter().dropped_lines(),
+      &0,
+      "failed worker writes are not counted as lossy drops",
+    )?;
+    drop(guard);
+    Ok(())
+  }
+
+  #[test]
+  fn worker_spawn_error_reports_source_kind() -> Result<(), TestFailure> {
+    let error = WorkerSpawnError {
+      source: io::Error::from(io::ErrorKind::PermissionDenied),
+    };
+
+    ensure(
+      error.kind() == io::ErrorKind::PermissionDenied,
+      "worker spawn error exposes its source kind",
+    )?;
+    ensure(
+      error.to_string() == "failed to spawn `tracing-appender` non-blocking worker thread",
+      "worker spawn error display is stable",
+    )
+  }
+
+  #[test]
+  fn builder_methods_preserve_configuration_and_try_finish_writes() -> Result<(), TestFailure> {
+    let builder = NonBlockingBuilder::default()
+      .buffered_lines_limit(2)
+      .lossy(false)
+      .thread_name("strict-test-worker");
+
+    ensure_eq(&builder.buffered_lines_limit, &2, "builder stores buffered line limit")?;
+    ensure(!builder.is_lossy, "builder stores non-lossy policy")?;
+    ensure_eq(
+      &builder.thread_name.as_str(),
+      &"strict-test-worker",
+      "builder stores custom thread name",
+    )?;
+
+    let (mock_writer, receiver) = MockWriter::new(2);
+    let (mut non_blocking, guard) = ensure_ok(builder.try_finish(mock_writer), "try_finish constructs a non-blocking writer")?;
+    ensure_ok(non_blocking.write_all(b"configured"), "configured writer accepts a line")?;
+    drop(non_blocking);
+    drop(guard);
+
+    let line = ensure_ok(
+      receiver.recv_timeout(EVENT_RECV_TIMEOUT),
+      "configured writer flushes through worker",
+    )?;
+    ensure(line == "configured", "configured writer line is forwarded")
+  }
+
+  #[test]
+  fn try_new_uses_default_builder_and_exposes_error_counter() -> Result<(), TestFailure> {
+    let (mock_writer, receiver) = MockWriter::new(1);
+    let (mut non_blocking, guard) = ensure_ok(
+      NonBlocking::try_new(mock_writer),
+      "try_new constructs the default non-blocking writer",
+    )?;
+    let counter = non_blocking.error_counter();
+
+    ensure_eq(&counter.dropped_lines(), &0, "new writer starts with zero dropped lines")?;
+    ensure_ok(non_blocking.write_all(b"default"), "default writer accepts a line")?;
+    drop(non_blocking);
+    drop(guard);
+
+    let line = ensure_ok(receiver.recv_timeout(EVENT_RECV_TIMEOUT), "default writer flushes through worker")?;
+    ensure(line == "default", "default writer line is forwarded")
+  }
+
+  #[test]
+  fn closed_lossy_channel_counts_dropped_lines_without_failing_write() -> Result<(), TestFailure> {
+    let (sender, receiver) = bounded(0);
+    drop(receiver);
+    let mut non_blocking = NonBlocking {
+      channel:           sender,
+      error_counter:     ErrorCounter::new(),
+      is_lossy:          true,
+      worker_error_kind: None,
+    };
+
+    ensure_ok(
+      non_blocking.write_all(b"dropped"),
+      "lossy writes report success when the line is dropped",
+    )?;
+    ensure_eq(
+      &non_blocking.error_counter().dropped_lines(),
+      &1,
+      "lossy write increments dropped-line counter",
+    )
+  }
+
+  #[test]
+  fn closed_backpressure_channel_reports_broken_pipe() -> Result<(), TestFailure> {
+    let (sender, receiver) = bounded(0);
+    drop(receiver);
+    let mut non_blocking = NonBlocking {
+      channel:           sender,
+      error_counter:     ErrorCounter::new(),
+      is_lossy:          false,
+      worker_error_kind: None,
+    };
+
+    let error = ensure_some(
+      non_blocking.write_all(b"blocked").err(),
+      "backpressure writes fail when the worker is gone",
+    )?;
+    ensure(
+      error.kind() == io::ErrorKind::BrokenPipe,
+      "closed backpressure channel reports broken pipe",
+    )?;
+    ensure_eq(
+      &non_blocking.error_counter().dropped_lines(),
+      &0,
+      "backpressure writes are not counted as drops",
+    )
+  }
+
+  #[test]
+  fn make_writer_clone_and_flush_forward_to_non_blocking_writer() -> Result<(), TestFailure> {
+    let (mock_writer, receiver) = MockWriter::new(2);
+    let (non_blocking, guard) = ensure_ok(
+      NonBlocking::try_new(mock_writer),
+      "fallible constructor builds a make-writer source",
+    )?;
+    let mut writer = non_blocking.make_writer();
+
+    ensure_ok(writer.write_all(b"cloned writer"), "cloned make_writer writes")?;
+    ensure_ok(writer.flush(), "non-blocking flush succeeds")?;
+    drop(writer);
+    drop(guard);
+
+    let line = ensure_ok(receiver.recv_timeout(EVENT_RECV_TIMEOUT), "worker flushes cloned writer line")?;
+    ensure(line == "cloned writer", "cloned make_writer line is forwarded")
+  }
+
+  #[test]
+  fn error_counter_increments_without_overflowing() -> Result<(), TestFailure> {
+    let counter = ErrorCounter::new();
+    counter.incr_saturating();
+    ensure_eq(&counter.dropped_lines(), &1, "dropped-line counter increments")?;
+
+    counter.0.store(usize::MAX, Ordering::Release);
+    counter.incr_saturating();
+    ensure_eq(&counter.dropped_lines(), &usize::MAX, "dropped-line counter saturates at usize max")
   }
 }

@@ -335,9 +335,9 @@ impl Layer {
   /// ```
   #[must_use]
   pub fn with_custom_fields<T: AsRef<str>, U: AsRef<[u8]>>(mut self, fields: impl IntoIterator<Item = (T, U)>) -> Self {
-    for (name, value) in fields {
+    for (name, field_value) in fields {
       put_field_length_encoded(&mut self.additional_fields, name.as_ref(), |value_buf| {
-        value_buf.extend_from_slice(value.as_ref());
+        value_buf.extend_from_slice(field_value.as_ref());
       });
     }
     self
@@ -542,18 +542,18 @@ impl SpanVisitor<'_> {
 }
 
 impl Visit for SpanVisitor<'_> {
-  fn record_str(&mut self, field: &Field, value: &str) {
+  fn record_str(&mut self, field: &Field, field_value: &str) {
     self.put_span_prefix();
     put_field_length_encoded(self.buf, field.name(), |value_buf| {
-      value_buf.extend_from_slice(value.as_bytes());
+      value_buf.extend_from_slice(field_value.as_bytes());
     });
   }
 
-  fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+  fn record_debug(&mut self, field: &Field, field_value: &dyn fmt::Debug) {
     self.put_span_prefix();
     put_field_length_encoded(self.buf, field.name(), |value_buf| {
       push_display(value_buf, DebugValue {
-        value,
+        field_value,
       });
     });
   }
@@ -582,18 +582,18 @@ impl EventVisitor<'_> {
 }
 
 impl Visit for EventVisitor<'_> {
-  fn record_str(&mut self, field: &Field, value: &str) {
+  fn record_str(&mut self, field: &Field, field_value: &str) {
     self.put_prefix(field);
     put_field_length_encoded(self.buf, field.name(), |value_buf| {
-      value_buf.extend_from_slice(value.as_bytes());
+      value_buf.extend_from_slice(field_value.as_bytes());
     });
   }
 
-  fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+  fn record_debug(&mut self, field: &Field, field_value: &dyn fmt::Debug) {
     self.put_prefix(field);
     put_field_length_encoded(self.buf, field.name(), |value_buf| {
       push_display(value_buf, DebugValue {
-        value,
+        field_value,
       });
     });
   }
@@ -602,18 +602,18 @@ impl Visit for EventVisitor<'_> {
 /// Display adapter that intentionally renders tracing's debug-only field values.
 struct DebugValue<'a> {
   /// Debug value supplied by the `tracing_core::field::Visit` API.
-  value: &'a dyn fmt::Debug,
+  field_value: &'a dyn fmt::Debug,
 }
 
 impl fmt::Display for DebugValue<'_> {
   fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-    fmt::Debug::fmt(self.value, formatter)
+    fmt::Debug::fmt(self.field_value, formatter)
   }
 }
 
 /// Append a display value to `buf`.
-fn push_display(buf: &mut Vec<u8>, value: impl fmt::Display) {
-  let rendered = value.to_string();
+fn push_display(buf: &mut Vec<u8>, field_value: impl fmt::Display) {
+  let rendered = field_value.to_string();
   buf.extend_from_slice(rendered.as_bytes());
 }
 
@@ -826,17 +826,259 @@ fn sanitize_name(name: &str, buf: &mut Vec<u8>) {
 
 /// Append arbitrary data with a well-formed name and value.
 ///
-/// `value` must not contain an internal newline, because this function writes
-/// `value` in the new-line separated format.
+/// `field_value` must not contain an internal newline, because this function
+/// writes `field_value` in the new-line separated format.
 ///
 /// For a "newline-safe" variant, see `put_field_length_encoded`.
-fn put_field_wellformed(buf: &mut Vec<u8>, name: &str, value: &[u8]) {
+fn put_field_wellformed(buf: &mut Vec<u8>, name: &str, field_value: &[u8]) {
   buf.extend_from_slice(name.as_bytes());
   buf.push(b'\n');
-  let Ok(value_len) = u64::try_from(value.len()) else {
+  let Ok(value_len) = u64::try_from(field_value.len()) else {
     return;
   };
   buf.extend_from_slice(&value_len.to_le_bytes());
-  buf.extend_from_slice(value);
+  buf.extend_from_slice(field_value);
   buf.push(b'\n');
+}
+
+#[cfg(test)]
+mod tests {
+  #[cfg(unix)]
+  use std::os::unix::net::UnixDatagram;
+  #[cfg(unix)]
+  use std::path::Path;
+  #[cfg(unix)]
+  use std::path::PathBuf;
+  use std::sync::Arc;
+
+  use parking_lot::Mutex;
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_contains;
+  use strict_test_support::ensure_ok;
+  #[cfg(unix)]
+  use tracing::dispatcher::with_default;
+  use tracing_core::callsite::Callsite;
+  use tracing_core::field::FieldSet;
+  use tracing_core::metadata::Kind;
+  use tracing_core::metadata::SourceLocation;
+  use tracing_core::subscriber::Interest;
+  use tracing_subscriber::prelude::*;
+
+  use super::*;
+
+  /// Callsite used by journald encoding tests.
+  struct JournaldTestCallsite;
+
+  /// Static callsite used for test metadata identity.
+  static JOURNALD_TEST_CALLSITE: JournaldTestCallsite = JournaldTestCallsite;
+
+  /// Source location used by journald metadata tests.
+  const JOURNALD_TEST_LOCATION: SourceLocation<'static> = SourceLocation::empty()
+    .with_module_path(Some("tracing_journald::tests"))
+    .with_file(Some("journald_contract.rs"))
+    .with_line(Some(77));
+
+  impl Callsite for JournaldTestCallsite {
+    fn set_interest(&self, _: Interest) {}
+
+    fn metadata(&self) -> &Metadata<'_> {
+      static META: Metadata<'static> = Metadata::new(
+        "journald_test",
+        "journal_target",
+        Level::INFO,
+        &JOURNALD_TEST_LOCATION,
+        &FieldSet::new(&["message"], tracing_core::identify_callsite!(&JOURNALD_TEST_CALLSITE)),
+        Kind::EVENT,
+      );
+      &META
+    }
+  }
+
+  /// Ensures a native-protocol payload contains the expected field.
+  fn ensure_field(payload: &[u8], name: &str, field_value: &[u8], context: &'static str) -> Result<(), TestFailure> {
+    let mut cursor = 0_usize;
+    while cursor < payload.len() {
+      let Some(remainder) = payload.get(cursor..) else {
+        return ensure(false, "native field cursor is in bounds");
+      };
+      let Some(name_offset) = remainder.iter().position(|byte| *byte == b'\n') else {
+        return ensure(false, "native field name terminator is present");
+      };
+      let name_end = cursor.saturating_add(name_offset);
+      let length_start = name_end.saturating_add(1);
+      let length_end = length_start.saturating_add(8);
+      let Some(length_bytes) = payload.get(length_start..length_end) else {
+        return ensure(false, "native field length is present");
+      };
+      let mut length_buffer = [0_u8; 8];
+      for (slot, byte) in length_buffer.iter_mut().zip(length_bytes.iter().copied()) {
+        *slot = byte;
+      }
+      let Ok(value_len) = usize::try_from(u64::from_le_bytes(length_buffer)) else {
+        return ensure(false, "native field length fits in usize");
+      };
+      let Some(value_end) = length_end.checked_add(value_len) else {
+        return ensure(false, "native field length does not overflow");
+      };
+      let Some(actual_name) = payload.get(cursor..name_end) else {
+        return ensure(false, "native field name is in bounds");
+      };
+      let Some(actual_value) = payload.get(length_end..value_end) else {
+        return ensure(false, "native field value is in bounds");
+      };
+      if actual_name == name.as_bytes() && actual_value == field_value {
+        return Ok(());
+      }
+      cursor = value_end.saturating_add(1);
+    }
+
+    ensure(false, context)
+  }
+
+  #[test]
+  fn priority_mappings_preserve_journald_priority_bytes() -> Result<(), TestFailure> {
+    let mappings = PriorityMappings::new();
+    ensure(mappings.error.as_byte() == b'3', "default error priority is journald error")?;
+    ensure(mappings.warn.as_byte() == b'4', "default warn priority is journald warning")?;
+    ensure(mappings.info.as_byte() == b'5', "default info priority is journald notice")?;
+    ensure(mappings.debug.as_byte() == b'6', "default debug priority is journald informational")?;
+    ensure(mappings.trace.as_byte() == b'7', "default trace priority is journald debug")?;
+    ensure(Priority::Emergency.as_byte() == b'0', "emergency priority byte is stable")?;
+    ensure(Priority::Alert.as_byte() == b'1', "alert priority byte is stable")?;
+    ensure(Priority::Critical.as_byte() == b'2', "critical priority byte is stable")
+  }
+
+  #[test]
+  fn field_encoding_sanitizes_names_and_preserves_multiline_values() -> Result<(), TestFailure> {
+    let mut payload = Vec::new();
+    put_field_length_encoded(&mut payload, "__bad.field-name", |buf| {
+      buf.extend_from_slice(b"first\nsecond\0third");
+    });
+    ensure_field(
+      &payload,
+      "BAD_FIELDNAME",
+      b"first\nsecond\0third",
+      "length-encoded fields preserve multiline and binary values",
+    )?;
+
+    put_field_length_encoded(&mut payload, "!!!", |buf| {
+      buf.extend_from_slice(b"empty-name");
+    });
+    ensure_field(
+      &payload,
+      "",
+      b"empty-name",
+      "fields whose names sanitize to empty retain an empty native name",
+    )
+  }
+
+  #[test]
+  fn metadata_encoding_writes_target_file_and_line_with_optional_prefix() -> Result<(), TestFailure> {
+    let mut payload = Vec::new();
+    put_metadata(&mut payload, JOURNALD_TEST_CALLSITE.metadata(), Some("SPAN_"));
+
+    ensure_field(&payload, "SPAN_TARGET", b"journal_target", "metadata target is encoded")?;
+    ensure_field(
+      &payload,
+      "SPAN_CODE_FILE",
+      b"journald_contract.rs",
+      "metadata file is encoded with prefix",
+    )?;
+    ensure_field(&payload, "SPAN_CODE_LINE", b"77", "metadata line is encoded with prefix")
+  }
+
+  #[test]
+  fn wellformed_fields_and_priority_encoding_match_native_protocol() -> Result<(), TestFailure> {
+    let mut payload = Vec::new();
+    put_field_wellformed(&mut payload, "TARGET", b"journal");
+    ensure_field(&payload, "TARGET", b"journal", "well-formed fields use native encoding")?;
+
+    let layer = test_layer()?;
+    layer.put_priority(&mut payload, JOURNALD_TEST_CALLSITE.metadata());
+    ensure_field(&payload, "PRIORITY", b"5", "layer encodes priorities from metadata")
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn layer_configuration_debug_includes_journald_fields() -> Result<(), TestFailure> {
+    let layer = test_layer()?
+      .with_field_prefix(Some("APP".to_owned()))
+      .with_syslog_identifier("journald-test".to_owned())
+      .with_custom_fields([("SYSLOG_FACILITY", "17")]);
+    let rendered = format!("{layer:?}");
+    ensure_contains(&rendered, "field_prefix", "debug output names field prefix")?;
+    ensure_contains(&rendered, "journald-test", "debug output includes syslog identifier")?;
+    ensure_contains(&rendered, "additional_fields", "debug output includes custom field storage")?;
+    ensure_contains(&rendered, "priority_mappings", "debug output includes priority mappings")
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn layer_formats_span_records_and_events_before_ignoring_socket_errors() -> Result<(), TestFailure> {
+    #[derive(Clone, Debug, Default)]
+    struct EventCounter {
+      events: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl<S> tracing_subscriber::Layer<S> for EventCounter
+    where
+      S: Subscriber,
+    {
+      fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) -> SubscriberResult {
+        let mut events = self.events.lock();
+        events.push(event.metadata().target().to_owned());
+        drop(events);
+        Ok(())
+      }
+    }
+
+    let layer = test_layer()?
+      .with_field_prefix(Some("APP".to_owned()))
+      .with_syslog_identifier("journald-test".to_owned())
+      .with_custom_fields([("EXTRA_FIELD", "extra")]);
+    let counter = EventCounter::default();
+    let dispatcher = tracing::Dispatch::new(tracing_subscriber::registry().with(layer).with(counter.clone()));
+
+    with_default(&dispatcher, || {
+      let span = tracing::info_span!("journal_span", span_field = "before");
+      let _entered = span.enter();
+      let _recorded_span = span.record("span_field", "after");
+      tracing::warn!(target: "journald_contracts", event_field = "visible", "journal event");
+    });
+
+    let events = counter.events.lock();
+    ensure(
+      *events == ["journald_contracts".to_owned()],
+      "journald layer returns success even when sending to a missing socket fails",
+    )
+  }
+
+  #[cfg(unix)]
+  #[test]
+  fn namespace_paths_select_system_and_user_journal_locations() -> Result<(), TestFailure> {
+    ensure(
+      JournalNamespace::System.socket_path().as_path() == Path::new(SYSTEM_JOURNALD_PATH),
+      "system namespace selects the system journald socket",
+    )?;
+    ensure(
+      JournalNamespace::User
+        .socket_path()
+        .ends_with(Path::new("systemd/journal/socket")),
+      "user namespace selects a user journald socket suffix",
+    )
+  }
+
+  /// Builds a journald layer pointed at a deliberately missing socket.
+  #[cfg(unix)]
+  fn test_layer() -> Result<Layer, TestFailure> {
+    Ok(Layer {
+      socket:            ensure_ok(UnixDatagram::unbound(), "test journald datagram socket opens")?,
+      socket_path:       PathBuf::from("/tmp/strict-tracing-missing-journald.sock"),
+      field_prefix:      Some("F".to_owned()),
+      syslog_identifier: "test-binary".to_owned(),
+      additional_fields: Vec::new(),
+      priority_mappings: PriorityMappings::new(),
+    })
+  }
 }

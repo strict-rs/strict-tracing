@@ -599,65 +599,43 @@ pub trait Subscriber: AsAny {
   }
 }
 
-impl dyn Subscriber {
-  /// Returns `true` if this `Subscriber` is the same type as `T`.
-  pub fn is<T: Any>(&self) -> bool {
-    self.downcast_ref::<T>().is_some()
-  }
+/// Implements the `is` / `downcast_ref` inherent downcasting methods for a
+/// [`Subscriber`] trait-object type.
+///
+/// Every auto-trait combination of `dyn Subscriber` exposes the same pair of
+/// methods; generating them from one macro keeps the four implementations
+/// identical.
+macro_rules! impl_downcast_inherent {
+  ($subscriber:ty) => {
+    impl $subscriber {
+      /// Returns `true` if this [`Subscriber`] is the same type as `T`.
+      #[allow(
+        clippy::single_call_fn,
+        reason = "public downcasting predicate mirrors the Subscriber trait-object API"
+      )]
+      #[must_use]
+      pub fn is<T: Any>(&self) -> bool {
+        self.downcast_ref::<T>().is_some()
+      }
 
-  /// Returns some reference to this `Subscriber` value if it is of type `T`,
-  /// or `None` if it isn't.
-  pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
-    self.downcast_ref_by_id(TypeId::of::<T>())?.downcast_ref::<T>()
-  }
+      /// Returns some reference to this [`Subscriber`] value if it is of type
+      /// `T`, or `None` if it isn't.
+      #[allow(
+        clippy::single_call_fn,
+        reason = "public downcasting accessor mirrors the Subscriber trait-object API"
+      )]
+      #[must_use]
+      pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
+        self.downcast_ref_by_id(TypeId::of::<T>())?.downcast_ref::<T>()
+      }
+    }
+  };
 }
 
-impl dyn Subscriber + Send {
-  /// Returns `true` if this [`Subscriber`] is the same type as `T`.
-  pub fn is<T: Any>(&self) -> bool {
-    self.downcast_ref::<T>().is_some()
-  }
-
-  /// Returns some reference to this [`Subscriber`] value if it is of type `T`,
-  /// or `None` if it isn't.
-  pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
-    self.downcast_ref_by_id(TypeId::of::<T>())?.downcast_ref::<T>()
-  }
-}
-
-impl dyn Subscriber + Sync {
-  /// Returns `true` if this [`Subscriber`] is the same type as `T`.
-  pub fn is<T: Any>(&self) -> bool {
-    self.downcast_ref::<T>().is_some()
-  }
-
-  /// Returns some reference to this [`Subscriber`] value if it is of type `T`,
-  /// or `None` if it isn't.
-  pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
-    self.downcast_ref_by_id(TypeId::of::<T>())?.downcast_ref::<T>()
-  }
-}
-
-impl dyn Subscriber + Send + Sync {
-  /// Returns `true` if this [`Subscriber`] is the same type as `T`.
-  #[allow(
-    clippy::single_call_fn,
-    reason = "public downcasting predicate mirrors the Subscriber trait-object API"
-  )]
-  pub fn is<T: Any>(&self) -> bool {
-    self.downcast_ref::<T>().is_some()
-  }
-
-  /// Returns some reference to this [`Subscriber`] value if it is of type `T`,
-  /// or `None` if it isn't.
-  #[allow(
-    clippy::single_call_fn,
-    reason = "public downcasting accessor mirrors the Subscriber trait-object API"
-  )]
-  pub fn downcast_ref<T: Any>(&self) -> Option<&T> {
-    self.downcast_ref_by_id(TypeId::of::<T>())?.downcast_ref::<T>()
-  }
-}
+impl_downcast_inherent!(dyn Subscriber);
+impl_downcast_inherent!(dyn Subscriber + Send);
+impl_downcast_inherent!(dyn Subscriber + Sync);
+impl_downcast_inherent!(dyn Subscriber + Send + Sync);
 
 /// Indicates a [`Subscriber`]'s interest in a particular callsite.
 ///
@@ -806,162 +784,275 @@ impl NoSubscriber {
   }
 }
 
-impl<S> Subscriber for Box<S>
-where
-  S: Subscriber + ?Sized,
-{
-  #[inline]
-  fn register_callsite(&self, metadata: &'static Metadata<'static>) -> SubscriberResult<Interest> {
-    self.as_ref().register_callsite(metadata)
-  }
+/// Implements [`Subscriber`] for a smart-pointer type by forwarding every
+/// trait method to the pointed-to subscriber.
+///
+/// `Box<S>` and `Arc<S>` forward identically; generating both impls from one
+/// macro keeps the two implementations in lockstep.
+macro_rules! impl_subscriber_forwarding {
+  ($pointer:ident) => {
+    impl<S> Subscriber for $pointer<S>
+    where
+      S: Subscriber + ?Sized,
+    {
+      #[inline]
+      fn on_register_dispatch(&self, subscriber: &Dispatch) -> SubscriberResult {
+        self.as_ref().on_register_dispatch(subscriber)
+      }
 
-  #[inline]
-  fn enabled(&self, metadata: &Metadata<'_>) -> SubscriberResult<bool> {
-    self.as_ref().enabled(metadata)
-  }
+      #[inline]
+      fn register_callsite(&self, metadata: &'static Metadata<'static>) -> SubscriberResult<Interest> {
+        self.as_ref().register_callsite(metadata)
+      }
 
-  #[inline]
-  fn max_level_hint(&self) -> Option<LevelFilter> {
-    self.as_ref().max_level_hint()
-  }
+      #[inline]
+      fn enabled(&self, metadata: &Metadata<'_>) -> SubscriberResult<bool> {
+        self.as_ref().enabled(metadata)
+      }
 
-  #[inline]
-  fn new_span(&self, span: &span::Attributes<'_>) -> SubscriberResult<span::Id> {
-    self.as_ref().new_span(span)
-  }
+      #[inline]
+      fn max_level_hint(&self) -> Option<LevelFilter> {
+        self.as_ref().max_level_hint()
+      }
 
-  #[inline]
-  fn record(&self, span: span::Id, values: &span::Record<'_>) -> SubscriberResult {
-    self.as_ref().record(span, values)
-  }
+      #[inline]
+      fn new_span(&self, span: &span::Attributes<'_>) -> SubscriberResult<span::Id> {
+        self.as_ref().new_span(span)
+      }
 
-  #[inline]
-  fn record_follows_from(&self, span: span::Id, follows: span::Id) -> SubscriberResult {
-    self.as_ref().record_follows_from(span, follows)
-  }
+      #[inline]
+      fn record(&self, span: span::Id, values: &span::Record<'_>) -> SubscriberResult {
+        self.as_ref().record(span, values)
+      }
 
-  #[inline]
-  fn event_enabled(&self, event: &Event<'_>) -> SubscriberResult<bool> {
-    self.as_ref().event_enabled(event)
-  }
+      #[inline]
+      fn record_follows_from(&self, span: span::Id, follows: span::Id) -> SubscriberResult {
+        self.as_ref().record_follows_from(span, follows)
+      }
 
-  #[inline]
-  fn event(&self, event: &Event<'_>) -> SubscriberResult {
-    self.as_ref().event(event)
-  }
+      #[inline]
+      fn event_enabled(&self, event: &Event<'_>) -> SubscriberResult<bool> {
+        self.as_ref().event_enabled(event)
+      }
 
-  #[inline]
-  fn enter(&self, span: span::Id) -> SubscriberResult {
-    self.as_ref().enter(span)
-  }
+      #[inline]
+      fn event(&self, event: &Event<'_>) -> SubscriberResult {
+        self.as_ref().event(event)
+      }
 
-  #[inline]
-  fn exit(&self, span: span::Id) -> SubscriberResult {
-    self.as_ref().exit(span)
-  }
+      #[inline]
+      fn enter(&self, span: span::Id) -> SubscriberResult {
+        self.as_ref().enter(span)
+      }
 
-  #[inline]
-  fn clone_span(&self, id: span::Id) -> SubscriberResult<span::Id> {
-    self.as_ref().clone_span(id)
-  }
+      #[inline]
+      fn exit(&self, span: span::Id) -> SubscriberResult {
+        self.as_ref().exit(span)
+      }
 
-  #[inline]
-  fn try_close(&self, id: span::Id) -> SubscriberResult<bool> {
-    self.as_ref().try_close(id)
-  }
+      #[inline]
+      fn clone_span(&self, id: span::Id) -> SubscriberResult<span::Id> {
+        self.as_ref().clone_span(id)
+      }
 
-  #[inline]
-  fn current_span(&self) -> SubscriberResult<span::Current> {
-    self.as_ref().current_span()
-  }
+      #[inline]
+      fn try_close(&self, id: span::Id) -> SubscriberResult<bool> {
+        self.as_ref().try_close(id)
+      }
 
-  #[inline]
-  fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
-    let this = self.as_any();
-    if this.type_id() == id {
-      return Some(this);
+      #[inline]
+      fn current_span(&self) -> SubscriberResult<span::Current> {
+        self.as_ref().current_span()
+      }
+
+      #[inline]
+      fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
+        let this = self.as_any();
+        if this.type_id() == id {
+          return Some(this);
+        }
+
+        self.as_ref().downcast_ref_by_id(id)
+      }
     }
-
-    self.as_ref().downcast_ref_by_id(id)
-  }
+  };
 }
 
-impl<S> Subscriber for Arc<S>
-where
-  S: Subscriber + ?Sized,
-{
-  #[inline]
-  fn register_callsite(&self, metadata: &'static Metadata<'static>) -> SubscriberResult<Interest> {
-    self.as_ref().register_callsite(metadata)
+impl_subscriber_forwarding!(Box);
+impl_subscriber_forwarding!(Arc);
+
+#[cfg(test)]
+mod tests {
+  use core::num::NonZeroU64;
+  use core::sync::atomic::AtomicUsize;
+  use core::sync::atomic::Ordering;
+
+  use strict_test_support::TestFailure;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_eq;
+  use strict_test_support::ensure_ok;
+
+  use super::*;
+  use crate::callsite::Callsite;
+  use crate::field::FieldSet;
+  use crate::metadata::Kind;
+  use crate::metadata::Level;
+  use crate::metadata::SourceLocation;
+
+  struct TestCallsite;
+
+  static TEST_CALLSITE: TestCallsite = TestCallsite;
+  static TEST_META: Metadata<'static> = Metadata::new(
+    "subscriber_test",
+    "subscriber_target",
+    Level::INFO,
+    &SourceLocation::empty(),
+    &FieldSet::new(&[], crate::identify_callsite!(&TEST_CALLSITE)),
+    Kind::EVENT,
+  );
+
+  impl Callsite for TestCallsite {
+    fn set_interest(&self, _: Interest) {}
+
+    fn metadata(&self) -> &Metadata<'_> {
+      &TEST_META
+    }
   }
 
-  #[inline]
-  fn enabled(&self, metadata: &Metadata<'_>) -> SubscriberResult<bool> {
-    self.as_ref().enabled(metadata)
+  #[derive(Debug, Default)]
+  struct CountingSubscriber {
+    register_callsite: AtomicUsize,
+    enabled:           AtomicUsize,
+    new_span:          AtomicUsize,
+    record:            AtomicUsize,
+    follows:           AtomicUsize,
+    event:             AtomicUsize,
+    enter:             AtomicUsize,
+    exit:              AtomicUsize,
   }
 
-  #[inline]
-  fn max_level_hint(&self) -> Option<LevelFilter> {
-    self.as_ref().max_level_hint()
+  impl CountingSubscriber {
+    fn increment(counter: &AtomicUsize) {
+      let _previous = counter.fetch_add(1, Ordering::Relaxed);
+    }
   }
 
-  #[inline]
-  fn new_span(&self, span: &span::Attributes<'_>) -> SubscriberResult<span::Id> {
-    self.as_ref().new_span(span)
-  }
-
-  #[inline]
-  fn record(&self, span: span::Id, values: &span::Record<'_>) -> SubscriberResult {
-    self.as_ref().record(span, values)
-  }
-
-  #[inline]
-  fn record_follows_from(&self, span: span::Id, follows: span::Id) -> SubscriberResult {
-    self.as_ref().record_follows_from(span, follows)
-  }
-
-  #[inline]
-  fn event_enabled(&self, event: &Event<'_>) -> SubscriberResult<bool> {
-    self.as_ref().event_enabled(event)
-  }
-
-  #[inline]
-  fn event(&self, event: &Event<'_>) -> SubscriberResult {
-    self.as_ref().event(event)
-  }
-
-  #[inline]
-  fn enter(&self, span: span::Id) -> SubscriberResult {
-    self.as_ref().enter(span)
-  }
-
-  #[inline]
-  fn exit(&self, span: span::Id) -> SubscriberResult {
-    self.as_ref().exit(span)
-  }
-
-  #[inline]
-  fn clone_span(&self, id: span::Id) -> SubscriberResult<span::Id> {
-    self.as_ref().clone_span(id)
-  }
-
-  #[inline]
-  fn try_close(&self, id: span::Id) -> SubscriberResult<bool> {
-    self.as_ref().try_close(id)
-  }
-
-  #[inline]
-  fn current_span(&self) -> SubscriberResult<span::Current> {
-    self.as_ref().current_span()
-  }
-
-  #[inline]
-  fn downcast_ref_by_id(&self, id: TypeId) -> Option<&dyn Any> {
-    let this = self.as_any();
-    if this.type_id() == id {
-      return Some(this);
+  impl Subscriber for CountingSubscriber {
+    fn register_callsite(&self, _: &'static Metadata<'static>) -> SubscriberResult<Interest> {
+      Self::increment(&self.register_callsite);
+      Ok(Interest::always())
     }
 
-    self.as_ref().downcast_ref_by_id(id)
+    fn enabled(&self, _: &Metadata<'_>) -> SubscriberResult<bool> {
+      Self::increment(&self.enabled);
+      Ok(true)
+    }
+
+    fn new_span(&self, _: &span::Attributes<'_>) -> SubscriberResult<span::Id> {
+      Self::increment(&self.new_span);
+      Ok(span::Id::from_non_zero_u64(NonZeroU64::MIN))
+    }
+
+    fn record(&self, _: span::Id, _: &span::Record<'_>) -> SubscriberResult {
+      Self::increment(&self.record);
+      Ok(())
+    }
+
+    fn record_follows_from(&self, _: span::Id, _: span::Id) -> SubscriberResult {
+      Self::increment(&self.follows);
+      Ok(())
+    }
+
+    fn event(&self, _: &Event<'_>) -> SubscriberResult {
+      Self::increment(&self.event);
+      Ok(())
+    }
+
+    fn enter(&self, _: span::Id) -> SubscriberResult {
+      Self::increment(&self.enter);
+      Ok(())
+    }
+
+    fn exit(&self, _: span::Id) -> SubscriberResult {
+      Self::increment(&self.exit);
+      Ok(())
+    }
+  }
+
+  fn exercise_forwarded_hooks(subscriber: &impl Subscriber) -> Result<(), TestFailure> {
+    let valueset = TEST_META.fields().value_set(&[]);
+    let attrs = span::Attributes::new(&TEST_META, &valueset);
+    let event = Event::new(&TEST_META, &valueset);
+    let record = span::Record::new(&valueset);
+    let id = span::Id::from_non_zero_u64(NonZeroU64::MIN);
+
+    ensure(
+      ensure_ok(subscriber.register_callsite(&TEST_META), "register_callsite should succeed")?.is_always(),
+      "register_callsite forwards returned interest",
+    )?;
+    let enabled = ensure_ok(subscriber.enabled(&TEST_META), "enabled should succeed")?;
+    ensure(enabled, "enabled forwards the subscriber's result")?;
+    let new_span = ensure_ok(subscriber.new_span(&attrs), "new_span should succeed")?;
+    ensure_eq(&new_span.into_u64(), &1_u64, "new_span forwards the subscriber's span id")?;
+    ensure_ok(subscriber.record(id, &record), "record should succeed")?;
+    ensure_ok(subscriber.record_follows_from(id, id), "record_follows_from should succeed")?;
+    ensure_ok(subscriber.event(&event), "event should succeed")?;
+    ensure_ok(subscriber.enter(id), "enter should succeed")?;
+    ensure_ok(subscriber.exit(id), "exit should succeed")
+  }
+
+  fn ensure_forwarded_once(subscriber: &CountingSubscriber) -> Result<(), TestFailure> {
+    ensure_eq(
+      &subscriber.register_callsite.load(Ordering::Relaxed),
+      &1_usize,
+      "register_callsite count",
+    )?;
+    ensure_eq(&subscriber.enabled.load(Ordering::Relaxed), &1_usize, "enabled count")?;
+    ensure_eq(&subscriber.new_span.load(Ordering::Relaxed), &1_usize, "new_span count")?;
+    ensure_eq(&subscriber.record.load(Ordering::Relaxed), &1_usize, "record count")?;
+    ensure_eq(&subscriber.follows.load(Ordering::Relaxed), &1_usize, "record_follows_from count")?;
+    ensure_eq(&subscriber.event.load(Ordering::Relaxed), &1_usize, "event count")?;
+    ensure_eq(&subscriber.enter.load(Ordering::Relaxed), &1_usize, "enter count")?;
+    ensure_eq(&subscriber.exit.load(Ordering::Relaxed), &1_usize, "exit count")
+  }
+
+  #[test]
+  fn boxed_subscriber_forwarding_calls_each_hook() -> Result<(), TestFailure> {
+    let subscriber = Box::new(CountingSubscriber::default());
+
+    exercise_forwarded_hooks(&subscriber)?;
+
+    ensure_forwarded_once(&subscriber)
+  }
+
+  #[test]
+  fn arc_subscriber_forwarding_calls_each_hook() -> Result<(), TestFailure> {
+    let subscriber = Arc::new(CountingSubscriber::default());
+
+    exercise_forwarded_hooks(&subscriber)?;
+
+    ensure_forwarded_once(&subscriber)
+  }
+
+  #[test]
+  fn dyn_subscriber_downcast_ref_matches_registered_type() -> Result<(), TestFailure> {
+    let subscriber = CountingSubscriber::default();
+    let erased: &dyn Subscriber = &subscriber;
+
+    ensure(
+      erased.downcast_ref::<CountingSubscriber>().is_some(),
+      "trait object downcasts to its concrete subscriber type",
+    )
+  }
+
+  #[test]
+  fn dyn_subscriber_downcast_ref_rejects_unrelated_type() -> Result<(), TestFailure> {
+    let subscriber = CountingSubscriber::default();
+    let erased: &dyn Subscriber = &subscriber;
+
+    ensure(
+      erased.downcast_ref::<NoSubscriber>().is_none(),
+      "trait object rejects unrelated subscriber type",
+    )
   }
 }

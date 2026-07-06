@@ -10,10 +10,8 @@ mod tests {
 
   use tracing::Level;
   use tracing::span;
+  use tracing::subscriber;
   use tracing::subscriber::SetGlobalDefaultError;
-  use tracing::subscriber::{
-    self,
-  };
   use tracing_flame::FlameError;
   use tracing_flame::FlameLayer;
   use tracing_subscriber::prelude::*;

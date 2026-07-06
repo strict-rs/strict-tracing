@@ -34,10 +34,8 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures::Future;
+use futures::future;
 use futures::future::Ready;
-use futures::future::{
-  self,
-};
 use http::Method;
 use http::Request;
 use http::Response;
@@ -70,9 +68,6 @@ use tracing::info_span;
 use tracing::span;
 use tracing::trace;
 use tracing::warn;
-use tracing::{
-  self,
-};
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::reload::Handle;
 use tracing_tower::GetSpan;
@@ -322,11 +317,11 @@ where
           trace!("setting filter");
 
           let body = req.into_body().collect().await?.to_bytes();
-          match handle.set_from(&body) {
-            Err(error) => {
-              error!(%error, "setting filter failed!");
-              rsp(StatusCode::INTERNAL_SERVER_ERROR, error)?
-            }
+          match handle
+            .set_from(&body)
+            .inspect_err(|error| error!(%error, "setting filter failed!"))
+          {
+            Err(error) => rsp(StatusCode::INTERNAL_SERVER_ERROR, error)?,
             Ok(()) => rsp(StatusCode::NO_CONTENT, Bytes::new())?,
           }
         }

@@ -109,20 +109,20 @@ impl ExtensionsMut<'_> {
     /// Returns `None` when the value was inserted. If `T` is already present in
     /// `Extensions`, the provided value is returned as `Some(T)` and the
     /// existing extension is left unchanged.
-    pub fn insert<T: Send + Sync + 'static>(&mut self, val: T) -> Option<T> {
+    pub fn insert<T: Send + Sync + 'static>(&mut self, extension: T) -> Option<T> {
         if self.inner.contains::<T>() {
-            return Some(val);
+            return Some(extension);
         }
 
-        let _previous = self.inner.insert(val);
+        let _previous = self.inner.insert(extension);
         None
     }
 
     /// Replaces an existing `T` into this extensions.
     ///
     /// If `T` is not present, `Option::None` will be returned.
-    pub fn replace<T: Send + Sync + 'static>(&mut self, val: T) -> Option<T> {
-        self.inner.insert(val)
+    pub fn replace<T: Send + Sync + 'static>(&mut self, extension: T) -> Option<T> {
+        self.inner.insert(extension)
     }
 
     /// Get a mutable reference to a type previously inserted on this `ExtensionsMut`.
@@ -167,9 +167,9 @@ impl ExtensionsInner {
     ///
     /// If a extension of this type already existed, it will
     /// be returned.
-    pub(super) fn insert<T: Send + Sync + 'static>(&mut self, val: T) -> Option<T> {
+    pub(super) fn insert<T: Send + Sync + 'static>(&mut self, extension: T) -> Option<T> {
         self.map
-            .insert(TypeId::of::<T>(), Box::new(val))
+            .insert(TypeId::of::<T>(), Box::new(extension))
             .and_then(|boxed_value| boxed_value.downcast().ok().map(|typed| *typed))
     }
 

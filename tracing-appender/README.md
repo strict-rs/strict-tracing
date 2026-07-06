@@ -23,8 +23,8 @@ Writers for logging events and spans
 [docs-v0.2.x-url]: https://docs.rs/tracing-appender/
 [mit-badge]: https://img.shields.io/badge/license-MIT-blue.svg
 [mit-url]: ../LICENSE
-[actions-badge]: https://github.com/strict-rs/strict-tracing/workflows/CI/badge.svg
-[actions-url]:https://github.com/strict-rs/strict-tracing/actions?query=workflow%3ACI
+[actions-badge]: https://github.com/strict-rs/strict-tracing/actions/workflows/ci.yml/badge.svg
+[actions-url]:https://github.com/strict-rs/strict-tracing/actions/workflows/ci.yml
 [discord-badge]: https://img.shields.io/discord/500028886025895936?logo=discord&label=discord&logoColor=white
 [discord-url]: https://discord.gg/EeF3cQw
 

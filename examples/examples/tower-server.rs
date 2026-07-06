@@ -132,9 +132,10 @@ async fn main() -> Result<(), Err> {
     let hyper_svc = TowerToHyperService::new(svc);
 
     let _task = tokio::spawn(async move {
-      if let Err(error) = auto::Builder::new(TokioExecutor::new()).serve_connection(io, hyper_svc).await {
-        error!(%error, "connection error");
-      }
+      let _connection_error = auto::Builder::new(TokioExecutor::new())
+        .serve_connection(io, hyper_svc)
+        .await
+        .inspect_err(|error| error!(%error, "connection error"));
     });
   }
 }

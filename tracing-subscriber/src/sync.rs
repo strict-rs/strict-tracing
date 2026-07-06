@@ -34,8 +34,8 @@ pub(crate) enum LockResult<T> {
 impl<T> LockResult<T> {
     /// Creates a successful lock-acquisition result.
     #[cfg(feature = "parking_lot")]
-    const fn acquired(value: T) -> Self {
-        Self::Acquired(value)
+    const fn acquired(guard: T) -> Self {
+        Self::Acquired(guard)
     }
 }
 
@@ -64,9 +64,9 @@ pub(crate) struct RwLock<T> {
 
 impl<T> RwLock<T> {
     /// Creates a new read-write lock containing the provided value.
-    pub(crate) const fn new(value: T) -> Self {
+    pub(crate) const fn new(initial: T) -> Self {
         Self {
-            inner: InnerRwLock::new(value),
+            inner: InnerRwLock::new(initial),
         }
     }
 

@@ -280,6 +280,10 @@ impl DefaultCallsite {
   const INTEREST_ALWAYS: u8 = 2;
 
   /// Returns a new `DefaultCallsite` with the specified `Metadata`.
+  #[allow(
+    clippy::single_call_fn,
+    reason = "public callsite constructor is used by macros and downstream manual callsite definitions"
+  )]
   #[must_use]
   pub const fn new(meta: &'static Metadata<'static>) -> Self {
     Self {

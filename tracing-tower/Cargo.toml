@@ -33,6 +33,12 @@ tower_make = { workspace = true, optional = true }
 pin-project-lite = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 
+[dev-dependencies]
+strict-test-support = { workspace = true }
+tracing-mock = { workspace = true }
+futures = { workspace = true, default-features = true }
+tower-layer = { workspace = true }
+
 [badges]
 maintenance = { status = "experimental" }
 

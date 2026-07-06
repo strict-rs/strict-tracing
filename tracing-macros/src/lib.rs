@@ -33,9 +33,9 @@ macro_rules! trace_dbg {
 macro_rules! dbg {
     (target: $target:expr, level: $level:expr, $ex:expr) => {{
         match $ex {
-            value => {
-                $crate::tracing::event!(target: $target, $level, ?value, stringify!($ex));
-                value
+            field_value => {
+                $crate::tracing::event!(target: $target, $level, value = ?field_value, stringify!($ex));
+                field_value
             }
         }
     }};

@@ -18,6 +18,7 @@ mod tests {
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
   use tracing::Level;
+  use tracing::level_filters::STATIC_MAX_LEVEL;
   use tracing::span;
   use tracing::subscriber::set_global_default;
   use tracing_mock::*;
@@ -50,6 +51,11 @@ mod tests {
     // test will work even with no-std.
     ensure_ok(set_global_default(subscriber), "global subscriber should install")?;
 
+    // Under a `max_level_*` cap that statically disables TRACE, the spans are
+    // compiled out before the subscriber's filter can run, so each filter is
+    // evaluated zero times instead of once.
+    let expected = usize::from(STATIC_MAX_LEVEL.enables(Level::TRACE));
+
     // Enter "alice" and then "bob". The dispatcher expects to see "bob" but
     // not "alice."
     let alice = span!(Level::TRACE, "alice");
@@ -60,8 +66,16 @@ mod tests {
     });
 
     // The filter should have seen each span a single time.
-    ensure_eq(&alice_count.load(Ordering::Relaxed), &1, "alice filter runs once after first span")?;
-    ensure_eq(&bob_count.load(Ordering::Relaxed), &1, "bob filter runs once after first span")?;
+    ensure_eq(
+      &alice_count.load(Ordering::Relaxed),
+      &expected,
+      "alice filter runs once after first span",
+    )?;
+    ensure_eq(
+      &bob_count.load(Ordering::Relaxed),
+      &expected,
+      "bob filter runs once after first span",
+    )?;
 
     alice.in_scope(|| bob.in_scope(|| {}));
 
@@ -69,24 +83,24 @@ mod tests {
     // been called.
     ensure_eq(
       &alice_count.load(Ordering::Relaxed),
-      &1,
+      &expected,
       "alice filter remains cached after nested enter",
     )?;
     ensure_eq(
       &bob_count.load(Ordering::Relaxed),
-      &1,
+      &expected,
       "bob filter remains cached after nested enter",
     )?;
 
     bob.in_scope(|| {});
     ensure_eq(
       &alice_count.load(Ordering::Relaxed),
-      &1,
+      &expected,
       "alice filter remains cached after bob re-enter",
     )?;
     ensure_eq(
       &bob_count.load(Ordering::Relaxed),
-      &1,
+      &expected,
       "bob filter remains cached after bob re-enter",
     )?;
 

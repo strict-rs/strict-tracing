@@ -16,6 +16,7 @@ use tracing_core::Metadata as TraceMetadata;
 use tracing_core::callsite;
 use tracing_core::field;
 use tracing_core::metadata::Kind;
+use tracing_core::metadata::SourceLocation;
 use tracing_core::subscriber::Interest;
 
 /// Mask used to reserve the low hash bit for the cached interest value.
@@ -165,9 +166,7 @@ static SENTINEL_METADATA: TraceMetadata<'static> = TraceMetadata::new(
   "log interest cache",
   "log",
   TraceLevel::ERROR,
-  None,
-  None,
-  None,
+  &SourceLocation::empty(),
   &field::FieldSet::new(&[], tracing_core::identify_callsite!(&SENTINEL_CALLSITE)),
   Kind::EVENT,
 );
@@ -314,6 +313,10 @@ mod tests {
     LOCK.lock()
   }
 
+  fn configure_for_test(config: InterestCacheConfig) {
+    configure(Some(config));
+  }
+
   fn run_in_worker(callback: impl FnOnce() -> Result<(), TestFailure> + Send + 'static) -> Result<(), TestFailure> {
     thread::spawn(callback).join().map_err(|_panic| TestFailure::Condition {
       context: "worker thread must not panic",
@@ -324,31 +327,108 @@ mod tests {
     let _cached = try_cache(metadata, callback);
   }
 
+  /// Observes `level`/"dummy" metadata twice, checking the first call always runs the callback and
+  /// the second matches `second_expected`.
+  fn ensure_repeat_cache_counts(
+    level: Level,
+    first_message: &'static str,
+    second_expected: usize,
+    second_message: &'static str,
+  ) -> Result<(), TestFailure> {
+    let metadata = log::MetadataBuilder::new().level(level).target("dummy").build();
+    let mut count = 0;
+    observe_cache(
+      || {
+        increment(&mut count);
+        true
+      },
+      &metadata,
+    );
+    ensure_eq(&count, &1, first_message)?;
+    observe_cache(
+      || {
+        increment(&mut count);
+        true
+      },
+      &metadata,
+    );
+    ensure_eq(&count, &second_expected, second_message)
+  }
+
+  /// Observes `metadata` twice, asserting the cache served both calls from a single callback run.
+  fn ensure_cached_after(metadata: &Metadata<'_>, message: &'static str) -> Result<(), TestFailure> {
+    let mut count = 0;
+    observe_cache(
+      || {
+        increment(&mut count);
+        true
+      },
+      metadata,
+    );
+    observe_cache(
+      || {
+        increment(&mut count);
+        true
+      },
+      metadata,
+    );
+    ensure_eq(&count, &1, message)
+  }
+
+  /// Observes two distinct metadata twice each, asserting each is cached separately.
+  fn ensure_metadata_cached_separately(
+    first: &Metadata<'_>,
+    first_message: &'static str,
+    second: &Metadata<'_>,
+    second_message: &'static str,
+  ) -> Result<(), TestFailure> {
+    let mut first_count = 0;
+    let mut second_count = 0;
+    observe_cache(
+      || {
+        increment(&mut first_count);
+        true
+      },
+      first,
+    );
+    observe_cache(
+      || {
+        increment(&mut second_count);
+        true
+      },
+      second,
+    );
+    observe_cache(
+      || {
+        increment(&mut first_count);
+        true
+      },
+      first,
+    );
+    observe_cache(
+      || {
+        increment(&mut second_count);
+        true
+      },
+      second,
+    );
+    ensure_eq(&first_count, &1, first_message)?;
+    ensure_eq(&second_count, &1, second_message)
+  }
+
   #[test]
   fn test_when_disabled_the_callback_is_always_called() -> Result<(), TestFailure> {
     let _lock = lock_for_test();
 
-    *CONFIG.lock() = InterestCacheConfig::disabled();
+    configure(None);
 
     run_in_worker(|| {
-      let metadata = log::MetadataBuilder::new().level(Level::Trace).target("dummy").build();
-      let mut count = 0;
-      observe_cache(
-        || {
-          increment(&mut count);
-          true
-        },
-        &metadata,
-      );
-      ensure_eq(&count, &1, "disabled cache calls callback once")?;
-      observe_cache(
-        || {
-          increment(&mut count);
-          true
-        },
-        &metadata,
-      );
-      ensure_eq(&count, &2, "disabled cache calls callback every time")
+      ensure_repeat_cache_counts(
+        Level::Trace,
+        "disabled cache calls callback once",
+        2,
+        "disabled cache calls callback every time",
+      )
     })
   }
 
@@ -356,27 +436,15 @@ mod tests {
   fn test_when_enabled_the_callback_is_called_only_once_for_a_high_enough_verbosity() -> Result<(), TestFailure> {
     let _lock = lock_for_test();
 
-    *CONFIG.lock() = InterestCacheConfig::default().with_min_verbosity(Level::Debug);
+    configure_for_test(InterestCacheConfig::default().with_min_verbosity(Level::Debug));
 
     run_in_worker(|| {
-      let metadata = log::MetadataBuilder::new().level(Level::Debug).target("dummy").build();
-      let mut count = 0;
-      observe_cache(
-        || {
-          increment(&mut count);
-          true
-        },
-        &metadata,
-      );
-      ensure_eq(&count, &1, "enabled cache calls callback before storing hit")?;
-      observe_cache(
-        || {
-          increment(&mut count);
-          true
-        },
-        &metadata,
-      );
-      ensure_eq(&count, &1, "enabled cache reuses stored interest")
+      ensure_repeat_cache_counts(
+        Level::Debug,
+        "enabled cache calls callback before storing hit",
+        1,
+        "enabled cache reuses stored interest",
+      )
     })
   }
 
@@ -384,48 +452,13 @@ mod tests {
   fn test_when_core_interest_cache_is_rebuilt_this_cache_is_also_flushed() -> Result<(), TestFailure> {
     let _lock = lock_for_test();
 
-    *CONFIG.lock() = InterestCacheConfig::default().with_min_verbosity(Level::Debug);
+    configure_for_test(InterestCacheConfig::default().with_min_verbosity(Level::Debug));
 
     run_in_worker(|| {
       let metadata = log::MetadataBuilder::new().level(Level::Debug).target("dummy").build();
-      ({
-        let mut count = 0;
-        observe_cache(
-          || {
-            increment(&mut count);
-            true
-          },
-          &metadata,
-        );
-        observe_cache(
-          || {
-            increment(&mut count);
-            true
-          },
-          &metadata,
-        );
-        ensure_eq(&count, &1, "cache serves repeated metadata before rebuild")?;
-      });
+      ensure_cached_after(&metadata, "cache serves repeated metadata before rebuild")?;
       callsite::rebuild_interest_cache();
-      ({
-        let mut count = 0;
-        observe_cache(
-          || {
-            increment(&mut count);
-            true
-          },
-          &metadata,
-        );
-        observe_cache(
-          || {
-            increment(&mut count);
-            true
-          },
-          &metadata,
-        );
-        ensure_eq(&count, &1, "cache serves repeated metadata after rebuild")?;
-      });
-      Ok(())
+      ensure_cached_after(&metadata, "cache serves repeated metadata after rebuild")
     })
   }
 
@@ -433,27 +466,15 @@ mod tests {
   fn test_when_enabled_the_callback_is_always_called_for_a_low_enough_verbosity() -> Result<(), TestFailure> {
     let _lock = lock_for_test();
 
-    *CONFIG.lock() = InterestCacheConfig::default().with_min_verbosity(Level::Debug);
+    configure_for_test(InterestCacheConfig::default().with_min_verbosity(Level::Debug));
 
     run_in_worker(|| {
-      let metadata = log::MetadataBuilder::new().level(Level::Info).target("dummy").build();
-      let mut count = 0;
-      observe_cache(
-        || {
-          increment(&mut count);
-          true
-        },
-        &metadata,
-      );
-      ensure_eq(&count, &1, "below-threshold metadata calls callback once")?;
-      observe_cache(
-        || {
-          increment(&mut count);
-          true
-        },
-        &metadata,
-      );
-      ensure_eq(&count, &2, "below-threshold metadata is not cached")
+      ensure_repeat_cache_counts(
+        Level::Info,
+        "below-threshold metadata calls callback once",
+        2,
+        "below-threshold metadata is not cached",
+      )
     })
   }
 
@@ -461,43 +482,17 @@ mod tests {
   fn test_different_log_levels_are_cached_separately() -> Result<(), TestFailure> {
     let _lock = lock_for_test();
 
-    *CONFIG.lock() = InterestCacheConfig::default().with_min_verbosity(Level::Debug);
+    configure_for_test(InterestCacheConfig::default().with_min_verbosity(Level::Debug));
 
     run_in_worker(|| {
       let metadata_debug = log::MetadataBuilder::new().level(Level::Debug).target("dummy").build();
       let metadata_trace = log::MetadataBuilder::new().level(Level::Trace).target("dummy").build();
-      let mut count_debug = 0;
-      let mut count_trace = 0;
-      observe_cache(
-        || {
-          increment(&mut count_debug);
-          true
-        },
+      ensure_metadata_cached_separately(
         &metadata_debug,
-      );
-      observe_cache(
-        || {
-          increment(&mut count_trace);
-          true
-        },
+        "debug metadata callback count",
         &metadata_trace,
-      );
-      observe_cache(
-        || {
-          increment(&mut count_debug);
-          true
-        },
-        &metadata_debug,
-      );
-      observe_cache(
-        || {
-          increment(&mut count_trace);
-          true
-        },
-        &metadata_trace,
-      );
-      ensure_eq(&count_debug, &1, "debug metadata callback count")?;
-      ensure_eq(&count_trace, &1, "trace metadata callback count")
+        "trace metadata callback count",
+      )
     })
   }
 
@@ -505,43 +500,14 @@ mod tests {
   fn test_different_log_targets_are_cached_separately() -> Result<(), TestFailure> {
     let _lock = lock_for_test();
 
-    *CONFIG.lock() = InterestCacheConfig::default().with_min_verbosity(Level::Debug);
+    configure_for_test(InterestCacheConfig::default().with_min_verbosity(Level::Debug));
 
     run_in_worker(|| {
       let metadata_1 = log::MetadataBuilder::new().level(Level::Trace).target("dummy_1").build();
       let metadata_2 = log::MetadataBuilder::new().level(Level::Trace).target("dummy_2").build();
-      let mut count_1 = 0;
-      let mut count_2 = 0;
-      observe_cache(
-        || {
-          increment(&mut count_1);
-          true
-        },
-        &metadata_1,
-      );
-      observe_cache(
-        || {
-          increment(&mut count_2);
-          true
-        },
-        &metadata_2,
-      );
-      observe_cache(
-        || {
-          increment(&mut count_1);
-          true
-        },
-        &metadata_1,
-      );
-      observe_cache(
-        || {
-          increment(&mut count_2);
-          true
-        },
-        &metadata_2,
-      );
-      ensure_eq(&count_1, &1, "first target callback count")?;
-      ensure_eq(&count_2, &1, "second target callback count")
+      ensure_metadata_cached_separately(
+        &metadata_1, "first target callback count", &metadata_2, "second target callback count",
+      )
     })
   }
 
@@ -549,9 +515,11 @@ mod tests {
   fn test_when_cache_runs_out_of_space_the_callback_is_called_again() -> Result<(), TestFailure> {
     let _lock = lock_for_test();
 
-    *CONFIG.lock() = InterestCacheConfig::default()
-      .with_min_verbosity(Level::Debug)
-      .with_lru_cache_size(1);
+    configure_for_test(
+      InterestCacheConfig::default()
+        .with_min_verbosity(Level::Debug)
+        .with_lru_cache_size(1),
+    );
 
     run_in_worker(|| {
       let metadata_1 = log::MetadataBuilder::new().level(Level::Trace).target("dummy_1").build();
@@ -588,7 +556,7 @@ mod tests {
   fn test_cache_returns_previously_computed_value() -> Result<(), TestFailure> {
     let _lock = lock_for_test();
 
-    *CONFIG.lock() = InterestCacheConfig::default().with_min_verbosity(Level::Debug);
+    configure_for_test(InterestCacheConfig::default().with_min_verbosity(Level::Debug));
 
     run_in_worker(|| {
       let metadata_1 = log::MetadataBuilder::new().level(Level::Trace).target("dummy_1").build();
@@ -622,7 +590,7 @@ mod tests {
   fn test_cache_handles_non_static_target_string() -> Result<(), TestFailure> {
     let _lock = lock_for_test();
 
-    *CONFIG.lock() = InterestCacheConfig::default().with_min_verbosity(Level::Debug);
+    configure_for_test(InterestCacheConfig::default().with_min_verbosity(Level::Debug));
 
     run_in_worker(|| {
       let mut target = *b"dummy_1";

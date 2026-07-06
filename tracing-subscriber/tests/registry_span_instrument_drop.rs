@@ -18,10 +18,8 @@ mod tests {
   use tracing::Level;
   use tracing::Metadata;
   use tracing::Subscriber;
+  use tracing::span;
   use tracing::span::Id;
-  use tracing::span::{
-    self,
-  };
   use tracing::subscriber::with_default;
   use tracing_core::Interest;
   use tracing_core::LevelFilter;

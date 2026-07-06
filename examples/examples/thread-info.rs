@@ -19,10 +19,8 @@
 /// Jul 17 00:38:07.177  INFO large name thread 2 ThreadId(04) thread_info: i=9
 /// ```
 use std::error::Error;
+use std::thread;
 use std::thread::JoinHandle;
-use std::thread::{
-  self,
-};
 use std::time::Duration;
 
 use tracing::info;
