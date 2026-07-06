@@ -8575,18 +8575,18 @@
     ]
   },
   "TOML": {
-    "blanks": 225,
+    "blanks": 227,
     "children": {},
-    "code": 2037,
+    "code": 2045,
     "comments": 301,
     "inaccurate": false,
     "reports": [
       {
         "name": "./Cargo.toml",
         "stats": {
-          "blanks": 52,
+          "blanks": 54,
           "blobs": {},
-          "code": 477,
+          "code": 485,
           "comments": 135
         }
       },
@@ -8827,7 +8827,7 @@
     ]
   },
   "Total": {
-    "blanks": 15858,
+    "blanks": 15860,
     "children": {
       "BASH": [
         {
@@ -14472,9 +14472,9 @@
         {
           "name": "./Cargo.toml",
           "stats": {
-            "blanks": 52,
+            "blanks": 54,
             "blobs": {},
-            "code": 477,
+            "code": 485,
             "comments": 135
           }
         },
@@ -14714,7 +14714,7 @@
         }
       ]
     },
-    "code": 71481,
+    "code": 71489,
     "comments": 24554,
     "inaccurate": false,
     "reports": []

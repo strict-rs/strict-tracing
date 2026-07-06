@@ -25,6 +25,16 @@ members = [
 schema-version = "0.1.0"
 kind = "flat"
 
+[workspace.metadata.config.update]
+schema-version = "0.1.0"
+lockfile-refresh = "just-update-when-managed-dependencies-change"
+
+[workspace.metadata.config.update.opt-outs]
+files = []
+defaults = []
+keys = []
+elements = []
+
 # ─── Default metadata inherited by every member crate ───────────────────────
 [workspace.package]
 version = "0.3.0"

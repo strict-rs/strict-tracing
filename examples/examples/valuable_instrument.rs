@@ -27,7 +27,7 @@ mod app {
   // Currently there's no way to automatically apply valuable to a type, so
   // use the fields argument for `instrument`.
   #[instrument(fields(headers=valuable(&headers)))]
-  fn process(headers: Headers) {
+  fn process(headers: Headers<'_>) {
     info!("Handle request")
   }
 

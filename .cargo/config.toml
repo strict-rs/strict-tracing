@@ -19,7 +19,7 @@ xbuild  = ["build",  "--workspace", "--all-targets", "--all-features", "--releas
 
 [build]
 # Shared compiler flags for every workspace compilation.
-rustflags = ["--cfg=tokio_unstable"]
+rustflags = ["--cfg=tokio_unstable", "--cfg=tracing_unstable"]
 
 [term]
 verbose = false
