@@ -1130,12 +1130,12 @@ impl fmt::Debug for FilterMap {
         let alt = f.alternate();
         if alt {
             f.debug_struct("FilterMap")
-                .field("disabled_by", &format_args!("{:?}", &FmtBitset(self.bits)))
+                .field("disabled_by", &format_args!("{:?}", FmtBitset(self.bits)))
                 .field("bits", &format_args!("{:b}", self.bits))
                 .finish()
         } else {
             f.debug_struct("FilterMap")
-                .field("disabled_by", &format_args!("{:?}", &FmtBitset(self.bits)))
+                .field("disabled_by", &format_args!("{:?}", FmtBitset(self.bits)))
                 .finish()
         }
     }

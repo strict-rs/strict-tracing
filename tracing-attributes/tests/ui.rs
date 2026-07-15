@@ -5,12 +5,9 @@
 
 #[rustversion::stable]
 #[test]
-fn pass() -> Result<(), strict_test_support::TestFailure> {
-  strict_test_support::ensure_compiles("tests/ui/pass/*.rs", "instrument pass UI fixtures compile")
-}
-
-#[rustversion::stable]
-#[test]
-fn compile_fail() -> Result<(), strict_test_support::TestFailure> {
-  strict_test_support::ensure_compile_fail("tests/ui/fail/*.rs", "instrument fail UI fixtures match stderr")
+fn ui() -> Result<(), trybuild::TryBuildError> {
+  let mut cases = trybuild::TestCases::new();
+  cases.pass("tests/ui/pass/*.rs");
+  cases.compile_fail("tests/ui/fail/*.rs");
+  cases.run()
 }

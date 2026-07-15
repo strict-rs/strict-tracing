@@ -79,7 +79,8 @@ log = { workspace = true }
 tracing-log = { workspace = true, default-features = true }
 criterion = { workspace = true }
 regex = { workspace = true }
-strict-test-support = { workspace = true, features = ["trybuild"] }
+strict-test-support = { workspace = true }
+trybuild = { workspace = true }
 tracing-futures = { workspace = true, features = ["std-future", "std"] }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
 # Enable the `time` crate's `macros` feature, for examples.

@@ -34,7 +34,8 @@ tracing-subscriber = { workspace = true, features = ["registry"], optional = tru
 tokio-stream = { workspace = true, optional = true }
 
 [dev-dependencies]
-strict-test-support = { workspace = true, features = ["trybuild"] }
+strict-test-support = { workspace = true }
+trybuild = { workspace = true }
 
 [package.metadata.docs.rs]
 all-features = true

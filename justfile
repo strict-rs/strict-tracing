@@ -141,8 +141,8 @@ migrate-agent-guidance-fragments:
     cargo xtask migrate-agent-guidance-fragments
 
 # Regenerate generated Markdown docs from configured fragments.
-gen-agent-guidance *args:
-    cargo xtask gen-agent-guidance {{args}}
+gen-md *args:
+    cargo xtask gen-md {{args}}
 
 # Render live repo structure, command, gate, and generated-doc facts.
 repo-overview *args:
@@ -163,9 +163,10 @@ cq:
 snap-update:
     cargo xtask snap-update
 
-# Rerun the test suite with STRICT_TEST_SEED=random so `ensure_property` draws
-# fresh entropy instead of its fixed seed; pin any counterexample as a named
-# unit test. Replay a specific seed with `STRICT_TEST_SEED=<n> just test`.
+# Rerun the test suite with STRICT_TEST_SEED=random so
+# `proptest::strict::ensure_property` draws fresh entropy instead of its fixed
+# seed; pin any counterexample as a named unit test. Replay a specific seed with
+# `STRICT_TEST_SEED=<n> just test`.
 
 # Rerun property tests with a random strict-test seed.
 fuzz:
@@ -223,3 +224,9 @@ x *args:
 # Print the bpaf-rendered xtask command help.
 help:
     cargo xtask help
+# Split existing Markdown doc(s) into consumer fragments and regenerate them
+# in place: `just migrate-md [PATH]`. PATH may be a file or a directory
+# (recursive); with no PATH it self-heals legacy fragment layouts instead.
+migrate-md *args:
+    cargo xtask migrate-md --from "{{invocation_directory()}}" {{args}}
+
