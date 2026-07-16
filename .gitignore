@@ -1,4 +1,3 @@
-cov/html/
 *.profraw
 # Created by https://www.gitignore.io/api/rust,macos,visualstudiocode
 
@@ -56,7 +55,7 @@ librust_out.rlib
 # End of https://www.gitignore.io/api/rust,macos,visualstudiocode
 /target/
 **/*.rmeta
-/cov/html/
+cov/
 /report/
 /metrics/
 /mutants.out/
