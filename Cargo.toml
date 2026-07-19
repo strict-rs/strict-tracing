@@ -76,26 +76,26 @@ tracing-tower = { path = "tracing-tower", version = "0.1.0" }
 ahash = { version = "0.8.12" }
 ansi-to-tui = { version = "8.0.1" }
 argh = { version = "0.1.19" }
-async-trait = { version = "0.1.89" }
+async-trait = { version = "0.1.91" }
 bytes = { version = "1" }
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
 criterion = { version = "0.8.2", default-features = false }
 crossbeam-channel = { version = "0.5.16" }
 crossterm = { version = "0.29.0" }
-futures = { version = "0.3.32", default-features = false }
-futures-task = { version = "0.3.32" }
+futures = { version = "0.3.33", default-features = false }
+futures-task = { version = "0.3.33" }
 http = { version = "1.4.2" }
 humantime = { version = "2.4.0" }
 hyper = { version = "1.10.1", features = ["full"] }
 hyper-util = { version = "0.1.20", features = ["tokio", "server-auto", "client-legacy", "service", "http1", "http2"] }
-http-body-util = "0.1.3"
+http-body-util = "0.1.4"
 libc = { version = "0.2.186" }
 log = { version = "0.4.33" }
 lru = { version = "0.18.1" }
 matchers = { version = "0.2.0" }
 nu-ansi-term = { version = "0.50.3" }
 pin-project-lite = { version = "0.2.17" }
-quote = { version = "1.0.46" }
+quote = { version = "1.0.47" }
 rand = { version = "0.10.2" }
 ratatui = { version = "0.30.2" }
 ratatui-textarea = "0.9.2"
@@ -105,14 +105,14 @@ rustix = { version = "1.1.4", default-features = false, features = ["fs", "net",
 rustversion = { version = "1.0.23" }
 sharded-slab = { version = "0.1.7" }
 smallvec = { version = "1.15.2" }
-spin = { version = "0.12.1", default-features = false, features = ["mutex", "once", "spin_mutex"] }
+spin = { version = "0.12.2", default-features = false, features = ["mutex", "once", "spin_mutex"] }
 snafu = { version = "0.9.1" }
 symlink = { version = "0.1.0" }
-syn = { version = "2", features = ["full", "parsing", "printing", "visit-mut", "clone-impls", "extra-traits", "proc-macro"], default-features = false }
+syn = { version = "3", features = ["full", "parsing", "printing", "visit-mut", "clone-impls", "extra-traits", "proc-macro"], default-features = false }
 tempfile = { version = "3" }
 thread_local = { version = "1.1.10" }
 time = { version = "0.3.53", default-features = false }
-tokio = { version = "1.52.3" }
+tokio = { version = "1.53.0" }
 tokio-stream = { version = "0.1.18" }
 tokio-test = { version = "0.4.5" }
 tower = { version = "0.5.3", features = ["full"] }
@@ -123,15 +123,15 @@ valuable = { version = "0.1.1", default-features = false }
 valuable_crate = { package = "valuable", version = "0.1.1", default-features = false }
 valuable-serde = { version = "0.1.1", default-features = false }
 wasm-bindgen-test = { version = "0.3.76" }
-bpaf = { git = "https://github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10", default-features = false }
-template-core = { version = "0.1.0", git = "https://github.com/earthlings-dev/template-rs.git", branch = "main" }
-template-xtask = { version = "0.1.0", git = "https://github.com/earthlings-dev/template-rs.git", branch = "main" }
-mutant_fleet = { version = "0.1.0", git = "https://github.com/earthlings-dev/rust-mutant-fleet.git", branch = "main" }
-strict-test-support = { version = "0.1.0", git = "https://github.com/earthlings-dev/strict-test-support-rs.git", branch = "main" }
-trybuild = { git = "https://github.com/strict-rs/strict-trybuild.git", branch = "strict", version = "1" }
+bpaf = {  version = "0.10", default-features = false, git = "https://github.com/strict-rs/strict-bpaf.git", branch = "sync" }
+template-core = { version = "0.1.0", git = "https://github.com/earthlings-dev/template-rs.git", branch = "main"}
+template-xtask = { version = "0.1.0", git = "https://github.com/earthlings-dev/template-rs.git", branch = "main"}
+mutant_fleet = { version = "0.1.0", git = "https://github.com/earthlings-dev/rust-mutant-fleet.git", branch = "main"}
+strict-test-support = { version = "0.1.0", git = "https://github.com/earthlings-dev/strict-test-support-rs.git", branch = "main"}
+trybuild = {  version = "1", git = "https://github.com/strict-rs/strict-trybuild.git", branch = "strict" }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 serde = { version = "1", features = ["derive"] }
-thiserror = "2"
+thiserror = { version = "2", git = "https://github.com/strict-rs/strict-thiserror.git", branch = "upgrade"}
 serde_json = "1"
 cargo_metadata = "0.23"
 ignore = "0.4"
@@ -141,21 +141,21 @@ toml_edit = "0.25"
 anstyle = "1"
 snapbox = { version = "1.2", features = ["diff"], default-features = false }
 parking_lot = "0.12"
-proptest = { git = "https://github.com/strict-rs/strict-proptest.git", branch = "strict", version = "2", features = ["std"], default-features = false }
+proptest = {  version = "2", features = ["std", "strict-test"], default-features = false, git = "https://github.com/strict-rs/strict-proptest.git", branch = "strict" }
 
 [patch.crates-io]
 
 # strict-proptest (comment out if unused, do not remove)
-# proptest = { version = "1.11.0", git = "https://github.com/strict-rs/strict-proptest.git", branch = "upgrade" }
-# proptest-macro = { version = "0.5.0", git = "https://github.com/strict-rs/strict-proptest.git", branch = "upgrade" }
-# proptest-state-machine = { version = "0.8", git = "https://github.com/strict-rs/strict-proptest.git", branch = "upgrade" }
-# proptest-derive = { version = "0.8", git = "https://github.com/strict-rs/strict-proptest.git", branch = "upgrade" }
+# proptest = { version = "2", git = "https://github.com/strict-rs/strict-proptest.git", branch = "strict" }
+# proptest-macro = { version = "2", git = "https://github.com/strict-rs/strict-proptest.git", branch = "strict" }
+# proptest-state-machine = { version = "2", git = "https://github.com/strict-rs/strict-proptest.git", branch = "strict" }
+# proptest-derive = { version = "2", git = "https://github.com/strict-rs/strict-proptest.git", branch = "strict" }
 
 # strict-trybuild (comment out if unused, do not remove)
-trybuild = { git = "https://github.com/strict-rs/strict-trybuild.git", branch = "strict", version = "1" }
+trybuild = {  version = "1", git = "https://github.com/strict-rs/strict-trybuild.git", branch = "strict" }
 
 # strict-bpaf (comment out if unused, do not remove)
-bpaf = { git = "https://github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10" }
+bpaf = {  version = "0.10", git = "https://github.com/strict-rs/strict-bpaf.git", branch = "sync" }
 # bpaf_derive = { git = "https://github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10.0" }
 # bpaf_cauwugo = { git = "https://github.com/strict-rs/strict-bpaf.git", branch = "sync", version = "0.10.0" }
 
@@ -215,6 +215,8 @@ xtask = { path = "xtask" }
 # tracing-subscriber = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.3.23" }
 # tracing-test = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.0" }
 # tracing-tower = { git = "https://github.com/strict-rs/strict-tracing.git", branch = "strict", version = "0.1.0" }
+
+
 
 
 # ─── Release profile: small, fast, abort-on-panic ──────────────────────────
