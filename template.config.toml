@@ -18,11 +18,11 @@ kind = "flat"
 lockfile-refresh = "when-managed-dependencies-change"
 
 [ecosystems.cargo.update.workspace]
-dependencies = ["strict-test-support", "template-core", "template-xtask"]
+dependencies = ["strict-test-support", "template-core", "template-stask"]
 
 [[ecosystems.cargo.update.manifests]]
-path = "xtask/Cargo.toml"
-dependencies = ["template-core", "template-xtask"]
+path = "stask/Cargo.toml"
+dependencies = ["template-core", "template-stask"]
 dev-dependencies = ["strict-test-support"]
 
 [guidance]

@@ -1,6 +1,6 @@
 [package]
 name = "tracing-futures"
-version = "0.2.5"
+version.workspace = true
 authors = ["Eliza Weisman <eliza@buoyant.io>", "Tokio Contributors <team@tokio.rs>"]
 edition.workspace = true
 repository.workspace = true

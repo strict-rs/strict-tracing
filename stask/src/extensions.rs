@@ -8,6 +8,10 @@ use template_core::cli::command::CommandSet;
 ///
 /// Returns a typed registration error if the controlled `x` router metadata
 /// is invalid.
-pub fn commands() -> template_xtask::Result<CommandSet> {
-  template_xtask::empty_registry("strict-tracing extensions")
+#[allow(
+  clippy::single_call_fn,
+  reason = "the named seam keeps strict-tracing's intentionally empty `x` registry a testable consumer composition boundary"
+)]
+pub fn commands() -> template_stask::Result<CommandSet> {
+  template_stask::empty_registry("strict-tracing extensions")
 }

@@ -1,6 +1,6 @@
 [package]
 name = "tracing-attributes-internal"
-version = "0.1.31"
+version.workspace = true
 authors = [
     "Tokio Contributors <team@tokio.rs>",
     "Eliza Weisman <eliza@buoyant.io>",

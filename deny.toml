@@ -39,6 +39,13 @@ wildcards                  = "deny"
 highlight                  = "all"
 workspace-default-features = "allow"
 external-default-features  = "allow"
+# Skip only the legacy syn major so a genuinely new duplicate still warns:
+# the workspace's macro crates build on syn 3, while the external proc-macro
+# ecosystem (argh_derive, darling, the ratatui stack) still tracks syn 2 and
+# reaches the graph solely through tracing-examples dev-dependencies.
+skip = [
+  { crate = "syn@2", reason = "external proc-macro dependencies of tracing-examples still track syn 2 alongside the workspace's syn 3" },
+]
 
 [sources]
 unknown-registry = "deny"
@@ -55,6 +62,7 @@ allow-git = [
   "https://github.com/strict-rs/strict-bpaf.git",
   "https://github.com/strict-rs/strict-rowan.git",
   "https://github.com/strict-rs/strict-taplo.git",
+  "https://github.com/strict-rs/strict-thiserror.git",
   "https://github.com/strict-rs/strict-trybuild.git",
 ]
 

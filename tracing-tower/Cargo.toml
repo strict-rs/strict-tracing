@@ -1,6 +1,6 @@
 [package]
 name = "tracing-tower"
-version = "0.1.0"
+version.workspace = true
 authors = ["Eliza Weisman <eliza@buoyant.io>"]
 edition.workspace = true
 repository.workspace = true

@@ -5,7 +5,7 @@
 
 [package]
 name = "tracing-test"
-version = "0.1.0"
+version.workspace = true
 authors = [
     "Eliza Weisman <eliza@buoyant.io>",
     "Tokio Contributors <team@tokio.rs>",

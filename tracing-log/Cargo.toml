@@ -1,6 +1,6 @@
 [package]
 name = "tracing-log"
-version = "0.2.0"
+version.workspace = true
 authors = ["Tokio Contributors <team@tokio.rs>"]
 edition.workspace = true
 repository.workspace = true

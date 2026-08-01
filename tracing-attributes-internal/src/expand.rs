@@ -62,6 +62,7 @@ pub fn gen_function<B: ToTokens>(
     outer_attrs,
     inner_attrs,
     vis,
+    modifiers,
     sig,
     brace_token,
     block,
@@ -69,7 +70,7 @@ pub fn gen_function<B: ToTokens>(
 
   let output = &sig.output;
   let params = &sig.inputs;
-  let unsafety = &sig.unsafety;
+  let safety = &sig.safety;
   let asyncness = &sig.asyncness;
   let constness = &sig.constness;
   let abi = &sig.abi;
@@ -79,6 +80,7 @@ pub fn gen_function<B: ToTokens>(
   let lt_token = &sig.generics.lt_token;
   let gt_token = &sig.generics.gt_token;
   let fn_token = &sig.fn_token;
+  let defaultness = &modifiers.defaultness;
   let paren_token = &sig.paren_token;
   let variadic = &sig.variadic;
 
@@ -129,7 +131,7 @@ pub fn gen_function<B: ToTokens>(
 
   let mut result = quote!(
       #(#outer_attrs) *
-      #vis #constness #asyncness #unsafety #abi #fn_token #ident
+      #vis #defaultness #constness #asyncness #safety #abi #fn_token #ident
       #lt_token #gen_params #gt_token
   );
 
@@ -954,10 +956,10 @@ struct ImplTraitEraser;
 impl VisitMut for ImplTraitEraser {
   fn visit_type_mut(&mut self, field_type: &mut Type) {
     if let Type::ImplTrait(..) = *field_type {
-      *field_type = TypeInfer {
+      *field_type = Type::Infer(TypeInfer {
+        attrs:            Vec::new(),
         underscore_token: Token![_](field_type.span()),
-      }
-      .into();
+      });
     } else {
       visit_type_mut(self, field_type);
     }

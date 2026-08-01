@@ -11,6 +11,7 @@ use quote::ToTokens;
 use quote::TokenStreamExt as _;
 use quote::quote;
 use syn::Attribute;
+use syn::FnModifiers;
 use syn::ItemFn;
 use syn::Signature;
 use syn::Visibility;
@@ -95,6 +96,8 @@ pub struct MaybeItemFn {
   inner_attrs: Vec<Attribute>,
   /// Function visibility.
   vis:         Visibility,
+  /// Additional function modifiers retained outside the signature.
+  modifiers:   FnModifiers,
   /// Function signature.
   sig:         Signature,
   /// Brace token delimiting the raw function body.
@@ -111,6 +114,7 @@ impl MaybeItemFn {
       outer_attrs: &self.outer_attrs,
       inner_attrs: &self.inner_attrs,
       vis:         &self.vis,
+      modifiers:   &self.modifiers,
       sig:         &self.sig,
       brace_token: &self.brace_token,
       block:       &self.block,
@@ -124,6 +128,8 @@ impl Parse for MaybeItemFn {
   fn parse(input: ParseStream<'_>) -> syn::Result<Self> {
     let outer_attrs = input.call(Attribute::parse_outer)?;
     let vis: Visibility = input.parse()?;
+    let mut modifiers = FnModifiers::default();
+    modifiers.defaultness = input.parse()?;
     let sig: Signature = input.parse()?;
     let inner_attrs = input.call(Attribute::parse_inner)?;
     let body;
@@ -133,6 +139,7 @@ impl Parse for MaybeItemFn {
       outer_attrs,
       inner_attrs,
       vis,
+      modifiers,
       sig,
       brace_token,
       block,
@@ -145,6 +152,7 @@ impl From<ItemFn> for MaybeItemFn {
     ItemFn {
       attrs,
       vis,
+      modifiers,
       sig,
       block,
     }: ItemFn,
@@ -156,6 +164,7 @@ impl From<ItemFn> for MaybeItemFn {
       outer_attrs,
       inner_attrs,
       vis,
+      modifiers,
       sig,
       brace_token: block.brace_token,
       block: block_tokens,
@@ -174,6 +183,8 @@ pub struct MaybeItemFnRef<'a, B: ToTokens> {
   pub inner_attrs: &'a Vec<Attribute>,
   /// Borrowed function visibility.
   pub vis:         &'a Visibility,
+  /// Borrowed additional function modifiers.
+  pub modifiers:   &'a FnModifiers,
   /// Borrowed function signature.
   pub sig:         &'a Signature,
   /// Borrowed brace token delimiting the function body.

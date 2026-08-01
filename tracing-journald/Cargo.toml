@@ -1,6 +1,6 @@
 [package]
 name = "tracing-journald"
-version = "0.3.2"
+version.workspace = true
 authors = ["Benjamin Saunders <ben.e.saunders@gmail.com>"]
 edition.workspace = true
 license.workspace = true
