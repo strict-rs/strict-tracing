@@ -2,7 +2,7 @@
 
 # stask
 
-Workspace automation for this Rust template is compiled Rust reached through `just`. The root `justfile` is the canonical command surface and command index for developers, AI agents, and local automation; recipes stay thin and dispatch into the composed `cargo stask` runner with `stask_VIA_JUST=1`.
+Workspace automation for this Rust template is compiled Rust reached through `just`. The root `justfile` is the canonical command surface and command index for developers, AI agents, and local automation; recipes stay thin and dispatch into the composed `cargo stask` runner with `STASK_VIA_JUST=1`.
 
 Keep this crate as the template composition adapter. It owns only explicit bin entrypoints, command-set composition in `lib.rs`, local generated-doc source wiring, startup handling, and local extension registration. Reusable behavior lives in external crates: `strict-stask-core` owns runner, command registration, parser, color, output, context, process, and extension-router primitives; `strict-stask-cargo` owns Rust/Cargo workflow commands, `repo-overview`, reusable agent reports, gate behavior, and command behavior tests; `strict-stask-agents-md` owns generated-doc engine behavior, generated-content provider APIs, changed-path reporting, and fragment migration. Reusable Markdown content lives in `agents-md-rs` under `agents-md/fragments/**`.
 
@@ -12,9 +12,9 @@ Run `just repo-overview md` or `just repo-overview json` for the live command in
 
 ## Entry Point
 
-`just` lists source-ordered recipes by default. A direct `cargo stask <subcommand>` invocation is rejected by `strict_stask_core::Runner` unless `stask_VIA_JUST=1` or `CI` is set, so local users and agents share the same command surface while GitHub Actions can still run `cargo stask ci`.
+`just` lists source-ordered recipes by default. A direct `cargo stask <subcommand>` invocation is rejected by `strict_stask_core::Runner` unless `STASK_VIA_JUST=1` or `CI` is set, so local users and agents share the same command surface while GitHub Actions can still run `cargo stask ci`.
 
-Output color follows `--color <auto|always|never>` / `--no-color` or `stask_COLOR` / `CARGO_TERM_COLOR`, and the resolved policy is threaded through child tools.
+Output color follows `--color <auto|always|never>` / `--no-color` or `STASK_COLOR` / `CARGO_TERM_COLOR`, and the resolved policy is threaded through child tools.
 
 ## Generated Markdown
 

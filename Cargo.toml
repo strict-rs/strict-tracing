@@ -78,7 +78,7 @@ ansi-to-tui = { version = "8.0.1" }
 argh = { version = "0.1.19" }
 async-trait = { version = "0.1.91" }
 bytes = { version = "1" }
-chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "std"], git = "https://github.com/strict-rs/strict-chrono.git", branch = "upgrade" }
 criterion = { version = "0.8.2", default-features = false }
 crossbeam-channel = { version = "0.5.16" }
 crossterm = { version = "0.29.0" }
@@ -124,8 +124,8 @@ valuable_crate = { package = "valuable", version = "0.1.1", default-features = f
 valuable-serde = { version = "0.1.1", default-features = false }
 wasm-bindgen-test = { version = "0.3.76" }
 bpaf = {  version = "0.10", default-features = false, git = "https://github.com/strict-rs/strict-bpaf.git", branch = "sync"}
-template-core = { version = "0.2.0", git = "https://github.com/earthlings-dev/template-rs.git", branch = "main"}
-template-stask = { version = "0.2.0", git = "https://github.com/earthlings-dev/template-rs.git", branch = "main"}
+template-core = { version = "0.3.0", git = "https://github.com/earthlings-dev/template-rs.git", branch = "main"}
+template-stask = { version = "0.3.0", git = "https://github.com/earthlings-dev/template-rs.git", branch = "main"}
 mutant_fleet = { version = "0.1.0", git = "https://github.com/earthlings-dev/rust-mutant-fleet.git", branch = "main"}
 strict-test-support = { version = "0.1.0", git = "https://github.com/earthlings-dev/strict-test-support-rs.git", branch = "main"}
 trybuild = {  version = "1", git = "https://github.com/strict-rs/strict-trybuild.git", branch = "strict"}

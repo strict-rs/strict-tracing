@@ -37,8 +37,8 @@ Never add standard command aliases, delegation, or fallback execution to the loc
 - `template_stask::extension_command(...)` lifts one typed parser into a named nested extension.
 - `template_stask::registry(...)` validates unique nested command identities and constructs the top-level `x` command set.
 - `template_stask::empty_registry(...)` preserves the controlled `x` surface when the repository has no project command.
-- `template_stask::run_with_extensions(...)` rejects installed command sets, validates the extension-only catalog, and executes it through `RunnerMode::stask`.
-- The runner parses `x --from <DIR>`, rebases `CommandContext::invocation_dir()`, splits passthrough tokens at the first bare `--`, and retains the `stask_VIA_JUST=1` or `CI` direct-invocation guard.
+- `template_stask::run_with_extensions(...)` rejects installed command sets, validates the extension-only catalog, and executes it through `RunnerMode::Stask`.
+- The runner parses `x --from <DIR>`, rebases `CommandContext::invocation_dir()`, splits passthrough tokens at the first bare `--`, and retains the `STASK_VIA_JUST=1` or `CI` direct-invocation guard.
 
 Reject duplicate extension names during registry construction, before parsing or executing a handler. Do not mirror the installed catalog locally to detect collisions; surface classification keeps installed and extension command sets distinct.
 
@@ -52,7 +52,7 @@ Keep extensions idempotent where they maintain files. Validate every target path
 
 ## Errors and Output
 
-Keep a source-preserving, `#[non_exhaustive]`, `thiserror`-based `staskError` and a local `Result<T>` alias when repository extensions need domain failures. Wrap lower-domain errors transparently; do not convert them to strings or ad-hoc `io::Error` values.
+Keep a source-preserving, `#[non_exhaustive]`, `thiserror`-based `XtaskError` and a local `Result<T>` alias when repository extensions need domain failures. Wrap lower-domain errors transparently; do not convert them to strings or ad-hoc `io::Error` values.
 
 Adapt extension errors into the core runner only at command registration. Every public fallible function documents its errors.
 
@@ -67,7 +67,7 @@ Local tests return `Result<(), TestFailure>` and validate observable extension b
 - malformed arguments and unknown extensions;
 - duplicate-name and installed-surface rejection before execution;
 - `--from` rebasing and passthrough splitting;
-- guarded invocation with and without `stask_VIA_JUST=1` or `CI`;
+- guarded invocation with and without `XTASK_VIA_JUST=1` or `CI`;
 - process, filesystem, and output observations for both success and failure.
 
 Use `template_core::testing` recording capabilities for reusable runner observations. Do not mirror standard command tests here, add source-text assertions, or introduce filler branches for coverage.
