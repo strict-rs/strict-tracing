@@ -350,7 +350,18 @@ mod tests {
 
   use log::Log as _;
   use parking_lot::Mutex;
-  use strict_test_support::TestFailure;
+
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonLogLevelFilter(#[from] strict_test_support::ComparisonFailure<log::LevelFilter, log::LevelFilter>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use tracing_core::Event;
@@ -420,21 +431,23 @@ mod tests {
   }
 
   #[test]
-  fn builder_records_level_filter_and_ignored_targets() -> Result<(), TestFailure> {
+  fn builder_records_level_filter_and_ignored_targets() -> Result<(), TestError> {
     let builder = LogTracer::builder()
       .with_max_level(log::LevelFilter::Info)
       .ignore_crate("ignored")
       .ignore_all(["also_ignored"]);
 
-    ensure_eq(&builder.filter, &log::LevelFilter::Info, "builder stores max log level")?;
+    ensure_eq(builder.filter, log::LevelFilter::Info, "builder stores max log level").map(drop)?;
     ensure(
       builder.ignore_crates.as_slice() == [String::from("ignored"), String::from("also_ignored")],
       "builder stores ignored target prefixes in order",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn enabled_respects_tracing_max_level_and_ignored_targets() -> Result<(), TestFailure> {
+  fn enabled_respects_tracing_max_level_and_ignored_targets() -> Result<(), TestError> {
     let captured = Arc::new(CapturedEvents::default());
     let subscriber = CapturingSubscriber {
       captured,
@@ -453,14 +466,16 @@ mod tests {
         .target("ignored::module")
         .build();
 
-      ensure(logger.enabled(&accepted_metadata), "info log is enabled by max level")?;
-      ensure(!logger.enabled(&too_verbose_metadata), "debug log is rejected by tracing max level")?;
+      ensure(logger.enabled(&accepted_metadata), "info log is enabled by max level").map(drop)?;
+      ensure(!logger.enabled(&too_verbose_metadata), "debug log is rejected by tracing max level").map(drop)?;
       ensure(!logger.enabled(&ignored_metadata), "ignored target prefix rejects log record")
+        .map(drop)
+        .map_err(TestError::from)
     })
   }
 
   #[test]
-  fn log_forwards_enabled_records_and_filters_disabled_records() -> Result<(), TestFailure> {
+  fn log_forwards_enabled_records_and_filters_disabled_records() -> Result<(), TestError> {
     let captured = Arc::new(CapturedEvents::default());
     let subscriber = CapturingSubscriber {
       captured:  Arc::clone(&captured),
@@ -498,6 +513,8 @@ mod tests {
         targets.as_slice() == [String::from("accepted")],
         "only enabled log record is forwarded",
       )
+      .map(drop)
+      .map_err(TestError::from)
     })
   }
 }

@@ -721,9 +721,24 @@ feature! {
 #[cfg(test)]
 #[cfg(feature = "std")]
 mod tests {
+  use alloc::string::String;
   use std::format;
 
-  use strict_test_support::TestFailure;
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Retains the searched text and expected substring.
+    #[error(transparent)]
+    Substring(#[from] strict_test_support::SubstringFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_contains;
   use strict_test_support::ensure_ok;
@@ -775,26 +790,26 @@ mod tests {
   }
 
   #[test]
-  fn filter_fn_layer_contract_reports_enabled_hint_and_callsite_interest() -> Result<(), TestFailure> {
+  fn filter_fn_layer_contract_reports_enabled_hint_and_callsite_interest() -> Result<(), TestError> {
     let filter = filter_fn(|metadata| metadata.target() == "allowed_target").with_max_level_hint(LevelFilter::INFO);
 
     let allowed = ensure_ok(
       Layer::<NoSubscriber>::enabled(&filter, &ALLOW_METADATA, Context::none()),
       "filter_fn layer enabled result should be fallible only through subscriber errors",
     )?;
-    ensure(allowed, "matching metadata should be enabled")?;
+    ensure(allowed, "matching metadata should be enabled").map(drop)?;
 
     let blocked = ensure_ok(
       Layer::<NoSubscriber>::enabled(&filter, &BLOCK_METADATA, Context::none()),
       "filter_fn layer disabled result should be fallible only through subscriber errors",
     )?;
-    ensure(!blocked, "non-matching metadata should be rejected")?;
+    ensure(!blocked, "non-matching metadata should be rejected").map(drop)?;
 
     let hint = ensure_ok(
       Layer::<NoSubscriber>::max_level_hint(&filter),
       "filter_fn layer max-level hint should be available",
     )?;
-    ensure(hint == Some(LevelFilter::INFO), "configured max-level hint should be preserved")?;
+    ensure(hint == Some(LevelFilter::INFO), "configured max-level hint should be preserved").map(drop)?;
 
     let allowed_interest = ensure_ok(
       Layer::<NoSubscriber>::register_callsite(&filter, &ALLOW_METADATA),
@@ -803,7 +818,8 @@ mod tests {
     ensure(
       allowed_interest.is_always(),
       "matching static callsite should be cacheable as always enabled",
-    )?;
+    )
+    .map(drop)?;
 
     let blocked_interest = ensure_ok(
       Layer::<NoSubscriber>::register_callsite(&filter, &BLOCK_METADATA),
@@ -813,38 +829,55 @@ mod tests {
       blocked_interest.is_never(),
       "rejected static callsite should be cacheable as never enabled",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn filter_fn_clone_from_and_debug_preserve_predicate_shape() -> Result<(), TestFailure> {
+  fn filter_fn_clone_from_and_debug_preserve_predicate_shape() -> Result<(), TestError> {
     let filter = FilterFn::new(|metadata| metadata.name() == "allowed");
     let cloned = filter.clone();
     ensure(
       cloned.is_enabled(&ALLOW_METADATA),
       "cloned filter should retain the original predicate",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       !cloned.is_enabled(&BLOCK_METADATA),
       "cloned filter should retain the negative predicate",
-    )?;
+    )
+    .map(drop)?;
 
     let from_filter = FilterFn::from(|metadata: &Metadata<'_>| metadata.level() <= &Level::INFO);
     ensure(
       from_filter.is_enabled(&ALLOW_METADATA),
       "From should construct an enabled filter from the closure",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       !from_filter.is_enabled(&BLOCK_METADATA),
       "From should construct a filter that still rejects metadata above the predicate level",
-    )?;
+    )
+    .map(drop)?;
 
     let rendered = format!("{filter:?}");
-    ensure_contains(&rendered, "FilterFn", "debug output should name the filter type")?;
-    ensure_contains(&rendered, "max_level_hint", "debug output should include max-level hint state")
+    ensure_contains(
+      rendered.clone(),
+      String::from("FilterFn"),
+      "debug output should name the filter type",
+    )
+    .map(drop)?;
+    ensure_contains(
+      rendered,
+      String::from("max_level_hint"),
+      "debug output should include max-level hint state",
+    )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn dyn_filter_fn_layer_contract_uses_context_predicate_and_default_callsite_interest() -> Result<(), TestFailure> {
+  fn dyn_filter_fn_layer_contract_uses_context_predicate_and_default_callsite_interest() -> Result<(), TestError> {
     let filter = dynamic_filter_fn::<NoSubscriber, _>(|metadata, _context| metadata.target() == "allowed_target")
       .with_max_level_hint(LevelFilter::INFO);
 
@@ -852,19 +885,19 @@ mod tests {
       Layer::<NoSubscriber>::enabled(&filter, &ALLOW_METADATA, Context::none()),
       "dynamic filter enabled result should be reported through the layer",
     )?;
-    ensure(allowed, "matching dynamic metadata should be enabled")?;
+    ensure(allowed, "matching dynamic metadata should be enabled").map(drop)?;
 
     let blocked = ensure_ok(
       Layer::<NoSubscriber>::enabled(&filter, &BLOCK_METADATA, Context::none()),
       "dynamic filter disabled result should be reported through the layer",
     )?;
-    ensure(!blocked, "non-matching dynamic metadata should be rejected")?;
+    ensure(!blocked, "non-matching dynamic metadata should be rejected").map(drop)?;
 
     let hint = ensure_ok(
       Layer::<NoSubscriber>::max_level_hint(&filter),
       "dynamic filter max-level hint should be available",
     )?;
-    ensure(hint == Some(LevelFilter::INFO), "dynamic filter should preserve configured hint")?;
+    ensure(hint == Some(LevelFilter::INFO), "dynamic filter should preserve configured hint").map(drop)?;
 
     let allowed_interest = ensure_ok(
       Layer::<NoSubscriber>::register_callsite(&filter, &ALLOW_METADATA),
@@ -873,7 +906,8 @@ mod tests {
     ensure(
       allowed_interest.is_sometimes(),
       "metadata inside the dynamic max-level hint should be rechecked at runtime",
-    )?;
+    )
+    .map(drop)?;
 
     let blocked_interest = ensure_ok(
       Layer::<NoSubscriber>::register_callsite(&filter, &BLOCK_METADATA),
@@ -883,10 +917,12 @@ mod tests {
       blocked_interest.is_never(),
       "metadata above the dynamic max-level hint should be rejected statically",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn dyn_filter_fn_callsite_filter_overrides_default_interest() -> Result<(), TestFailure> {
+  fn dyn_filter_fn_callsite_filter_overrides_default_interest() -> Result<(), TestError> {
     let filter = DynFilterFn::<NoSubscriber, _>::new(|metadata, _context| metadata.name() == "allowed").with_callsite_filter(|metadata| {
       if metadata.target() == "allowed_target" {
         return Interest::always();
@@ -902,7 +938,8 @@ mod tests {
     ensure(
       allowed_interest.is_always(),
       "explicit callsite filter should mark matching metadata as always enabled",
-    )?;
+    )
+    .map(drop)?;
 
     let blocked_interest = ensure_ok(
       Layer::<NoSubscriber>::register_callsite(&filter, &BLOCK_METADATA),
@@ -911,17 +948,20 @@ mod tests {
     ensure(
       blocked_interest.is_never(),
       "explicit callsite filter should mark non-matching metadata as never enabled",
-    )?;
+    )
+    .map(drop)?;
 
     let enabled = ensure_ok(
       Layer::<NoSubscriber>::enabled(&filter, &ALLOW_METADATA, Context::none()),
       "dynamic enabled predicate should remain active with an explicit callsite filter",
     )?;
     ensure(enabled, "dynamic predicate should still enable matching metadata")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn dyn_filter_fn_clone_from_and_debug_preserve_dynamic_shape() -> Result<(), TestFailure> {
+  fn dyn_filter_fn_clone_from_and_debug_preserve_dynamic_shape() -> Result<(), TestError> {
     let filter = dynamic_filter_fn::<NoSubscriber, _>(|metadata, _context| metadata.name() == "allowed");
     let cloned = filter.clone();
 
@@ -929,13 +969,13 @@ mod tests {
       Layer::<NoSubscriber>::enabled(&cloned, &ALLOW_METADATA, Context::none()),
       "cloned dynamic filter should report enabled results",
     )?;
-    ensure(enabled, "cloned dynamic filter should retain the positive predicate")?;
+    ensure(enabled, "cloned dynamic filter should retain the positive predicate").map(drop)?;
 
     let rejected = ensure_ok(
       Layer::<NoSubscriber>::enabled(&cloned, &BLOCK_METADATA, Context::none()),
       "cloned dynamic filter should report rejected results",
     )?;
-    ensure(!rejected, "cloned dynamic filter should retain the negative predicate")?;
+    ensure(!rejected, "cloned dynamic filter should retain the negative predicate").map(drop)?;
 
     let from_filter = DynFilterFn::<NoSubscriber, _>::from(|metadata: &Metadata<'_>, _context: &Context<'_, NoSubscriber>| {
       metadata.level() <= &Level::INFO
@@ -944,28 +984,36 @@ mod tests {
       Layer::<NoSubscriber>::enabled(&from_filter, &ALLOW_METADATA, Context::none()),
       "From should construct a dynamic filter that reports enabled results",
     )?;
-    ensure(from_enabled, "From should preserve the dynamic positive predicate")?;
+    ensure(from_enabled, "From should preserve the dynamic positive predicate").map(drop)?;
 
     let from_rejected = ensure_ok(
       Layer::<NoSubscriber>::enabled(&from_filter, &BLOCK_METADATA, Context::none()),
       "From should construct a dynamic filter that reports rejected results",
     )?;
-    ensure(!from_rejected, "From should preserve the dynamic negative predicate")?;
+    ensure(!from_rejected, "From should preserve the dynamic negative predicate").map(drop)?;
 
     let no_callsite_debug = format!("{filter:?}");
     ensure_contains(
-      &no_callsite_debug,
-      "DynFilterFn",
+      no_callsite_debug.clone(),
+      String::from("DynFilterFn"),
       "debug output should name the dynamic filter type",
-    )?;
-    ensure_contains(&no_callsite_debug, "None", "debug output should expose the absent callsite filter")?;
+    )
+    .map(drop)?;
+    ensure_contains(
+      no_callsite_debug,
+      String::from("None"),
+      "debug output should expose the absent callsite filter",
+    )
+    .map(drop)?;
 
     let callsite_filter = filter.with_callsite_filter(|_| Interest::sometimes());
     let with_callsite_debug = format!("{callsite_filter:?}");
     ensure_contains(
-      &with_callsite_debug,
-      "Some",
+      with_callsite_debug,
+      String::from("Some"),
       "debug output should expose the present callsite filter",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

@@ -9,7 +9,7 @@
 //! validated as the code under test is run.
 //!
 //! ```no_run
-//! # fn main() -> Result<(), strict_test_support::TestFailure> {
+//! # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 //! use tracing_mock::expect;
 //! use tracing_mock::layer;
 //! use tracing_subscriber::Layer;
@@ -41,7 +41,7 @@
 //! their respective fields:
 //!
 //! ```no_run
-//! # fn main() -> Result<(), strict_test_support::TestFailure> {
+//! # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 //! use tracing_mock::expect;
 //! use tracing_mock::layer;
 //! use tracing_subscriber::Layer;
@@ -85,12 +85,12 @@
 //! [`MockHandle::finished`]:
 //!
 //! ```
-//! use strict_test_support::TestFailure;
+//! use strict_test_support::ConditionFailure;
 //! use strict_test_support::ensure;
 //! use tracing_mock::expect;
 //! use tracing_mock::layer;
 //!
-//! # fn main() -> Result<(), TestFailure> {
+//! # fn main() -> Result<(), ConditionFailure> {
 //! let span = expect::span().named("my_span");
 //! let (layer, handle) = layer::mock()
 //!     // Enter a matching span
@@ -157,7 +157,7 @@ use crate::subscriber::MockHandle;
 /// # Examples
 ///
 /// ```no_run
-/// # fn main() -> Result<(), strict_test_support::TestFailure> {
+/// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 /// use tracing_mock::expect;
 /// use tracing_mock::layer;
 /// use tracing_subscriber::Layer;
@@ -224,7 +224,7 @@ pub fn mock() -> MockLayerBuilder {
 /// The example from [`MockLayerBuilder::named`] could be rewritten as:
 ///
 /// ```
-/// # fn main() -> Result<(), strict_test_support::TestFailure> {
+/// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
 /// use tracing_mock::expect;
 /// use tracing_mock::layer;
 /// use tracing_subscriber::Layer;
@@ -322,7 +322,7 @@ impl MockLayerBuilder {
   /// event, the test will fail:
   ///
   /// ```no_run
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   /// use tracing_subscriber::Layer;
@@ -391,7 +391,7 @@ impl MockLayerBuilder {
   /// # Examples
   ///
   /// ```no_run
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   /// use tracing_subscriber::Layer;
@@ -414,7 +414,7 @@ impl MockLayerBuilder {
   /// A span is entered before the event, causing the test to fail:
   ///
   /// ```no_run
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   /// use tracing_subscriber::Layer;
@@ -461,7 +461,7 @@ impl MockLayerBuilder {
   /// # Examples
   ///
   /// ```no_run
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   /// use tracing_subscriber::Layer;
@@ -488,12 +488,12 @@ impl MockLayerBuilder {
   /// An unmet span expectation can be inspected through a returned error:
   ///
   /// ```
-  /// use strict_test_support::TestFailure;
+  /// use strict_test_support::ConditionFailure;
   /// use strict_test_support::ensure;
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   ///
-  /// # fn main() -> Result<(), TestFailure> {
+  /// # fn main() -> Result<(), ConditionFailure> {
   /// let span = expect::span()
   ///   .at_level(tracing::Level::INFO)
   ///   .named("the span we're testing")
@@ -534,7 +534,7 @@ impl MockLayerBuilder {
   /// # Examples
   ///
   /// ```no_run
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   /// use tracing_subscriber::Layer;
@@ -561,12 +561,12 @@ impl MockLayerBuilder {
   /// An unmet enter expectation can be inspected through a returned error:
   ///
   /// ```
-  /// use strict_test_support::TestFailure;
+  /// use strict_test_support::ConditionFailure;
   /// use strict_test_support::ensure;
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   ///
-  /// # fn main() -> Result<(), TestFailure> {
+  /// # fn main() -> Result<(), ConditionFailure> {
   /// let span = expect::span().at_level(tracing::Level::INFO).named("the span we're testing");
   /// let (layer, handle) = layer::mock().enter(&span).exit(&span).only().run_with_handle();
   ///
@@ -605,7 +605,7 @@ impl MockLayerBuilder {
   /// # Examples
   ///
   /// ```no_run
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   /// use tracing_subscriber::Layer;
@@ -631,12 +631,12 @@ impl MockLayerBuilder {
   /// An unmet exit expectation can be inspected through a returned error:
   ///
   /// ```
-  /// use strict_test_support::TestFailure;
+  /// use strict_test_support::ConditionFailure;
   /// use strict_test_support::ensure;
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   ///
-  /// # fn main() -> Result<(), TestFailure> {
+  /// # fn main() -> Result<(), ConditionFailure> {
   /// let span = expect::span().at_level(tracing::Level::INFO).named("the span we're testing");
   /// let (layer, handle) = layer::mock().enter(&span).exit(&span).only().run_with_handle();
   ///
@@ -672,7 +672,7 @@ impl MockLayerBuilder {
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   /// use tracing_subscriber::Layer;
@@ -716,7 +716,7 @@ impl MockLayerBuilder {
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   /// use tracing_subscriber::Layer;
@@ -741,7 +741,7 @@ impl MockLayerBuilder {
   /// then the expectation will fail.
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// # use std::marker::PhantomData;
   ///
   /// # use tracing::{Event, Subscriber};
@@ -818,7 +818,7 @@ impl MockLayerBuilder {
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing::Level;
   /// use tracing::level_filters::STATIC_MAX_LEVEL;
   /// use tracing_mock::expect;
@@ -881,7 +881,7 @@ impl MockLayerBuilder {
   /// expect a single event, but receive three:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   /// use tracing_subscriber::Layer;
@@ -906,7 +906,7 @@ impl MockLayerBuilder {
   /// After including `only`, the test will fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   /// use tracing_subscriber::Layer;
@@ -952,7 +952,7 @@ impl MockLayerBuilder {
   /// codebase:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing::Subscriber;
   /// use tracing_mock::layer;
   /// use tracing_subscriber::Layer;
@@ -995,7 +995,7 @@ impl MockLayerBuilder {
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   /// use tracing_subscriber::Layer;
@@ -1309,7 +1309,25 @@ impl fmt::Debug for MockLayer {
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionSubscriberError(#[from] strict_test_support::OptionFailure<SubscriberError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+    /// Retains the searched text and expected substring.
+    #[error(transparent)]
+    Substring(#[from] strict_test_support::SubstringFailure<String, String>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_contains;
   use strict_test_support::ensure_ok;
@@ -1323,7 +1341,7 @@ mod tests {
   use crate::expect;
 
   #[test]
-  fn expect_when_enabled_applies_the_built_expectations() -> Result<(), TestFailure> {
+  fn expect_when_enabled_applies_the_built_expectations() -> Result<(), TestError> {
     let (layer, handle) = mock()
       .expect_when(true, |builder| builder.event(expect::event()))
       .only()
@@ -1333,11 +1351,11 @@ mod tests {
     tracing::info!("recorded");
     drop(registry_guard);
 
-    ensure_ok(handle.finished(), "the expectation added by expect_when matches the event")
+    ensure_ok(handle.finished(), "the expectation added by expect_when matches the event").map_err(TestError::from)
   }
 
   #[test]
-  fn expect_when_enabled_enforces_the_built_expectations() -> Result<(), TestFailure> {
+  fn expect_when_enabled_enforces_the_built_expectations() -> Result<(), TestError> {
     let (layer, handle) = mock()
       .expect_when(true, |builder| builder.event(expect::event()))
       .run_with_handle();
@@ -1349,10 +1367,12 @@ mod tests {
       handle.finished().is_err(),
       "the expectation added by expect_when fails when no event is recorded",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn expect_when_disabled_leaves_the_script_unchanged() -> Result<(), TestFailure> {
+  fn expect_when_disabled_leaves_the_script_unchanged() -> Result<(), TestError> {
     let (layer, handle) = mock()
       .expect_when(false, |builder| builder.event(expect::event()))
       .only()
@@ -1361,11 +1381,11 @@ mod tests {
     let registry_guard = set_default(tracing_subscriber::registry().with(layer));
     drop(registry_guard);
 
-    ensure_ok(handle.finished(), "a disabled expect_when adds no expectations")
+    ensure_ok(handle.finished(), "a disabled expect_when adds no expectations").map_err(TestError::from)
   }
 
   #[test]
-  fn expect_when_disabled_does_not_swallow_recorded_events() -> Result<(), TestFailure> {
+  fn expect_when_disabled_does_not_swallow_recorded_events() -> Result<(), TestError> {
     let (layer, handle) = mock()
       .expect_when(false, |builder| builder.event(expect::event()))
       .only()
@@ -1379,10 +1399,12 @@ mod tests {
       handle.finished().is_err(),
       "an event recorded against a disabled expect_when still violates only()",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn only_rejects_extra_notifications() -> Result<(), TestFailure> {
+  fn only_rejects_extra_notifications() -> Result<(), TestError> {
     let (layer, handle) = mock().event(expect::event()).only().run_with_handle();
 
     let registry_guard = set_default(tracing_subscriber::registry().with(layer));
@@ -1391,10 +1413,12 @@ mod tests {
     drop(registry_guard);
 
     ensure(handle.finished().is_err(), "only rejects extra layer notifications")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn new_span_field_failures_are_reported_by_finished() -> Result<(), TestFailure> {
+  fn new_span_field_failures_are_reported_by_finished() -> Result<(), TestError> {
     let expected_span = expect::span()
       .named("layer_span")
       .with_fields(expect::field("answer").with_value(&42_i64));
@@ -1405,20 +1429,22 @@ mod tests {
     drop(registry_guard);
 
     ensure(handle.finished().is_err(), "layer new-span field mismatch is reported")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn on_register_dispatch_expectation_matches_default_registration() -> Result<(), TestFailure> {
+  fn on_register_dispatch_expectation_matches_default_registration() -> Result<(), TestError> {
     let (layer, handle) = mock().on_register_dispatch().only().run_with_handle();
 
     let registry_guard = set_default(tracing_subscriber::registry().with(layer));
     drop(registry_guard);
 
-    ensure_ok(handle.finished(), "layer observes on_register_dispatch when registered as default")
+    ensure_ok(handle.finished(), "layer observes on_register_dispatch when registered as default").map_err(TestError::from)
   }
 
   #[test]
-  fn span_lifecycle_and_event_scope_match_through_layer_hooks() -> Result<(), TestFailure> {
+  fn span_lifecycle_and_event_scope_match_through_layer_hooks() -> Result<(), TestError> {
     let span = expect::span().named("layer_scope_span");
     let event = expect::event().in_scope([expect::span().named("layer_scope_span")]);
     let (layer, handle) = mock()
@@ -1438,11 +1464,11 @@ mod tests {
     drop(layer_span);
     drop(registry_guard);
 
-    ensure_ok(handle.finished(), "layer span lifecycle and event scope expectations match")
+    ensure_ok(handle.finished(), "layer span lifecycle and event scope expectations match").map_err(TestError::from)
   }
 
   #[test]
-  fn event_scope_mismatch_is_reported_by_finished() -> Result<(), TestFailure> {
+  fn event_scope_mismatch_is_reported_by_finished() -> Result<(), TestError> {
     let event = expect::event().in_scope([expect::span().named("missing_scope_span")]);
     let (layer, handle) = mock().event(event).run_with_handle();
 
@@ -1451,10 +1477,12 @@ mod tests {
     drop(registry_guard);
 
     ensure(handle.finished().is_err(), "missing event scope is reported")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn layer_record_and_follows_from_hooks_report_unsupported_notifications() -> Result<(), TestFailure> {
+  fn layer_record_and_follows_from_hooks_report_unsupported_notifications() -> Result<(), TestError> {
     let (layer, handle) = mock().run_with_handle();
 
     let registry_guard = set_default(tracing_subscriber::registry().with(layer));
@@ -1468,31 +1496,57 @@ mod tests {
       handle.finished().is_err(),
       "layer records unsupported record and follows-from notifications as failures",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn composed_layer_names_are_included_in_failure_messages() -> Result<(), TestFailure> {
+  fn composed_layer_names_are_included_in_failure_messages() -> Result<(), TestError> {
     let (layer, handle) = named("outer").named("inner").event(expect::event()).run_with_handle();
 
     drop(layer);
     let error = handle.finished();
 
-    ensure(error.is_err(), "missing named layer expectation fails")?;
+    ensure(error.is_err(), "missing named layer expectation fails").map(drop)?;
     let failure = ensure_some(error.err(), "missing named layer expectation returns an error")?;
     let rendered = failure.to_string();
-    ensure_contains(&rendered, "outer::inner", "composed layer name appears in failures")
+    ensure_contains(rendered, String::from("outer::inner"), "composed layer name appears in failures")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn mock_layer_debug_reports_name_expected_and_current_state() -> Result<(), TestFailure> {
+  fn mock_layer_debug_reports_name_expected_and_current_state() -> Result<(), TestError> {
     let layer = named("debug-layer").event(expect::event()).run();
 
     let rendered = format!("{layer:?}");
 
-    ensure_contains(&rendered, "ExpectSubscriber", "debug output names the mock layer")?;
-    ensure_contains(&rendered, "debug-layer", "debug output includes the layer name")?;
-    ensure_contains(&rendered, "expected", "debug output includes pending expectations")?;
-    ensure_contains(&rendered, "failures", "debug output includes recorded failures")?;
-    ensure_contains(&rendered, "current", "debug output includes current span state")
+    ensure_contains(
+      (rendered).clone(),
+      String::from("ExpectSubscriber"),
+      "debug output names the mock layer",
+    )
+    .map(drop)?;
+    ensure_contains(
+      (rendered).clone(),
+      String::from("debug-layer"),
+      "debug output includes the layer name",
+    )
+    .map(drop)?;
+    ensure_contains(
+      (rendered).clone(),
+      String::from("expected"),
+      "debug output includes pending expectations",
+    )
+    .map(drop)?;
+    ensure_contains(
+      (rendered).clone(),
+      String::from("failures"),
+      "debug output includes recorded failures",
+    )
+    .map(drop)?;
+    ensure_contains(rendered, String::from("current"), "debug output includes current span state")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

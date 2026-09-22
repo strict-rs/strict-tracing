@@ -1,4 +1,15 @@
-use strict_test_support::TestFailure;
+use tracing_core::subscriber::SubscriberError;
+/// Native failures from these behavioral checks.
+#[derive(Debug, thiserror::Error)]
+enum TestError {
+  /// A boolean expectation failed.
+  #[error(transparent)]
+  Condition(#[from] strict_test_support::ConditionFailure),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+}
+
 use strict_test_support::ensure;
 use strict_test_support::ensure_ok;
 use tracing::Subscriber;
@@ -10,15 +21,17 @@ use tracing_subscriber::prelude::*;
 
 use super::*;
 
-fn ensure_hint<S>(subscriber: &S, expected: Option<LevelFilter>, context: &'static str) -> Result<(), TestFailure>
+fn ensure_hint<S>(subscriber: &S, expected: Option<LevelFilter>, context: &'static str) -> Result<(), TestError>
 where
   S: Subscriber,
 {
   ensure(subscriber.max_level_hint() == expected, context)
+    .map(drop)
+    .map_err(TestError::from)
 }
 
 #[test]
-fn option_some() -> Result<(), TestFailure> {
+fn option_some() -> Result<(), TestError> {
   let (raw_layer, handle) = layer::mock().only().run_with_handle();
   let filtered_layer = raw_layer.with_filter(Some(filter::dynamic_filter_fn(|_, _| false)));
 
@@ -33,7 +46,7 @@ fn option_some() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn option_none() -> Result<(), TestFailure> {
+fn option_none() -> Result<(), TestError> {
   let (raw_layer, handle) = layer::mock()
     .event(expect::event())
     .event(expect::event())
@@ -52,7 +65,7 @@ fn option_none() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn option_mixed() -> Result<(), TestFailure> {
+fn option_mixed() -> Result<(), TestError> {
   let (raw_layer, handle) = layer::mock().event(expect::event()).only().run_with_handle();
   let filtered_layer = raw_layer
     .with_filter(filter::dynamic_filter_fn(|meta, _ctx| meta.target() == "interesting"))
@@ -68,7 +81,7 @@ fn option_mixed() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn none_max_level_hint() -> Result<(), TestFailure> {
+fn none_max_level_hint() -> Result<(), TestError> {
   let (raw_none_layer, handle_none) = layer::mock()
     .event(expect::event())
     .event(expect::event())
@@ -76,7 +89,7 @@ fn none_max_level_hint() -> Result<(), TestFailure> {
     .run_with_handle();
   let filtered_none_layer = raw_none_layer.with_filter(None::<filter::DynFilterFn<_>>);
   let filtered_none_hint = ensure_ok(filtered_none_layer.max_level_hint(), "None filter max level hint returns")?;
-  ensure(filtered_none_hint.is_none(), "None filter does not provide a max level hint")?;
+  ensure(filtered_none_hint.is_none(), "None filter does not provide a max level hint").map(drop)?;
 
   let (raw_filter_fn_layer, handle_filter_fn) = layer::mock().event(expect::event()).only().run_with_handle();
   let max_level = Level::INFO;
@@ -86,7 +99,8 @@ fn none_max_level_hint() -> Result<(), TestFailure> {
   ensure(
     filtered_fn_hint == Some(LevelFilter::INFO),
     "filter function provides info max level hint",
-  )?;
+  )
+  .map(drop)?;
 
   let subscriber = tracing_subscriber::registry().with(filtered_none_layer).with(filtered_fn_layer);
   ensure_hint(&subscriber, None, "None filter upgrades the sibling filter hint")?;
@@ -101,7 +115,7 @@ fn none_max_level_hint() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn some_max_level_hint() -> Result<(), TestFailure> {
+fn some_max_level_hint() -> Result<(), TestError> {
   let (raw_some_layer, handle_some) = layer::mock()
     .event(expect::event())
     .event(expect::event())
@@ -114,7 +128,8 @@ fn some_max_level_hint() -> Result<(), TestFailure> {
   ensure(
     filtered_some_hint == Some(LevelFilter::DEBUG),
     "Some filter propagates debug max level hint",
-  )?;
+  )
+  .map(drop)?;
 
   let (raw_filter_fn_layer, handle_filter_fn) = layer::mock().event(expect::event()).only().run_with_handle();
   let filtered_fn_layer = raw_filter_fn_layer
@@ -123,7 +138,8 @@ fn some_max_level_hint() -> Result<(), TestFailure> {
   ensure(
     filtered_fn_hint == Some(LevelFilter::INFO),
     "filter function provides info max level hint",
-  )?;
+  )
+  .map(drop)?;
 
   let subscriber = tracing_subscriber::registry().with(filtered_some_layer).with(filtered_fn_layer);
   ensure_hint(&subscriber, Some(LevelFilter::DEBUG), "Some filter upgrades sibling filter hint")?;

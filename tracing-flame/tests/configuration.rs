@@ -8,9 +8,40 @@ mod tests {
   use std::io;
   use std::io::Write;
   use std::mem::ManuallyDrop;
+  use std::string;
   use std::sync::mpsc;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonString(#[from] strict_test_support::ComparisonFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonUsize(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionFlameError(#[from] strict_test_support::OptionFailure<tracing_flame::FlameError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultFlameError(#[from] strict_test_support::ResultFailure<tracing_flame::FlameError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultError(#[from] strict_test_support::ResultFailure<io::Error>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultFromUtf8Error(#[from] strict_test_support::ResultFailure<string::FromUtf8Error>),
+    /// Retains the searched text and expected substring.
+    #[error(transparent)]
+    Substring(#[from] strict_test_support::SubstringFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionString(#[from] strict_test_support::OptionFailure<String>),
+  }
 
-  use strict_test_support::TestFailure;
   use strict_test_support::ensure;
   use strict_test_support::ensure_contains;
   use strict_test_support::ensure_eq;
@@ -27,7 +58,7 @@ mod tests {
   }
 
   impl RecordingSink {
-    fn lines(&self) -> Result<Vec<String>, TestFailure> {
+    fn lines(&self) -> Result<Vec<String>, TestError> {
       let mut bytes = Vec::new();
       for chunk in self.chunks.try_iter() {
         bytes.extend(chunk);
@@ -69,7 +100,7 @@ mod tests {
   fn capture_lines(
     configure: impl FnOnce(FlameLayer<Registry, RecordingWriter>) -> FlameLayer<Registry, RecordingWriter>,
     run: impl FnOnce(),
-  ) -> Result<Vec<String>, TestFailure> {
+  ) -> Result<Vec<String>, TestError> {
     let (chunks, receiver) = mpsc::channel();
     let writer = RecordingWriter {
       chunks,
@@ -86,8 +117,12 @@ mod tests {
     sink.lines()
   }
 
-  fn ensure_line_contains<'a>(lines: &'a [String], needle: &str, context: &'static str) -> Result<&'a str, TestFailure> {
-    let line = ensure_some(lines.iter().find(|line| line.contains(needle)), context)?;
+  fn ensure_line_contains<'a>(lines: &'a [String], needle: &str, context: &'static str) -> Result<&'a str, TestError> {
+    let line =
+      ensure_some(lines.iter().find(|line| line.contains(needle)), context).map_err(|failure| strict_test_support::OptionFailure {
+        context: failure.context,
+        option:  failure.option.cloned(),
+      })?;
     Ok(line.as_str())
   }
 
@@ -101,7 +136,7 @@ mod tests {
   }
 
   #[test]
-  fn configuration_flags_shape_folded_output() -> Result<(), TestFailure> {
+  fn configuration_flags_shape_folded_output() -> Result<(), TestError> {
     let lines = capture_lines(
       |layer| {
         layer
@@ -116,35 +151,50 @@ mod tests {
       },
     )?;
 
-    ensure_eq(&lines.len(), &1_usize, "empty root-entry sample is omitted")?;
+    ensure_eq(lines.len(), 1_usize, "empty root-entry sample is omitted").map(drop)?;
     let root_line = ensure_line_contains(&lines, "root_span", "root span exit sample is recorded")?;
     ensure(
       root_line.starts_with("all-threads;"),
       "collapsed thread output uses the synthetic thread prefix",
-    )?;
-    ensure_contains(root_line, "configuration.rs:", "file and line output includes the test file")?;
+    )
+    .map(drop)?;
+    ensure_contains(
+      (root_line).to_owned(),
+      String::from("configuration.rs:"),
+      "file and line output includes the test file",
+    )
+    .map(drop)?;
     ensure(
       !root_line.contains("configuration::"),
       "module path is omitted when module path output is disabled",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn manual_flush_writes_all_previously_emitted_lines() -> Result<(), TestFailure> {
+  fn manual_flush_writes_all_previously_emitted_lines() -> Result<(), TestError> {
     let lines = capture_lines(|layer| layer, create_nested_spans)?;
 
-    ensure(!lines.is_empty(), "manual flush writes at least one folded sample")?;
+    ensure(!lines.is_empty(), "manual flush writes at least one folded sample").map(drop)?;
     let outer_line = ensure_line_contains(&lines, "outer", "outer span appears in folded output")?;
     let inner_line = ensure_line_contains(&lines, "Inner", "inner span appears in folded output")?;
-    ensure_contains(inner_line, "outer", "nested span stack includes the parent span")?;
+    ensure_contains(
+      (inner_line).to_owned(),
+      String::from("outer"),
+      "nested span stack includes the parent span",
+    )
+    .map(drop)?;
     ensure(
       outer_line.split_whitespace().last().is_some_and(|sample| !sample.is_empty()),
       "folded output includes a non-empty sample suffix",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn with_file_creates_and_flushes_folded_output() -> Result<(), TestFailure> {
+  fn with_file_creates_and_flushes_folded_output() -> Result<(), TestError> {
     let temp_dir = ensure_ok(
       tempfile::Builder::new().prefix("tracing-flame-file-").tempdir(),
       "temp dir is created",
@@ -157,13 +207,13 @@ mod tests {
     ensure_ok(guard.flush(), "file-backed flame guard flushes")?;
 
     let output = ensure_ok(fs::read_to_string(&path), "folded output file is readable")?;
-    ensure_contains(&output, "outer", "file-backed output contains outer span")?;
-    ensure_contains(&output, "Inner", "file-backed output contains inner span")?;
-    ensure_ok(temp_dir.close(), "temporary flame directory closes")
+    ensure_contains((output).clone(), String::from("outer"), "file-backed output contains outer span").map(drop)?;
+    ensure_contains(output, String::from("Inner"), "file-backed output contains inner span").map(drop)?;
+    ensure_ok(temp_dir.close(), "temporary flame directory closes").map_err(TestError::from)
   }
 
   #[test]
-  fn with_file_reports_create_errors_with_source() -> Result<(), TestFailure> {
+  fn with_file_reports_create_errors_with_source() -> Result<(), TestError> {
     let temp_dir = ensure_ok(
       tempfile::Builder::new().prefix("tracing-flame-missing-").tempdir(),
       "temp dir is created",
@@ -175,38 +225,44 @@ mod tests {
       "missing output directory returns an error",
     )?;
     ensure_contains(
-      &error.to_string(),
-      "cannot create output file",
+      error.to_string(),
+      String::from("cannot create output file"),
       "create-file error display names the failed operation",
-    )?;
-    ensure(error.source().is_some(), "create-file error preserves the I/O source")?;
-    ensure_ok(temp_dir.close(), "temporary flame directory closes")
+    )
+    .map(drop)?;
+    ensure(error.source().is_some(), "create-file error preserves the I/O source").map(drop)?;
+    ensure_ok(temp_dir.close(), "temporary flame directory closes").map_err(TestError::from)
   }
 
   #[test]
-  fn flush_guard_reports_flush_errors_with_source() -> Result<(), TestFailure> {
+  fn flush_guard_reports_flush_errors_with_source() -> Result<(), TestError> {
     let layer = FlameLayer::<Registry, FailingFlushWriter>::new(FailingFlushWriter);
     let guard = ManuallyDrop::new(layer.flush_on_drop());
 
     let error = ensure_some(guard.flush().err(), "failing writer returns a flush error")?;
     ensure_eq(
-      &error.to_string(),
-      &"cannot flush output buffer".to_owned(),
+      error.to_string(),
+      "cannot flush output buffer".to_owned(),
       "flush error display names the failed operation",
-    )?;
+    )
+    .map(drop)?;
     ensure(error.source().is_some(), "flush error preserves the I/O source")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn thread_collapse_prefixes_every_emitted_line() -> Result<(), TestFailure> {
+  fn thread_collapse_prefixes_every_emitted_line() -> Result<(), TestError> {
     let lines = capture_lines(
       |layer| layer.with_threads_collapsed(true).with_empty_samples(false),
       create_nested_spans,
     )?;
-    ensure(!lines.is_empty(), "collapsed-thread output emits folded lines")?;
+    ensure(!lines.is_empty(), "collapsed-thread output emits folded lines").map(drop)?;
     ensure(
       lines.iter().all(|line| line.starts_with("all-threads;")),
       "all collapsed-thread lines use the synthetic prefix",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

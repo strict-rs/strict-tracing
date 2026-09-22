@@ -4,7 +4,26 @@
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use tracing_core::subscriber::SubscriberError;
+  use tracing_subscriber::filter;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Retains the searched text and expected substring.
+    #[error(transparent)]
+    Substring(#[from] strict_test_support::SubstringFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultTracingSubscriberParseError(#[from] strict_test_support::ResultFailure<filter::ParseError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_contains;
   use strict_test_support::ensure_ok;
@@ -17,7 +36,7 @@ mod tests {
   use tracing_subscriber::prelude::*;
 
   #[test]
-  fn valid_directive_accepts_matching_target_and_rejects_other_targets() -> Result<(), TestFailure> {
+  fn valid_directive_accepts_matching_target_and_rejects_other_targets() -> Result<(), TestError> {
     let filter = ensure_ok(EnvFilter::try_new("filter_contract_target=info"), "target directive parses")?;
     let (mock_subscriber, handle) = subscriber::mock()
       .event(expect::event().at_level(Level::INFO).with_target("filter_contract_target"))
@@ -31,24 +50,26 @@ mod tests {
       tracing::debug!(target: "filter_contract_target", "disabled by level");
     });
 
-    ensure_ok(handle.finished(), "target directive enables only matching events")
+    ensure_ok(handle.finished(), "target directive enables only matching events").map_err(TestError::from)
   }
 
   #[test]
-  fn invalid_directive_reports_the_bad_directive_text() -> Result<(), TestFailure> {
+  fn invalid_directive_reports_the_bad_directive_text() -> Result<(), TestError> {
     let invalid = EnvFilter::try_new("filter_contract_target[broken");
 
-    ensure(invalid.is_err(), "invalid directive is rejected")?;
+    ensure(invalid.is_err(), "invalid directive is rejected").map(drop)?;
     let parse_error = invalid.err().map(|error| error.to_string()).unwrap_or_default();
     ensure_contains(
-      &parse_error,
-      "invalid filter directive",
+      parse_error,
+      String::from("invalid filter directive"),
       "parse error identifies the invalid directive category",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn env_builder_uses_default_directive_only_for_empty_inputs() -> Result<(), TestFailure> {
+  fn env_builder_uses_default_directive_only_for_empty_inputs() -> Result<(), TestError> {
     let builder = EnvFilter::builder().with_default_directive(LevelFilter::INFO.into());
 
     let defaulted = ensure_ok(builder.parse(""), "empty filter parses through default directive")?;
@@ -57,15 +78,17 @@ mod tests {
       "explicit filter parses without using default directive",
     )?;
 
-    ensure(defaulted.to_string() == "info", "empty input uses the default directive")?;
+    ensure(defaulted.to_string() == "info", "empty input uses the default directive").map(drop)?;
     ensure(
       explicit.to_string() == "filter_contract_target=error",
       "explicit input replaces the default directive",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn more_specific_directive_wins_over_less_specific_default() -> Result<(), TestFailure> {
+  fn more_specific_directive_wins_over_less_specific_default() -> Result<(), TestError> {
     let filter = ensure_ok(
       EnvFilter::try_new("info,filter_contract_target=trace"),
       "specific trace directive parses",
@@ -83,11 +106,11 @@ mod tests {
       tracing::trace!(target: "filter_contract_target", "enabled by specific trace");
     });
 
-    ensure_ok(handle.finished(), "more-specific directive overrides the default level")
+    ensure_ok(handle.finished(), "more-specific directive overrides the default level").map_err(TestError::from)
   }
 
   #[test]
-  fn field_matchers_accept_primitive_span_field_values() -> Result<(), TestFailure> {
+  fn field_matchers_accept_primitive_span_field_values() -> Result<(), TestError> {
     let filter = ensure_ok(
       EnvFilter::builder()
         .with_regex(false)
@@ -129,11 +152,11 @@ mod tests {
       drop(f64_guard);
     });
 
-    ensure_ok(handle.finished(), "primitive field filters enable matching spans")
+    ensure_ok(handle.finished(), "primitive field filters enable matching spans").map_err(TestError::from)
   }
 
   #[test]
-  fn field_matchers_reject_wrong_type_and_value() -> Result<(), TestFailure> {
+  fn field_matchers_reject_wrong_type_and_value() -> Result<(), TestError> {
     let filter = ensure_ok(
       EnvFilter::builder()
         .with_regex(false)
@@ -166,6 +189,6 @@ mod tests {
       drop(exact_guard);
     });
 
-    ensure_ok(handle.finished(), "field filters reject mismatched values and accept exact matches")
+    ensure_ok(handle.finished(), "field filters reject mismatched values and accept exact matches").map_err(TestError::from)
   }
 }

@@ -8,7 +8,7 @@
 //! # Examples
 //!
 //! ```
-//! # fn main() -> Result<(), strict_test_support::TestFailure> {
+//! # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 //! use tracing_mock::expect;
 //! use tracing_mock::field;
 //! use tracing_mock::subscriber;
@@ -37,7 +37,7 @@
 //! their respective fields:
 //!
 //! ```
-//! # fn main() -> Result<(), strict_test_support::TestFailure> {
+//! # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 //! use tracing_mock::expect;
 //! use tracing_mock::field;
 //! use tracing_mock::subscriber;
@@ -84,7 +84,7 @@
 //! span before recording an event, the test will fail:
 //!
 //! ```
-//! # fn main() -> Result<(), strict_test_support::TestFailure> {
+//! # fn main() -> Result<(), strict_test_support::ConditionFailure> {
 //! use tracing_mock::expect;
 //! use tracing_mock::field;
 //! use tracing_mock::subscriber;
@@ -275,7 +275,7 @@ pub struct MockHandle {
 ///
 ///
 /// ```
-/// # fn main() -> Result<(), strict_test_support::TestFailure> {
+/// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 /// use tracing_mock::expect;
 /// use tracing_mock::field;
 /// use tracing_mock::subscriber;
@@ -362,7 +362,7 @@ where
   /// event, the test will fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -426,7 +426,7 @@ where
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -444,7 +444,7 @@ where
   /// A span is entered before the event, causing the test to fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -488,7 +488,7 @@ where
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -511,7 +511,7 @@ where
   /// test to fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -556,7 +556,7 @@ where
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -577,7 +577,7 @@ where
   /// test to fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -623,7 +623,7 @@ where
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -644,7 +644,7 @@ where
   /// test to fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -687,7 +687,7 @@ where
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -708,7 +708,7 @@ where
   /// test to fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -771,7 +771,7 @@ where
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -797,7 +797,7 @@ where
   /// this test to fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -849,7 +849,7 @@ where
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -876,7 +876,7 @@ where
   /// causing the test to fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -925,7 +925,7 @@ where
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -942,7 +942,7 @@ where
   ///
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::{subscriber};
   ///
   /// struct WrapSubscriber<S: tracing::Subscriber> {
@@ -1026,7 +1026,7 @@ where
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -1074,7 +1074,7 @@ where
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -1120,7 +1120,7 @@ where
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing::Level;
   /// use tracing::level_filters::STATIC_MAX_LEVEL;
   /// use tracing_mock::expect;
@@ -1174,7 +1174,7 @@ where
   /// expect a single event, but receive three:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -1194,7 +1194,7 @@ where
   /// After including `only`, the test will fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -1232,7 +1232,7 @@ where
   /// codebase:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::subscriber;
   ///
   /// let spans_are_equal = tracing::subscriber::with_default(subscriber::mock().run(), || {
@@ -1260,7 +1260,7 @@ where
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -1748,7 +1748,19 @@ impl MockHandle {
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use tracing::field::Empty;
@@ -1758,7 +1770,7 @@ mod tests {
   use crate::expect;
 
   #[test]
-  fn expect_when_enabled_applies_the_built_expectations() -> Result<(), TestFailure> {
+  fn expect_when_enabled_applies_the_built_expectations() -> Result<(), TestError> {
     let (subscriber, handle) = mock()
       .expect_when(true, |builder| builder.event(expect::event()))
       .only()
@@ -1768,11 +1780,11 @@ mod tests {
       tracing::info!("recorded");
     });
 
-    ensure_ok(handle.finished(), "the expectation added by expect_when matches the event")
+    ensure_ok(handle.finished(), "the expectation added by expect_when matches the event").map_err(TestError::from)
   }
 
   #[test]
-  fn expect_when_enabled_enforces_the_built_expectations() -> Result<(), TestFailure> {
+  fn expect_when_enabled_enforces_the_built_expectations() -> Result<(), TestError> {
     let (subscriber, handle) = mock()
       .expect_when(true, |builder| builder.event(expect::event()))
       .run_with_handle();
@@ -1783,10 +1795,12 @@ mod tests {
       handle.finished().is_err(),
       "the expectation added by expect_when fails when no event is recorded",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn expect_when_disabled_leaves_the_script_unchanged() -> Result<(), TestFailure> {
+  fn expect_when_disabled_leaves_the_script_unchanged() -> Result<(), TestError> {
     let (subscriber, handle) = mock()
       .expect_when(false, |builder| builder.event(expect::event()))
       .only()
@@ -1794,11 +1808,11 @@ mod tests {
 
     with_default(subscriber, || {});
 
-    ensure_ok(handle.finished(), "a disabled expect_when adds no expectations")
+    ensure_ok(handle.finished(), "a disabled expect_when adds no expectations").map_err(TestError::from)
   }
 
   #[test]
-  fn expect_when_disabled_does_not_swallow_recorded_events() -> Result<(), TestFailure> {
+  fn expect_when_disabled_does_not_swallow_recorded_events() -> Result<(), TestError> {
     let (subscriber, handle) = mock()
       .expect_when(false, |builder| builder.event(expect::event()))
       .only()
@@ -1812,10 +1826,12 @@ mod tests {
       handle.finished().is_err(),
       "an event recorded against a disabled expect_when still violates only()",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn only_rejects_extra_notifications() -> Result<(), TestFailure> {
+  fn only_rejects_extra_notifications() -> Result<(), TestError> {
     let (subscriber, handle) = mock().event(expect::event()).only().run_with_handle();
 
     with_default(subscriber, || {
@@ -1824,10 +1840,12 @@ mod tests {
     });
 
     ensure(handle.finished().is_err(), "only rejects extra subscriber notifications")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn record_failures_are_reported_by_finished() -> Result<(), TestFailure> {
+  fn record_failures_are_reported_by_finished() -> Result<(), TestError> {
     let expected_span = expect::span().named("recorded_span");
     let (subscriber, handle) = mock()
       .new_span(&expected_span)
@@ -1840,5 +1858,7 @@ mod tests {
     });
 
     ensure(handle.finished().is_err(), "subscriber record mismatch is reported")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

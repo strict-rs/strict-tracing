@@ -17,8 +17,8 @@ categories = [
     "asynchronous",
 ]
 keywords = ["logging", "tracing", "file-appender", "non-blocking-writer"]
-edition.workspace = true
-rust-version.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
 
 [dependencies]
 crossbeam-channel = { workspace = true }

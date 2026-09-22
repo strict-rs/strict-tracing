@@ -196,7 +196,24 @@ pub struct MaybeItemFnRef<'a, B: ToTokens> {
 #[cfg(test)]
 mod tests {
   use quote::quote;
-  use strict_test_support::TestFailure;
+
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Retains the native parse failure.
+    #[error(transparent)]
+    Parse(#[from] strict_test_support::ResultFailure<syn::Error>),
+    /// Retains the native stringcomparison failure.
+    #[error(transparent)]
+    StringComparison(#[from] strict_test_support::ComparisonFailure<String, String>),
+    /// Retains the native countcomparison failure.
+    #[error(transparent)]
+    CountComparison(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
@@ -206,35 +223,39 @@ mod tests {
   use super::instrument;
 
   #[test]
-  fn invalid_attribute_arguments_expand_to_compile_error() -> Result<(), TestFailure> {
+  fn invalid_attribute_arguments_expand_to_compile_error() -> Result<(), TestError> {
     let tokens = instrument(quote!(level = "verbose"), quote! {
       fn demo() {}
     })
     .to_string();
 
-    ensure(tokens.contains("compile_error !"), "invalid args emit compile_error")?;
+    ensure(tokens.contains("compile_error !"), "invalid args emit compile_error").map(drop)?;
     ensure(
       tokens.contains("unknown verbosity level"),
       "compile_error includes parser diagnostic",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn const_functions_are_rejected_by_the_precise_parser() -> Result<(), TestFailure> {
+  fn const_functions_are_rejected_by_the_precise_parser() -> Result<(), TestError> {
     let tokens = instrument(quote!(), quote! {
       const fn demo() {}
     })
     .to_string();
 
-    ensure(tokens.contains("compile_error !"), "const fn emits compile_error")?;
+    ensure(tokens.contains("compile_error !"), "const fn emits compile_error").map(drop)?;
     ensure(
       tokens.contains("may not be used with `const fn`s"),
       "const fn rejection names the unsupported item kind",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn precise_parser_expands_regular_functions_with_span_and_return_event() -> Result<(), TestFailure> {
+  fn precise_parser_expands_regular_functions_with_span_and_return_event() -> Result<(), TestError> {
     let tokens = instrument(
       quote!(level = "debug", skip(skipped), fields(extra = answer), ret(Display)),
       quote! {
@@ -245,18 +266,21 @@ mod tests {
     )
     .to_string();
 
-    ensure(tokens.contains("pub fn demo"), "expanded output preserves function signature")?;
-    ensure(tokens.contains(":: tracing :: span !"), "expanded output creates a tracing span")?;
-    ensure(tokens.contains("extra = answer"), "expanded output records custom fields")?;
+    ensure(tokens.contains("pub fn demo"), "expanded output preserves function signature").map(drop)?;
+    ensure(tokens.contains(":: tracing :: span !"), "expanded output creates a tracing span").map(drop)?;
+    ensure(tokens.contains("extra = answer"), "expanded output records custom fields").map(drop)?;
     ensure(
       tokens.contains("return = % __tracing_attr_return"),
       "ret(Display) emits display-formatted return event",
-    )?;
+    )
+    .map(drop)?;
     ensure(!tokens.contains("skipped ="), "skipped parameter is not auto-recorded")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn speculative_parser_preserves_raw_body_tokens_when_precise_parsing_fails() -> Result<(), TestFailure> {
+  fn speculative_parser_preserves_raw_body_tokens_when_precise_parsing_fails() -> Result<(), TestError> {
     let tokens = instrument(quote!(name = "speculative"), quote! {
       fn demo() {
         let = ;
@@ -264,16 +288,18 @@ mod tests {
     })
     .to_string();
 
-    ensure(tokens.contains("fn demo"), "speculative output preserves function signature")?;
-    ensure(tokens.contains("let = ;"), "speculative output preserves raw invalid body")?;
+    ensure(tokens.contains("fn demo"), "speculative output preserves function signature").map(drop)?;
+    ensure(tokens.contains("let = ;"), "speculative output preserves raw invalid body").map(drop)?;
     ensure(
       tokens.contains("\"speculative\""),
       "speculative output still applies parsed attributes",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn maybe_item_fn_parse_and_from_item_fn_preserve_function_parts() -> Result<(), TestFailure> {
+  fn maybe_item_fn_parse_and_from_item_fn_preserve_function_parts() -> Result<(), TestError> {
     let maybe = ensure_ok(
       syn::parse2::<MaybeItemFn>(quote! {
         #[inline]
@@ -287,13 +313,14 @@ mod tests {
       "raw-body function parser accepts regular function item",
     )?;
     let maybe_ref = maybe.as_ref();
-    ensure_eq(&maybe_ref.outer_attrs.len(), &1_usize, "raw parser preserves outer attributes")?;
+    ensure_eq(maybe_ref.outer_attrs.len(), 1_usize, "raw parser preserves outer attributes").map(drop)?;
     ensure_eq(
-      &maybe_ref.sig.ident.to_string(),
-      &String::from("demo"),
+      maybe_ref.sig.ident.to_string(),
+      String::from("demo"),
       "raw parser preserves function ident",
-    )?;
-    ensure(maybe_ref.block.to_string().contains("value"), "raw parser preserves body tokens")?;
+    )
+    .map(drop)?;
+    ensure(maybe_ref.block.to_string().contains("value"), "raw parser preserves body tokens").map(drop)?;
 
     let item = ensure_ok(
       syn::parse2::<ItemFn>(quote! {
@@ -306,10 +333,12 @@ mod tests {
     )?;
     let converted = MaybeItemFn::from(item);
     let converted_ref = converted.as_ref();
-    ensure_eq(&converted_ref.outer_attrs.len(), &1_usize, "conversion preserves outer attributes")?;
+    ensure_eq(converted_ref.outer_attrs.len(), 1_usize, "conversion preserves outer attributes").map(drop)?;
     ensure(
       converted_ref.block.to_string().contains("let value = 1"),
       "conversion preserves body statements",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

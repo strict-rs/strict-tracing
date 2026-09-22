@@ -3,17 +3,19 @@
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use strict_test_support::ResultFailure;
   use strict_test_support::ensure_ok;
   use tracing::Level;
   use tracing::level_filters::STATIC_MAX_LEVEL;
   use tracing::subscriber::set_default;
   use tracing::subscriber::with_default;
+  use tracing_core::subscriber::SubscriberError;
   use tracing_mock::*;
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn spans_dont_leak() -> Result<(), TestFailure> {
+  fn spans_dont_leak() -> Result<(), ResultFailure<SubscriberError>> {
     fn do_span() {
       let span = tracing::debug_span!("alice");
       let _entered = span.enter();
@@ -54,7 +56,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn events_dont_leak() -> Result<(), TestFailure> {
+  fn events_dont_leak() -> Result<(), ResultFailure<SubscriberError>> {
     fn do_event() {
       tracing::debug!("alice");
     }

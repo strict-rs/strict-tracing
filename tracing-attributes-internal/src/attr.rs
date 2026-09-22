@@ -744,7 +744,30 @@ mod tests {
   use proc_macro2::TokenStream;
   use quote::ToTokens as _;
   use quote::quote;
-  use strict_test_support::TestFailure;
+
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Retains the native missingparseerror failure.
+    #[error(transparent)]
+    MissingParseError(#[from] strict_test_support::OptionFailure<syn::Error>),
+    /// Retains the native parse failure.
+    #[error(transparent)]
+    Parse(#[from] strict_test_support::ResultFailure<syn::Error>),
+    /// Retains the native stringcomparison failure.
+    #[error(transparent)]
+    StringComparison(#[from] strict_test_support::ComparisonFailure<String, String>),
+    /// Retains the native countcomparison failure.
+    #[error(transparent)]
+    CountComparison(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+    /// Retains the native eventargs failure.
+    #[error(transparent)]
+    EventArgs(#[from] strict_test_support::OptionFailure<super::EventArgs>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
@@ -762,20 +785,22 @@ mod tests {
 
   /// Parse `tokens` as `#[instrument(...)]` arguments, requiring rejection with exactly
   /// `expected_message`.
-  fn ensure_rejects(tokens: TokenStream, expected_message: &'static str) -> Result<(), TestFailure> {
+  fn ensure_rejects(tokens: TokenStream, expected_message: &'static str) -> Result<(), TestError> {
     let parse_error = ensure_some(
       syn::parse2::<InstrumentArgs>(tokens).err(),
       "duplicate or conflicting arguments must be rejected",
     )?;
     ensure_eq(
-      &parse_error.to_string().as_str(),
-      &expected_message,
+      parse_error.to_string(),
+      (expected_message).to_owned(),
       "rejection message must match the pinned text",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn parses_names_targets_levels_and_skip_lists() -> Result<(), TestFailure> {
+  fn parses_names_targets_levels_and_skip_lists() -> Result<(), TestError> {
     let args = ensure_ok(
       syn::parse2::<InstrumentArgs>(quote!(
         "literal_name",
@@ -787,24 +812,28 @@ mod tests {
       "literal name, ident target, numeric level, raw skips, and fields parse together",
     )?;
 
-    ensure(args.name.is_some(), "literal name is stored")?;
+    ensure(args.name.is_some(), "literal name is stored").map(drop)?;
     ensure_eq(
-      &args.target().to_string(),
-      &quote!(target_ident).to_string(),
+      args.target().to_string(),
+      quote!(target_ident).to_string(),
       "identifier target is emitted as target tokens",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &level_tokens(&args.level()),
-      &quote!(::tracing::Level::ERROR).to_string(),
+      level_tokens(&args.level()),
+      quote!(::tracing::Level::ERROR).to_string(),
       "numeric level 5 maps to ERROR",
-    )?;
-    ensure_eq(&args.skips.len(), &2_usize, "two skip identifiers are recorded")?;
-    ensure(!args.skip_all, "skip list does not enable skip_all")?;
+    )
+    .map(drop)?;
+    ensure_eq(args.skips.len(), 2_usize, "two skip identifiers are recorded").map(drop)?;
+    ensure(!args.skip_all, "skip list does not enable skip_all").map(drop)?;
     ensure(args.fields.is_some(), "custom fields are retained")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn parses_every_string_level_and_custom_path_level() -> Result<(), TestFailure> {
+  fn parses_every_string_level_and_custom_path_level() -> Result<(), TestError> {
     let cases = [
       (quote!(level = "trace"), quote!(::tracing::Level::TRACE).to_string()),
       (quote!(level = "debug"), quote!(::tracing::Level::DEBUG).to_string()),
@@ -816,7 +845,12 @@ mod tests {
 
     for (input, expected_tokens) in cases {
       let args = ensure_ok(syn::parse2::<InstrumentArgs>(input), "supported level literal or path parses")?;
-      ensure_eq(&level_tokens(&args.level()), &expected_tokens, "parsed level emits expected tokens")?;
+      ensure_eq(
+        level_tokens(&args.level()),
+        (expected_tokens).clone(),
+        "parsed level emits expected tokens",
+      )
+      .map(drop)?;
     }
 
     ensure_rejects(
@@ -832,7 +866,7 @@ mod tests {
   }
 
   #[test]
-  fn parses_event_args_modes_levels_and_rejects_duplicates() -> Result<(), TestFailure> {
+  fn parses_event_args_modes_levels_and_rejects_duplicates() -> Result<(), TestError> {
     let args = ensure_ok(
       syn::parse2::<InstrumentArgs>(quote!(
         level = "debug",
@@ -842,34 +876,38 @@ mod tests {
       "err and ret argument lists parse",
     )?;
 
-    let err_args = ensure_some(args.err_args.as_ref(), "err args are recorded")?;
-    ensure(err_args.mode == FormatMode::Display, "err Display mode is recorded")?;
+    let err_args = ensure_some(args.err_args.clone(), "err args are recorded")?;
+    ensure(err_args.mode == FormatMode::Display, "err Display mode is recorded").map(drop)?;
     ensure_eq(
-      &level_tokens(&err_args.level(Level::Error)),
-      &quote!(::tracing::Level::WARN).to_string(),
+      level_tokens(&err_args.level(Level::Error)),
+      quote!(::tracing::Level::WARN).to_string(),
       "err level override is used",
-    )?;
+    )
+    .map(drop)?;
 
-    let ret_args = ensure_some(args.ret_args.as_ref(), "ret args are recorded")?;
-    ensure(ret_args.mode == FormatMode::Debug, "ret Debug mode is recorded")?;
+    let ret_args = ensure_some(args.ret_args, "ret args are recorded")?;
+    ensure(ret_args.mode == FormatMode::Debug, "ret Debug mode is recorded").map(drop)?;
     ensure_eq(
-      &level_tokens(&ret_args.level(Level::Info)),
-      &quote!(custom::RET_LEVEL).to_string(),
+      level_tokens(&ret_args.level(Level::Info)),
+      quote!(custom::RET_LEVEL).to_string(),
       "ret custom level override is used",
-    )?;
+    )
+    .map(drop)?;
 
     let defaults = ensure_ok(
       syn::parse2::<InstrumentArgs>(quote!(err, ret)),
       "bare err and ret arguments use defaults",
     )?;
     ensure(
-      ensure_some(defaults.err_args.as_ref(), "bare err args are recorded")?.mode == FormatMode::Default,
+      ensure_some(defaults.err_args.clone(), "bare err args are recorded")?.mode == FormatMode::Default,
       "bare err uses default format mode",
-    )?;
+    )
+    .map(drop)?;
     ensure(
-      ensure_some(defaults.ret_args.as_ref(), "bare ret args are recorded")?.mode == FormatMode::Default,
+      ensure_some(defaults.ret_args, "bare ret args are recorded")?.mode == FormatMode::Default,
       "bare ret uses default format mode",
-    )?;
+    )
+    .map(drop)?;
 
     ensure_rejects(quote!(err(Display, Debug)), "expected only a single format argument")?;
     ensure_rejects(
@@ -879,7 +917,7 @@ mod tests {
   }
 
   #[test]
-  fn parses_field_names_values_and_formatting_modes() -> Result<(), TestFailure> {
+  fn parses_field_names_values_and_formatting_modes() -> Result<(), TestError> {
     let fields = ensure_ok(
       syn::parse2::<Fields>(quote!(
         fields(
@@ -899,74 +937,86 @@ mod tests {
     ensure(
       rendered.contains("bare = :: tracing :: field :: Empty"),
       "bare field emits an explicit Empty value",
-    )?;
-    ensure(rendered.contains("? debug_only"), "debug field shorthand is emitted")?;
-    ensure(rendered.contains("% display_only"), "display field shorthand is emitted")?;
-    ensure(rendered.contains("dotted . name = answer"), "dotted field value is emitted")?;
-    ensure(rendered.contains("explicit_debug = ? answer"), "explicit debug value is emitted")?;
+    )
+    .map(drop)?;
+    ensure(rendered.contains("? debug_only"), "debug field shorthand is emitted").map(drop)?;
+    ensure(rendered.contains("% display_only"), "display field shorthand is emitted").map(drop)?;
+    ensure(rendered.contains("dotted . name = answer"), "dotted field value is emitted").map(drop)?;
+    ensure(rendered.contains("explicit_debug = ? answer"), "explicit debug value is emitted").map(drop)?;
     ensure(
       rendered.contains("explicit_display = % answer"),
       "explicit display value is emitted",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       rendered.contains("{ dynamic_name () } = value"),
       "dynamic field name is emitted in braces",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn parse_warnings_preserve_unknown_inputs_without_dropping_valid_args() -> Result<(), TestFailure> {
+  fn parse_warnings_preserve_unknown_inputs_without_dropping_valid_args() -> Result<(), TestError> {
     let args = ensure_ok(
       syn::parse2::<InstrumentArgs>(quote!(unknown_token, level = "info", another_unknown, skip_all)),
       "unknown inputs are retained as warnings while valid inputs parse",
     )?;
 
-    ensure_eq(&args.parse_warnings.len(), &2_usize, "two unknown tokens become warnings")?;
+    ensure_eq(args.parse_warnings.len(), 2_usize, "two unknown tokens become warnings").map(drop)?;
     ensure_eq(
-      &level_tokens(&args.level()),
-      &quote!(::tracing::Level::INFO).to_string(),
+      level_tokens(&args.level()),
+      quote!(::tracing::Level::INFO).to_string(),
       "valid level is still recorded after unknown input",
-    )?;
-    ensure(args.skip_all, "valid skip_all is still recorded after unknown input")?;
+    )
+    .map(drop)?;
+    ensure(args.skip_all, "valid skip_all is still recorded after unknown input").map(drop)?;
     let warnings = args.warnings().to_token_stream().to_string();
     ensure(
       warnings.contains("TRACING_INSTRUMENT_WARNING"),
       "warning tokens define the fake deprecation marker",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       warnings.contains("found unrecognized input"),
       "warning tokens include the diagnostic text",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn skip_list_rejects_duplicate_raw_or_plain_identifiers() -> Result<(), TestFailure> {
+  fn skip_list_rejects_duplicate_raw_or_plain_identifiers() -> Result<(), TestError> {
     ensure_rejects(quote!(skip(first_arg, first_arg)), "tried to skip the same field twice")?;
     ensure_rejects(quote!(skip(r#type, r#type)), "tried to skip the same field twice")
   }
 
   #[test]
-  fn accepts_target_with_parent() -> Result<(), TestFailure> {
+  fn accepts_target_with_parent() -> Result<(), TestError> {
     let args = ensure_ok(
       syn::parse2::<InstrumentArgs>(quote!(target = "custom_target", parent = source::parent_span)),
       "`target` combined with `parent` must parse",
     )?;
-    ensure(args.target.is_some(), "the `target` argument must be recorded")?;
+    ensure(args.target.is_some(), "the `target` argument must be recorded").map(drop)?;
     ensure(args.parent.is_some(), "the `parent` argument must be recorded")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn accepts_target_with_follows_from() -> Result<(), TestFailure> {
+  fn accepts_target_with_follows_from() -> Result<(), TestError> {
     let args = ensure_ok(
       syn::parse2::<InstrumentArgs>(quote!(target = "custom_target", follows_from = causes)),
       "`target` combined with `follows_from` must parse",
     )?;
-    ensure(args.target.is_some(), "the `target` argument must be recorded")?;
+    ensure(args.target.is_some(), "the `target` argument must be recorded").map(drop)?;
     ensure(args.follows_from.is_some(), "the `follows_from` argument must be recorded")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn rejects_duplicate_name() -> Result<(), TestFailure> {
+  fn rejects_duplicate_name() -> Result<(), TestError> {
     ensure_rejects(
       quote!(name = "first_name", name = "second_name"),
       "expected only a single `name` argument",
@@ -974,7 +1024,7 @@ mod tests {
   }
 
   #[test]
-  fn rejects_duplicate_target() -> Result<(), TestFailure> {
+  fn rejects_duplicate_target() -> Result<(), TestError> {
     ensure_rejects(
       quote!(target = "first_target", target = "second_target"),
       "expected only a single `target` argument",
@@ -982,7 +1032,7 @@ mod tests {
   }
 
   #[test]
-  fn rejects_duplicate_parent() -> Result<(), TestFailure> {
+  fn rejects_duplicate_parent() -> Result<(), TestError> {
     ensure_rejects(
       quote!(parent = first_parent, parent = second_parent),
       "expected only a single `parent` argument",
@@ -990,7 +1040,7 @@ mod tests {
   }
 
   #[test]
-  fn rejects_duplicate_follows_from() -> Result<(), TestFailure> {
+  fn rejects_duplicate_follows_from() -> Result<(), TestError> {
     ensure_rejects(
       quote!(follows_from = first_causes, follows_from = second_causes),
       "expected only a single `follows_from` argument",
@@ -998,22 +1048,22 @@ mod tests {
   }
 
   #[test]
-  fn rejects_duplicate_level() -> Result<(), TestFailure> {
+  fn rejects_duplicate_level() -> Result<(), TestError> {
     ensure_rejects(quote!(level = "info", level = "debug"), "expected only a single `level` argument")
   }
 
   #[test]
-  fn rejects_duplicate_skip() -> Result<(), TestFailure> {
+  fn rejects_duplicate_skip() -> Result<(), TestError> {
     ensure_rejects(quote!(skip(first_arg), skip(second_arg)), "expected only a single `skip` argument")
   }
 
   #[test]
-  fn rejects_duplicate_skip_all() -> Result<(), TestFailure> {
+  fn rejects_duplicate_skip_all() -> Result<(), TestError> {
     ensure_rejects(quote!(skip_all, skip_all), "expected only a single `skip_all` argument")
   }
 
   #[test]
-  fn rejects_duplicate_fields() -> Result<(), TestFailure> {
+  fn rejects_duplicate_fields() -> Result<(), TestError> {
     ensure_rejects(
       quote!(fields(first_field), fields(second_field)),
       "expected only a single `fields` argument",
@@ -1021,12 +1071,12 @@ mod tests {
   }
 
   #[test]
-  fn rejects_skip_then_skip_all() -> Result<(), TestFailure> {
+  fn rejects_skip_then_skip_all() -> Result<(), TestError> {
     ensure_rejects(quote!(skip(first_arg), skip_all), "expected either `skip` or `skip_all` argument")
   }
 
   #[test]
-  fn rejects_skip_all_then_skip() -> Result<(), TestFailure> {
+  fn rejects_skip_all_then_skip() -> Result<(), TestError> {
     ensure_rejects(quote!(skip_all, skip(first_arg)), "expected either `skip` or `skip_all` argument")
   }
 }

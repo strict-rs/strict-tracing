@@ -236,7 +236,8 @@ pub(super) fn try_cache(metadata: &Metadata<'_>, callback: impl FnOnce() -> bool
     //
     // We want each level to be cached separately so we also use the level as key, and since
     // some linkers at certain optimization levels deduplicate strings if their prefix matches
-    // (e.g. "ham" and "hamster" might actually have the same address in memory) we also use the length.
+    // (e.g. "ham" and "hamster" might actually have the same address in memory) we also use the
+    // length.
     let key = Key {
       target_address:   target.as_ptr().addr(),
       // For extra efficiency we pack both the level and the length into a single field.
@@ -290,10 +291,35 @@ const fn level_key(level: Level) -> usize {
 #[cfg(test)]
 mod tests {
 
+  use std::any;
+  use std::str;
   use std::str::from_utf8;
   use std::thread;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A worker panicked; preserve the native join payload.
+    #[error("{context}: {payload:?}")]
+    Thread {
+      /// Worker expectation that failed.
+      context: &'static str,
+      /// Original panic payload returned by the standard thread API.
+      payload: Box<dyn any::Any + Send>,
+    },
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonUsize(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultStrUtf8Error(#[from] strict_test_support::ResultFailure<str::Utf8Error>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionU8(#[from] strict_test_support::OptionFailure<u8>),
+  }
 
-  use strict_test_support::TestFailure;
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
@@ -317,8 +343,9 @@ mod tests {
     configure(Some(config));
   }
 
-  fn run_in_worker(callback: impl FnOnce() -> Result<(), TestFailure> + Send + 'static) -> Result<(), TestFailure> {
-    thread::spawn(callback).join().map_err(|_panic| TestFailure::Condition {
+  fn run_in_worker(callback: impl FnOnce() -> Result<(), TestError> + Send + 'static) -> Result<(), TestError> {
+    thread::spawn(callback).join().map_err(|payload| TestError::Thread {
+      payload,
       context: "worker thread must not panic",
     })?
   }
@@ -334,7 +361,7 @@ mod tests {
     first_message: &'static str,
     second_expected: usize,
     second_message: &'static str,
-  ) -> Result<(), TestFailure> {
+  ) -> Result<(), TestError> {
     let metadata = log::MetadataBuilder::new().level(level).target("dummy").build();
     let mut count = 0;
     observe_cache(
@@ -344,7 +371,7 @@ mod tests {
       },
       &metadata,
     );
-    ensure_eq(&count, &1, first_message)?;
+    ensure_eq(count, 1, first_message).map(drop)?;
     observe_cache(
       || {
         increment(&mut count);
@@ -352,11 +379,13 @@ mod tests {
       },
       &metadata,
     );
-    ensure_eq(&count, &second_expected, second_message)
+    ensure_eq(count, second_expected, second_message)
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   /// Observes `metadata` twice, asserting the cache served both calls from a single callback run.
-  fn ensure_cached_after(metadata: &Metadata<'_>, message: &'static str) -> Result<(), TestFailure> {
+  fn ensure_cached_after(metadata: &Metadata<'_>, message: &'static str) -> Result<(), TestError> {
     let mut count = 0;
     observe_cache(
       || {
@@ -372,7 +401,7 @@ mod tests {
       },
       metadata,
     );
-    ensure_eq(&count, &1, message)
+    ensure_eq(count, 1, message).map(drop).map_err(TestError::from)
   }
 
   /// Observes two distinct metadata twice each, asserting each is cached separately.
@@ -381,7 +410,7 @@ mod tests {
     first_message: &'static str,
     second: &Metadata<'_>,
     second_message: &'static str,
-  ) -> Result<(), TestFailure> {
+  ) -> Result<(), TestError> {
     let mut first_count = 0;
     let mut second_count = 0;
     observe_cache(
@@ -412,12 +441,12 @@ mod tests {
       },
       second,
     );
-    ensure_eq(&first_count, &1, first_message)?;
-    ensure_eq(&second_count, &1, second_message)
+    ensure_eq(first_count, 1, first_message).map(drop)?;
+    ensure_eq(second_count, 1, second_message).map(drop).map_err(TestError::from)
   }
 
   #[test]
-  fn test_when_disabled_the_callback_is_always_called() -> Result<(), TestFailure> {
+  fn test_when_disabled_the_callback_is_always_called() -> Result<(), TestError> {
     let _lock = lock_for_test();
 
     configure(None);
@@ -433,7 +462,7 @@ mod tests {
   }
 
   #[test]
-  fn test_when_enabled_the_callback_is_called_only_once_for_a_high_enough_verbosity() -> Result<(), TestFailure> {
+  fn test_when_enabled_the_callback_is_called_only_once_for_a_high_enough_verbosity() -> Result<(), TestError> {
     let _lock = lock_for_test();
 
     configure_for_test(InterestCacheConfig::default().with_min_verbosity(Level::Debug));
@@ -449,7 +478,7 @@ mod tests {
   }
 
   #[test]
-  fn test_when_core_interest_cache_is_rebuilt_this_cache_is_also_flushed() -> Result<(), TestFailure> {
+  fn test_when_core_interest_cache_is_rebuilt_this_cache_is_also_flushed() -> Result<(), TestError> {
     let _lock = lock_for_test();
 
     configure_for_test(InterestCacheConfig::default().with_min_verbosity(Level::Debug));
@@ -463,7 +492,7 @@ mod tests {
   }
 
   #[test]
-  fn test_when_enabled_the_callback_is_always_called_for_a_low_enough_verbosity() -> Result<(), TestFailure> {
+  fn test_when_enabled_the_callback_is_always_called_for_a_low_enough_verbosity() -> Result<(), TestError> {
     let _lock = lock_for_test();
 
     configure_for_test(InterestCacheConfig::default().with_min_verbosity(Level::Debug));
@@ -479,7 +508,7 @@ mod tests {
   }
 
   #[test]
-  fn test_different_log_levels_are_cached_separately() -> Result<(), TestFailure> {
+  fn test_different_log_levels_are_cached_separately() -> Result<(), TestError> {
     let _lock = lock_for_test();
 
     configure_for_test(InterestCacheConfig::default().with_min_verbosity(Level::Debug));
@@ -497,7 +526,7 @@ mod tests {
   }
 
   #[test]
-  fn test_different_log_targets_are_cached_separately() -> Result<(), TestFailure> {
+  fn test_different_log_targets_are_cached_separately() -> Result<(), TestError> {
     let _lock = lock_for_test();
 
     configure_for_test(InterestCacheConfig::default().with_min_verbosity(Level::Debug));
@@ -512,7 +541,7 @@ mod tests {
   }
 
   #[test]
-  fn test_when_cache_runs_out_of_space_the_callback_is_called_again() -> Result<(), TestFailure> {
+  fn test_when_cache_runs_out_of_space_the_callback_is_called_again() -> Result<(), TestError> {
     let _lock = lock_for_test();
 
     configure_for_test(
@@ -539,7 +568,7 @@ mod tests {
         },
         &metadata_1,
       );
-      ensure_eq(&count, &1, "first target cache hit count")?;
+      ensure_eq(count, 1, "first target cache hit count").map(drop)?;
       observe_cache(|| true, &metadata_2);
       observe_cache(
         || {
@@ -548,12 +577,14 @@ mod tests {
         },
         &metadata_1,
       );
-      ensure_eq(&count, &2, "evicted target calls callback again")
+      ensure_eq(count, 2, "evicted target calls callback again")
+        .map(drop)
+        .map_err(TestError::from)
     })
   }
 
   #[test]
-  fn test_cache_returns_previously_computed_value() -> Result<(), TestFailure> {
+  fn test_cache_returns_previously_computed_value() -> Result<(), TestError> {
     let _lock = lock_for_test();
 
     configure_for_test(InterestCacheConfig::default().with_min_verbosity(Level::Debug));
@@ -567,27 +598,30 @@ mod tests {
         first_unexpected_callback = true;
         false
       });
-      ensure(first_cached, "first cached value should be reused")?;
+      ensure(first_cached, "first cached value should be reused").map(drop)?;
       ensure(
         !first_unexpected_callback,
         "cache hit should not invoke callback for first metadata",
-      )?;
+      )
+      .map(drop)?;
       observe_cache(|| false, &metadata_2);
       let mut second_unexpected_callback = false;
       let second_cached = try_cache(&metadata_2, || {
         second_unexpected_callback = true;
         true
       });
-      ensure(!second_cached, "second cached value should be reused")?;
+      ensure(!second_cached, "second cached value should be reused").map(drop)?;
       ensure(
         !second_unexpected_callback,
         "cache hit should not invoke callback for second metadata",
       )
+      .map(drop)
+      .map_err(TestError::from)
     })
   }
 
   #[test]
-  fn test_cache_handles_non_static_target_string() -> Result<(), TestFailure> {
+  fn test_cache_handles_non_static_target_string() -> Result<(), TestError> {
     let _lock = lock_for_test();
 
     configure_for_test(InterestCacheConfig::default().with_min_verbosity(Level::Debug));
@@ -605,10 +639,13 @@ mod tests {
         first_unexpected_callback = true;
         false
       });
-      ensure(first_cached, "first cached target should be reused")?;
-      ensure(!first_unexpected_callback, "cache hit should not invoke callback for first target")?;
+      ensure(first_cached, "first cached target should be reused").map(drop)?;
+      ensure(!first_unexpected_callback, "cache hit should not invoke callback for first target").map(drop)?;
 
-      *ensure_some(target.last_mut(), "target contains a mutable suffix")? = b'2';
+      *ensure_some(target.last_mut(), "target contains a mutable suffix").map_err(|failure| strict_test_support::OptionFailure {
+        context: failure.context,
+        option:  failure.option.map(|value| *value),
+      })? = b'2';
       let metadata_2 = log::MetadataBuilder::new()
         .level(Level::Trace)
         .target(ensure_ok(from_utf8(&target), "mutated target remains valid UTF-8")?)
@@ -620,11 +657,13 @@ mod tests {
         second_unexpected_callback = true;
         true
       });
-      ensure(!second_cached, "second cached target should be reused")?;
+      ensure(!second_cached, "second cached target should be reused").map(drop)?;
       ensure(
         !second_unexpected_callback,
         "cache hit should not invoke callback for second target",
       )
+      .map(drop)
+      .map_err(TestError::from)
     })
   }
 }

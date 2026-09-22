@@ -24,8 +24,8 @@ categories = [
 keywords = ["logging", "tracing", "macro", "instrument", "log"]
 license.workspace = true
 readme = "README.md"
-edition.workspace = true
-rust-version.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
 
 [lib]
 proc-macro = true
@@ -39,6 +39,8 @@ async-await = []
 tracing-attributes-internal = { workspace = true }
 
 [dev-dependencies]
+tracing-core = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true, default-features = true }
 tracing-mock = { workspace = true }
 tokio-test = { workspace = true }

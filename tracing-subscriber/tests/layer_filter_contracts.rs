@@ -4,9 +4,11 @@
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use strict_test_support::ResultFailure;
   use strict_test_support::ensure_ok;
   use tracing::subscriber::set_default;
+  use tracing_core::subscriber::SubscriberError;
   use tracing_mock::expect;
   use tracing_mock::layer;
   use tracing_subscriber::filter;
@@ -15,7 +17,7 @@ mod tests {
   use tracing_subscriber::prelude::*;
 
   #[test]
-  fn and_filter_requires_both_sides_to_enable_metadata() -> Result<(), TestFailure> {
+  fn and_filter_requires_both_sides_to_enable_metadata() -> Result<(), ResultFailure<SubscriberError>> {
     let (mock_layer, handle) = layer::mock()
       .event(expect::event().at_level(tracing::Level::INFO).with_target("and_allowed"))
       .only()
@@ -33,7 +35,7 @@ mod tests {
   }
 
   #[test]
-  fn or_filter_enables_when_either_side_accepts_metadata() -> Result<(), TestFailure> {
+  fn or_filter_enables_when_either_side_accepts_metadata() -> Result<(), ResultFailure<SubscriberError>> {
     let (mock_layer, handle) = layer::mock()
       .event(expect::event().at_level(tracing::Level::WARN).with_target("or_blocked"))
       .event(expect::event().at_level(tracing::Level::DEBUG).with_target("or_allowed"))
@@ -52,7 +54,7 @@ mod tests {
   }
 
   #[test]
-  fn not_filter_inverts_metadata_enabled_result() -> Result<(), TestFailure> {
+  fn not_filter_inverts_metadata_enabled_result() -> Result<(), ResultFailure<SubscriberError>> {
     let (mock_layer, handle) = layer::mock()
       .event(expect::event().at_level(tracing::Level::INFO).with_target("not_allowed"))
       .only()
@@ -69,7 +71,7 @@ mod tests {
   }
 
   #[test]
-  fn boxed_filter_preserves_enabled_result() -> Result<(), TestFailure> {
+  fn boxed_filter_preserves_enabled_result() -> Result<(), ResultFailure<SubscriberError>> {
     let (mock_layer, handle) = layer::mock()
       .event(expect::event().at_level(tracing::Level::INFO).with_target("boxed_allowed"))
       .only()

@@ -1,4 +1,15 @@
-use strict_test_support::TestFailure;
+use tracing_core::subscriber::SubscriberError;
+/// Native failures from these behavioral checks.
+#[derive(Debug, thiserror::Error)]
+enum TestError {
+  /// A boolean expectation failed.
+  #[error(transparent)]
+  Condition(#[from] strict_test_support::ConditionFailure),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+}
+
 use strict_test_support::ensure;
 use strict_test_support::ensure_ok;
 use tracing::Subscriber;
@@ -8,15 +19,17 @@ use tracing_mock::layer::MockLayer;
 
 use super::*;
 
-fn ensure_hint<S>(subscriber: &S, expected: Option<LevelFilter>, context: &'static str) -> Result<(), TestFailure>
+fn ensure_hint<S>(subscriber: &S, expected: Option<LevelFilter>, context: &'static str) -> Result<(), TestError>
 where
   S: Subscriber,
 {
   ensure(subscriber.max_level_hint() == expected, context)
+    .map(drop)
+    .map_err(TestError::from)
 }
 
 #[test]
-fn with_filters_unboxed() -> Result<(), TestFailure> {
+fn with_filters_unboxed() -> Result<(), TestError> {
   let (raw_trace_layer, trace_handle) = layer::named("trace")
     .event(expect::event().at_level(Level::TRACE))
     .event(expect::event().at_level(Level::DEBUG))
@@ -52,7 +65,7 @@ fn with_filters_unboxed() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn with_filters_boxed() -> Result<(), TestFailure> {
+fn with_filters_boxed() -> Result<(), TestError> {
   let (raw_unfiltered_layer, unfiltered_handle) = layer::named("unfiltered")
     .event(expect::event().at_level(Level::TRACE))
     .event(expect::event().at_level(Level::DEBUG))
@@ -90,7 +103,7 @@ fn with_filters_boxed() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn mixed_max_level_hint() -> Result<(), TestFailure> {
+fn mixed_max_level_hint() -> Result<(), TestError> {
   let unfiltered = layer::named("unfiltered").run().boxed();
   let info = layer::named("info").run().with_filter(LevelFilter::INFO).boxed();
   let debug = layer::named("debug").run().with_filter(LevelFilter::DEBUG).boxed();
@@ -101,7 +114,7 @@ fn mixed_max_level_hint() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn all_filtered_max_level_hint() -> Result<(), TestFailure> {
+fn all_filtered_max_level_hint() -> Result<(), TestError> {
   let warn = layer::named("warn").run().with_filter(LevelFilter::WARN).boxed();
   let info = layer::named("info").run().with_filter(LevelFilter::INFO).boxed();
   let debug = layer::named("debug").run().with_filter(LevelFilter::DEBUG).boxed();
@@ -116,7 +129,7 @@ fn all_filtered_max_level_hint() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn empty_vec() -> Result<(), TestFailure> {
+fn empty_vec() -> Result<(), TestError> {
   // Just a None means everything is off
   let subscriber = tracing_subscriber::registry().with(Vec::<MockLayer>::new());
   ensure_hint(&subscriber, Some(LevelFilter::OFF), "empty vector disables all levels")

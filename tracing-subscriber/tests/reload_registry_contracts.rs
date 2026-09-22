@@ -8,7 +8,21 @@ mod tests {
   use std::sync::Arc;
 
   use parking_lot::Mutex;
-  use strict_test_support::TestFailure;
+
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Retains the searched text and expected substring.
+    #[error(transparent)]
+    Substring(#[from] strict_test_support::SubstringFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultTracingSubscriberReloadReloadError(#[from] strict_test_support::ResultFailure<reload::ReloadError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_contains;
   use strict_test_support::ensure_lacks;
@@ -257,7 +271,7 @@ mod tests {
   }
 
   #[test]
-  fn reload_filter_replaces_output_policy() -> Result<(), TestFailure> {
+  fn reload_filter_replaces_output_policy() -> Result<(), TestError> {
     let writer = MemoryWriter::default();
     let (filter, handle) = reload::Layer::new(LevelFilter::INFO);
     let subscriber = tracing_subscriber::registry().with(filter).with(
@@ -270,7 +284,7 @@ mod tests {
     );
     let dispatch = Dispatch::new(subscriber);
 
-    with_default(&dispatch, || -> Result<(), TestFailure> {
+    with_default(&dispatch, || -> Result<(), TestError> {
       tracing::debug!("debug before reload");
       tracing::info!("info before reload");
       ensure_ok(handle.reload(LevelFilter::DEBUG), "reload filter accepts a new level")?;
@@ -279,13 +293,29 @@ mod tests {
     })?;
 
     let output = writer.output();
-    ensure_contains(&output, "info before reload", "initial info-level filter records info events")?;
-    ensure_lacks(&output, "debug before reload", "initial info-level filter rejects debug events")?;
-    ensure_contains(&output, "debug after reload", "reloaded debug-level filter records debug events")
+    ensure_contains(
+      (output).clone(),
+      String::from("info before reload"),
+      "initial info-level filter records info events",
+    )
+    .map(drop)?;
+    ensure_lacks(
+      (output).clone(),
+      String::from("debug before reload"),
+      "initial info-level filter rejects debug events",
+    )
+    .map(drop)?;
+    ensure_contains(
+      output,
+      String::from("debug after reload"),
+      "reloaded debug-level filter records debug events",
+    )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn reload_handle_reports_closed_after_reload_layer_is_dropped() -> Result<(), TestFailure> {
+  fn reload_handle_reports_closed_after_reload_layer_is_dropped() -> Result<(), TestError> {
     let handle = {
       let (_filter, handle): (RegistryReloadLayer, RegistryReloadHandle) = reload::Layer::new(LevelFilter::INFO);
       handle
@@ -295,10 +325,12 @@ mod tests {
       handle.reload(LevelFilter::TRACE).is_err(),
       "reload handle reports an error after the reload layer drops",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn registry_context_reports_current_scope_and_extension_round_trips() -> Result<(), TestFailure> {
+  fn registry_context_reports_current_scope_and_extension_round_trips() -> Result<(), TestError> {
     let layer = ObservingLayer::default();
     let subscriber = tracing_subscriber::registry().with(layer.clone());
 
@@ -311,71 +343,84 @@ mod tests {
     });
 
     let observations = layer.observations();
-    ensure(observations.len() == 1, "one event observation is captured")?;
+    ensure(observations.len() == 1, "one event observation is captured").map(drop)?;
     let Some(observation) = observations.first() else {
-      return ensure(false, "event observation is present");
+      return ensure(false, "event observation is present").map(drop).map_err(TestError::from);
     };
     ensure(
       observation.current_name.as_deref() == Some("child_span"),
       "context lookup reports the current span",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       observation.event_span_name.as_deref() == Some("child_span"),
       "event_span reports the contextual event parent",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       observation.leaf_to_root == ["child_span".to_owned(), "root_span".to_owned()],
       "event scope iterates leaf to root",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       observation.root_to_leaf == ["root_span".to_owned(), "child_span".to_owned()],
       "root_to_leaf reverses event scope order",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       observation.span_note.as_deref() == Some("child_span"),
       "extensions expose values inserted by on_new_span",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       observation.duplicate_insert_returned_attempt,
       "duplicate extension insert returns the attempted value",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       observation.replaced_note == Some("before"),
       "extension replace returns the previous value",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       observation.removed_note == Some("removed"),
       "extension remove returns the stored value",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       observation.mutated_note.as_deref() == Some("after"),
       "extension get_mut allows in-place mutation",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn registry_closes_spans_after_the_last_handle_is_dropped() -> Result<(), TestFailure> {
+  fn registry_closes_spans_after_the_last_handle_is_dropped() -> Result<(), TestError> {
     let layer = CloseLayer::default();
     let subscriber = tracing_subscriber::registry().with(layer.clone());
 
-    with_default(&Dispatch::new(subscriber), || -> Result<(), TestFailure> {
+    with_default(&Dispatch::new(subscriber), || -> Result<(), TestError> {
       let span = tracing::info_span!("closed_after_last_handle");
       let cloned_span = span.clone();
       drop(span);
       ensure(
         layer.closed_names().is_empty(),
         "span is not closed while a clone still holds its ID",
-      )?;
+      )
+      .map(drop)?;
       drop(cloned_span);
       ensure(
         layer.closed_names() == ["closed_after_last_handle".to_owned()],
         "span closes after the last handle drops",
       )
+      .map(drop)
+      .map_err(TestError::from)
     })
   }
 
   #[test]
-  fn layered_subscriber_calls_inner_layer_before_outer_layer() -> Result<(), TestFailure> {
+  fn layered_subscriber_calls_inner_layer_before_outer_layer() -> Result<(), TestError> {
     let order = Arc::new(Mutex::new(Vec::new()));
     let inner = OrderLayer {
       label: "inner",
@@ -395,5 +440,7 @@ mod tests {
       *order.lock() == ["inner", "outer"],
       "layered subscriber invokes inner event hooks before outer hooks",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

@@ -4,7 +4,27 @@
 mod tests {
   use serde_json::Value;
   use serde_json::json;
-  use strict_test_support::TestFailure;
+
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// Retains the native field failure.
+    #[error(transparent)]
+    Field(#[from] strict_test_support::OptionFailure<Field>),
+    /// Retains the native spanid failure.
+    #[error(transparent)]
+    SpanId(#[from] strict_test_support::OptionFailure<Id>),
+    /// Retains the native serialize failure.
+    #[error(transparent)]
+    Serialize(#[from] strict_test_support::ResultFailure<serde_json::Error>),
+    /// Retains the native jsonfield failure.
+    #[error(transparent)]
+    JsonField(#[from] strict_test_support::OptionFailure<Value>),
+    /// Retains the native jsoncomparison failure.
+    #[error(transparent)]
+    JsonComparison(#[from] strict_test_support::ComparisonFailure<Value, Value>),
+  }
+
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
   use strict_test_support::ensure_some;
@@ -84,28 +104,28 @@ mod tests {
     }
   }
 
-  fn event_field(name: &'static str) -> Result<Field, TestFailure> {
-    ensure_some(EVENT_META.fields().field(name), "event field exists")
+  fn event_field(name: &'static str) -> Result<Field, TestError> {
+    ensure_some(EVENT_META.fields().field(name), "event field exists").map_err(TestError::from)
   }
 
-  fn span_field(name: &'static str) -> Result<Field, TestFailure> {
-    ensure_some(SPAN_META.fields().field(name), "span field exists")
+  fn span_field(name: &'static str) -> Result<Field, TestError> {
+    ensure_some(SPAN_META.fields().field(name), "span field exists").map_err(TestError::from)
   }
 
-  fn span_id(raw: u64) -> Result<Id, TestFailure> {
-    ensure_some(Id::try_from_u64(raw), "span id is nonzero")
+  fn span_id(raw: u64) -> Result<Id, TestError> {
+    ensure_some(Id::try_from_u64(raw), "span id is nonzero").map_err(TestError::from)
   }
 
-  fn serialize_value(value: impl serde::Serialize) -> Result<Value, TestFailure> {
-    ensure_ok(serde_json::to_value(value), "value should serialize")
+  fn serialize_value(value: impl serde::Serialize) -> Result<Value, TestError> {
+    ensure_ok(serde_json::to_value(value), "value should serialize").map_err(TestError::from)
   }
 
-  fn object_field<'a>(value: &'a Value, name: &'static str) -> Result<&'a Value, TestFailure> {
-    ensure_some(value.get(name), "JSON object field exists")
+  fn object_field(value: &Value, name: &'static str) -> Result<Value, TestError> {
+    ensure_some(value.get(name).cloned(), "JSON object field exists").map_err(TestError::from)
   }
 
   #[test]
-  fn metadata_serializes_identity_location_fields_and_kind_flags() -> Result<(), TestFailure> {
+  fn metadata_serializes_identity_location_fields_and_kind_flags() -> Result<(), TestError> {
     let serialized = serialize_value(EVENT_META.as_serde())?;
     let expected = json!({
       "name": EVENT_META.name(),
@@ -119,11 +139,13 @@ mod tests {
       "is_event": true,
     });
 
-    ensure_eq(&serialized, &expected, "metadata JSON shape")
+    ensure_eq(serialized, expected, "metadata JSON shape")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn metadata_optional_location_fields_serialize_as_null() -> Result<(), TestFailure> {
+  fn metadata_optional_location_fields_serialize_as_null() -> Result<(), TestError> {
     let serialized = serialize_value(EMPTY_META.as_serde())?;
     let expected = json!({
       "name": "empty_event",
@@ -137,11 +159,13 @@ mod tests {
       "is_event": true,
     });
 
-    ensure_eq(&serialized, &expected, "empty metadata location fields are null")
+    ensure_eq(serialized, expected, "empty metadata location fields are null")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn field_sets_levels_and_span_ids_serialize_as_public_values() -> Result<(), TestFailure> {
+  fn field_sets_levels_and_span_ids_serialize_as_public_values() -> Result<(), TestError> {
     let fields = serialize_value(EVENT_META.fields().as_serde())?;
     let level = serialize_value(Level::WARN.as_serde())?;
     let id = span_id(7)?;
@@ -150,17 +174,20 @@ mod tests {
     let serialized_field = serialize_value(message.as_serde())?;
 
     ensure_eq(
-      &fields,
-      &json!(["message", "answer", "flag", "count", "ratio", "debugged", "empty"]),
+      fields,
+      json!(["message", "answer", "flag", "count", "ratio", "debugged", "empty"]),
       "field set preserves declaration order",
-    )?;
-    ensure_eq(&serialized_field, &json!("message"), "individual field serializes as its name")?;
-    ensure_eq(&level, &json!("WARN"), "level serializes as its string form")?;
-    ensure_eq(&serialized_id, &json!([7]), "span id serializes as one-field tuple")
+    )
+    .map(drop)?;
+    ensure_eq(serialized_field, json!("message"), "individual field serializes as its name").map(drop)?;
+    ensure_eq(level, json!("WARN"), "level serializes as its string form").map(drop)?;
+    ensure_eq(serialized_id, json!([7]), "span id serializes as one-field tuple")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn events_serialize_metadata_and_recorded_fields() -> Result<(), TestFailure> {
+  fn events_serialize_metadata_and_recorded_fields() -> Result<(), TestError> {
     let message = event_field("message")?;
     let answer = event_field("answer")?;
     let flag = event_field("flag")?;
@@ -189,23 +216,23 @@ mod tests {
 
     ensure_eq(
       object_field(&serialized, "metadata")?,
-      &serialize_value(EVENT_META.as_serde())?,
+      serialize_value(EVENT_META.as_serde())?,
       "event metadata",
-    )?;
-    ensure_eq(object_field(&serialized, "message")?, &json!("hello"), "event message field")?;
-    ensure_eq(object_field(&serialized, "answer")?, &json!(42), "event i64 field")?;
-    ensure_eq(object_field(&serialized, "flag")?, &json!(true), "event bool field")?;
-    ensure_eq(object_field(&serialized, "count")?, &json!(42), "event u64 field")?;
-    ensure_eq(object_field(&serialized, "ratio")?, &json!(2.5), "event f64 field")?;
-    ensure_eq(
-      object_field(&serialized, "debugged")?,
-      &json!("\"event debug\""),
-      "event debug field",
     )
+    .map(drop)?;
+    let fields = object_field(&serialized, "fields")?;
+    ensure_eq(object_field(&fields, "message")?, json!("hello"), "event message field").map(drop)?;
+    ensure_eq(object_field(&fields, "answer")?, json!(42), "event i64 field").map(drop)?;
+    ensure_eq(object_field(&fields, "flag")?, json!(true), "event bool field").map(drop)?;
+    ensure_eq(object_field(&fields, "count")?, json!(42), "event u64 field").map(drop)?;
+    ensure_eq(object_field(&fields, "ratio")?, json!(2.5), "event f64 field").map(drop)?;
+    ensure_eq(object_field(&fields, "debugged")?, json!("\"event debug\""), "event debug field")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn span_attributes_serialize_current_root_and_explicit_parent_variants() -> Result<(), TestFailure> {
+  fn span_attributes_serialize_current_root_and_explicit_parent_variants() -> Result<(), TestError> {
     let message = span_field("message")?;
     let answer = span_field("answer")?;
     let message_value: &dyn FieldValue = &"span hello";
@@ -221,39 +248,47 @@ mod tests {
 
     ensure_eq(
       object_field(&current, "parent")?,
-      &Value::Null,
-      "current-parent attributes have no explicit parent",
-    )?;
-    ensure_eq(
-      object_field(&current, "is_root")?,
-      &json!(false),
-      "current-parent attributes are not root",
-    )?;
+      json!("Current"),
+      "contextual attributes preserve current parenting",
+    )
+    .map(drop)?;
     ensure_eq(
       object_field(&root, "parent")?,
-      &Value::Null,
-      "root attributes have no explicit parent",
-    )?;
-    ensure_eq(object_field(&root, "is_root")?, &json!(true), "root attributes set the root flag")?;
+      json!("Root"),
+      "root attributes preserve explicit root parenting",
+    )
+    .map(drop)?;
     ensure_eq(
       object_field(&child, "parent")?,
-      &json!([9]),
-      "explicit child attributes serialize parent id",
-    )?;
+      json!({"Explicit": [9]}),
+      "child attributes preserve explicit parent id",
+    )
+    .map(drop)?;
+    for attributes in [&current, &root, &child] {
+      ensure_eq(
+        object_field(attributes, "metadata")?,
+        serialize_value(SPAN_META.as_serde())?,
+        "attributes preserve metadata",
+      )
+      .map(drop)?;
+      ensure_eq(
+        object_field(attributes, "fields")?,
+        field_map.clone(),
+        "attributes nest recorded fields",
+      )
+      .map(drop)?;
+    }
     ensure_eq(
-      object_field(&child, "is_root")?,
-      &json!(false),
-      "explicit child attributes are not root",
-    )?;
-    ensure_eq(
-      &field_map,
-      &json!({"message": "span hello", "answer": 42}),
+      field_map,
+      json!({"message": "span hello", "answer": 42}),
       "attributes field map serializes only recorded fields",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn records_serialize_present_fields_and_omit_absent_fields() -> Result<(), TestFailure> {
+  fn records_serialize_present_fields_and_omit_absent_fields() -> Result<(), TestError> {
     let message = event_field("message")?;
     let answer = event_field("answer")?;
     let empty = event_field("empty")?;
@@ -266,12 +301,14 @@ mod tests {
     let serialized = serialize_value(record.as_serde())?;
     let field_map = serialize_value(record.field_map())?;
 
-    ensure_eq(&serialized, &json!({"message": "recorded", "answer": 42}), "record fields")?;
-    ensure_eq(&field_map, &serialized, "record field map matches record serialization")
+    ensure_eq((serialized).clone(), json!({"message": "recorded", "answer": 42}), "record fields").map(drop)?;
+    ensure_eq(field_map, serialized, "record field map matches record serialization")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn primitive_field_values_serialize_to_json_values() -> Result<(), TestFailure> {
+  fn primitive_field_values_serialize_to_json_values() -> Result<(), TestError> {
     let flag = event_field("flag")?;
     let answer = event_field("answer")?;
     let count = event_field("count")?;
@@ -308,6 +345,8 @@ mod tests {
       "debugged": "\"debug text\"",
     });
 
-    ensure_eq(&serialized, &expected, "primitive field JSON values")
+    ensure_eq(serialized, expected, "primitive field JSON values")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

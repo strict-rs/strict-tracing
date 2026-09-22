@@ -452,12 +452,48 @@ impl ErrorCounter {
 /// Tests for non-blocking writer queue behavior.
 #[cfg(test)]
 mod test {
+  use std::any;
   use std::sync::mpsc;
   use std::thread;
   use std::thread::JoinHandle;
   use std::time::Duration;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A worker panicked; preserve the native join payload.
+    #[error("{context}: {payload:?}")]
+    Thread {
+      /// Worker expectation that failed.
+      context: &'static str,
+      /// Original panic payload returned by the standard thread API.
+      payload: Box<dyn any::Any + Send>,
+    },
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonUsize(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionError(#[from] strict_test_support::OptionFailure<io::Error>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultNonBlockingWorkerSpawnError(#[from] strict_test_support::ResultFailure<WorkerSpawnError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultError(#[from] strict_test_support::ResultFailure<io::Error>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultRecvError(#[from] strict_test_support::ResultFailure<mpsc::RecvError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultRecvTimeoutError(#[from] strict_test_support::ResultFailure<mpsc::RecvTimeoutError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonString(#[from] strict_test_support::ComparisonFailure<String, String>),
+  }
 
-  use strict_test_support::TestFailure;
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
@@ -506,10 +542,11 @@ mod test {
   }
 
   /// Joins a test thread and converts thread panics into test failures.
-  fn join_test_thread(handle: JoinHandle<Result<(), TestFailure>>, context: &'static str) -> Result<(), TestFailure> {
+  fn join_test_thread(handle: JoinHandle<Result<(), TestError>>, context: &'static str) -> Result<(), TestError> {
     match handle.join() {
       Ok(result) => result,
-      Err(_panic) => Err(TestFailure::Condition {
+      Err(payload) => Err(TestError::Thread {
+        payload,
         context,
       }),
     }
@@ -517,7 +554,7 @@ mod test {
 
   /// Verifies non-lossy writers block instead of dropping lines at capacity.
   #[test]
-  fn backpressure_exerted() -> Result<(), TestFailure> {
+  fn backpressure_exerted() -> Result<(), TestError> {
     let (mock_writer, receiver) = MockWriter::new(1);
 
     let (mut non_blocking, _guard) = NonBlockingBuilder::default()
@@ -528,18 +565,18 @@ mod test {
     let error_count = non_blocking.error_counter();
 
     ensure_ok(non_blocking.write_all(b"Hello"), "write initial line")?;
-    ensure_eq(&error_count.dropped_lines(), &0, "initial write does not drop lines")?;
+    ensure_eq(error_count.dropped_lines(), 0, "initial write does not drop lines").map(drop)?;
 
-    let handle = thread::spawn(move || ensure_ok(non_blocking.write_all(b", World"), "write blocked line"));
+    let handle = thread::spawn(move || ensure_ok(non_blocking.write_all(b", World"), "write blocked line").map_err(TestError::from));
 
     // Sleep a little to ensure previously spawned thread gets blocked on write.
     thread::sleep(Duration::from_millis(100));
     // We should not drop logs when blocked.
-    ensure_eq(&error_count.dropped_lines(), &0, "blocked write does not drop lines")?;
+    ensure_eq(error_count.dropped_lines(), 0, "blocked write does not drop lines").map(drop)?;
 
     // Read the first message to unblock sender.
     let mut line = ensure_ok(receiver.recv(), "receive initial line")?;
-    ensure(line == "Hello", "initial line contents")?;
+    ensure(line == "Hello", "initial line contents").map(drop)?;
 
     // Wait for thread to finish.
     join_test_thread(handle, "writer thread should not panic")?;
@@ -547,10 +584,12 @@ mod test {
     // Thread has joined, we should be able to read the message it sent.
     line = ensure_ok(receiver.recv(), "receive blocked line")?;
     ensure(line == ", World", "blocked line contents")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   /// Writes one message and pauses long enough for worker scheduling.
-  fn write_non_blocking(non_blocking: &mut NonBlocking, msg: &[u8]) -> Result<(), TestFailure> {
+  fn write_non_blocking(non_blocking: &mut NonBlocking, msg: &[u8]) -> Result<(), TestError> {
     ensure_ok(non_blocking.write_all(msg), "write non-blocking line")?;
 
     // Sleep a bit to prevent races.
@@ -561,7 +600,7 @@ mod test {
   /// Verifies lossy writers count dropped lines when the queue is full.
   #[test]
   #[ignore = "flaky timing-sensitive channel backpressure test; see tokio-rs/tracing#751"]
-  fn logs_dropped_if_lossy() -> Result<(), TestFailure> {
+  fn logs_dropped_if_lossy() -> Result<(), TestError> {
     let (mock_writer, receiver) = MockWriter::new(1);
 
     let (mut non_blocking, _guard) = NonBlockingBuilder::default()
@@ -573,43 +612,45 @@ mod test {
 
     // First write will not block
     write_non_blocking(&mut non_blocking, b"Hello")?;
-    ensure_eq(&error_count.dropped_lines(), &0, "first lossy write does not drop lines")?;
+    ensure_eq(error_count.dropped_lines(), 0, "first lossy write does not drop lines").map(drop)?;
 
     // Second write will not block as Worker will have called `recv` on channel.
     // "Hello" is not yet consumed. MockWriter call to write_all will block until
     // "Hello" is consumed.
     write_non_blocking(&mut non_blocking, b", World")?;
-    ensure_eq(&error_count.dropped_lines(), &0, "second lossy write does not drop lines")?;
+    ensure_eq(error_count.dropped_lines(), 0, "second lossy write does not drop lines").map(drop)?;
 
     // Will sit in NonBlocking channel's buffer.
     write_non_blocking(&mut non_blocking, b"Test")?;
-    ensure_eq(&error_count.dropped_lines(), &0, "buffered lossy write does not drop lines")?;
+    ensure_eq(error_count.dropped_lines(), 0, "buffered lossy write does not drop lines").map(drop)?;
 
     // Allow a line to be written. "Hello" message will be consumed.
     // ", World" will be able to write to MockWriter.
     // "Test" will block on call to MockWriter's `write_all`
     let line = ensure_ok(receiver.recv(), "receive first lossy line")?;
-    ensure(line == "Hello", "first lossy line contents")?;
+    ensure(line == "Hello", "first lossy line contents").map(drop)?;
 
     // This will block as NonBlocking channel is full.
     write_non_blocking(&mut non_blocking, b"Universe")?;
-    ensure_eq(&error_count.dropped_lines(), &1, "full lossy queue drops one line")?;
+    ensure_eq(error_count.dropped_lines(), 1, "full lossy queue drops one line").map(drop)?;
 
     // Finally the second message sent will be consumed.
     let second_line = ensure_ok(receiver.recv(), "receive second lossy line")?;
-    ensure(second_line == ", World", "second lossy line contents")?;
-    ensure_eq(&error_count.dropped_lines(), &1, "lossy dropped-line count remains one")
+    ensure(second_line == ", World", "second lossy line contents").map(drop)?;
+    ensure_eq(error_count.dropped_lines(), 1, "lossy dropped-line count remains one")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   /// Verifies cloned non-blocking writers can be used from multiple threads.
   #[test]
-  fn multi_threaded_writes() -> Result<(), TestFailure> {
+  fn multi_threaded_writes() -> Result<(), TestError> {
     let (mock_writer, receiver) = MockWriter::new(DEFAULT_BUFFERED_LINES_LIMIT);
 
     let (non_blocking, _guard) = NonBlockingBuilder::default().lossy(true).finish(mock_writer);
 
     let error_count = non_blocking.error_counter();
-    let mut join_handles: Vec<JoinHandle<Result<(), TestFailure>>> = Vec::with_capacity(THREAD_COUNT);
+    let mut join_handles: Vec<JoinHandle<Result<(), TestError>>> = Vec::with_capacity(THREAD_COUNT);
 
     for _thread_index in 0..THREAD_COUNT {
       let writer = NonBlocking::clone(&non_blocking);
@@ -627,16 +668,18 @@ mod test {
     let mut hello_count = 0_usize;
 
     while let Ok(event_line) = receiver.recv_timeout(EVENT_RECV_TIMEOUT) {
-      ensure(event_line.contains("Hello"), "event line contains message")?;
+      ensure(event_line.contains("Hello"), "event line contains message").map(drop)?;
       hello_count = hello_count.saturating_add(1);
     }
 
-    ensure_eq(&hello_count, &THREAD_COUNT, "all writer threads emit one line")?;
-    ensure_eq(&error_count.dropped_lines(), &0, "multi-threaded writes do not drop lines")
+    ensure_eq(hello_count, THREAD_COUNT, "all writer threads emit one line").map(drop)?;
+    ensure_eq(error_count.dropped_lines(), 0, "multi-threaded writes do not drop lines")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn failed_worker_writer_reports_stored_spawn_error() -> Result<(), TestFailure> {
+  fn failed_worker_writer_reports_stored_spawn_error() -> Result<(), TestError> {
     let (mut non_blocking, guard) = NonBlocking::create_failed(1, true, io::ErrorKind::PermissionDenied);
 
     let error = ensure_some(
@@ -646,18 +689,20 @@ mod test {
     ensure(
       error.kind() == io::ErrorKind::PermissionDenied,
       "failed worker writer preserves the spawn error kind",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &non_blocking.error_counter().dropped_lines(),
-      &0,
+      non_blocking.error_counter().dropped_lines(),
+      0,
       "failed worker writes are not counted as lossy drops",
-    )?;
+    )
+    .map(drop)?;
     drop(guard);
     Ok(())
   }
 
   #[test]
-  fn worker_spawn_error_reports_source_kind() -> Result<(), TestFailure> {
+  fn worker_spawn_error_reports_source_kind() -> Result<(), TestError> {
     let error = WorkerSpawnError {
       source: io::Error::from(io::ErrorKind::PermissionDenied),
     };
@@ -665,27 +710,31 @@ mod test {
     ensure(
       error.kind() == io::ErrorKind::PermissionDenied,
       "worker spawn error exposes its source kind",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       error.to_string() == "failed to spawn `tracing-appender` non-blocking worker thread",
       "worker spawn error display is stable",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn builder_methods_preserve_configuration_and_try_finish_writes() -> Result<(), TestFailure> {
+  fn builder_methods_preserve_configuration_and_try_finish_writes() -> Result<(), TestError> {
     let builder = NonBlockingBuilder::default()
       .buffered_lines_limit(2)
       .lossy(false)
       .thread_name("strict-test-worker");
 
-    ensure_eq(&builder.buffered_lines_limit, &2, "builder stores buffered line limit")?;
-    ensure(!builder.is_lossy, "builder stores non-lossy policy")?;
+    ensure_eq(builder.buffered_lines_limit, 2, "builder stores buffered line limit").map(drop)?;
+    ensure(!builder.is_lossy, "builder stores non-lossy policy").map(drop)?;
     ensure_eq(
-      &builder.thread_name.as_str(),
-      &"strict-test-worker",
+      String::from(builder.thread_name.as_str()),
+      String::from("strict-test-worker"),
       "builder stores custom thread name",
-    )?;
+    )
+    .map(drop)?;
 
     let (mock_writer, receiver) = MockWriter::new(2);
     let (mut non_blocking, guard) = ensure_ok(builder.try_finish(mock_writer), "try_finish constructs a non-blocking writer")?;
@@ -698,10 +747,12 @@ mod test {
       "configured writer flushes through worker",
     )?;
     ensure(line == "configured", "configured writer line is forwarded")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn try_new_uses_default_builder_and_exposes_error_counter() -> Result<(), TestFailure> {
+  fn try_new_uses_default_builder_and_exposes_error_counter() -> Result<(), TestError> {
     let (mock_writer, receiver) = MockWriter::new(1);
     let (mut non_blocking, guard) = ensure_ok(
       NonBlocking::try_new(mock_writer),
@@ -709,17 +760,19 @@ mod test {
     )?;
     let counter = non_blocking.error_counter();
 
-    ensure_eq(&counter.dropped_lines(), &0, "new writer starts with zero dropped lines")?;
+    ensure_eq(counter.dropped_lines(), 0, "new writer starts with zero dropped lines").map(drop)?;
     ensure_ok(non_blocking.write_all(b"default"), "default writer accepts a line")?;
     drop(non_blocking);
     drop(guard);
 
     let line = ensure_ok(receiver.recv_timeout(EVENT_RECV_TIMEOUT), "default writer flushes through worker")?;
     ensure(line == "default", "default writer line is forwarded")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn closed_lossy_channel_counts_dropped_lines_without_failing_write() -> Result<(), TestFailure> {
+  fn closed_lossy_channel_counts_dropped_lines_without_failing_write() -> Result<(), TestError> {
     let (sender, receiver) = bounded(0);
     drop(receiver);
     let mut non_blocking = NonBlocking {
@@ -734,14 +787,16 @@ mod test {
       "lossy writes report success when the line is dropped",
     )?;
     ensure_eq(
-      &non_blocking.error_counter().dropped_lines(),
-      &1,
+      non_blocking.error_counter().dropped_lines(),
+      1,
       "lossy write increments dropped-line counter",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn closed_backpressure_channel_reports_broken_pipe() -> Result<(), TestFailure> {
+  fn closed_backpressure_channel_reports_broken_pipe() -> Result<(), TestError> {
     let (sender, receiver) = bounded(0);
     drop(receiver);
     let mut non_blocking = NonBlocking {
@@ -758,16 +813,19 @@ mod test {
     ensure(
       error.kind() == io::ErrorKind::BrokenPipe,
       "closed backpressure channel reports broken pipe",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &non_blocking.error_counter().dropped_lines(),
-      &0,
+      non_blocking.error_counter().dropped_lines(),
+      0,
       "backpressure writes are not counted as drops",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn make_writer_clone_and_flush_forward_to_non_blocking_writer() -> Result<(), TestFailure> {
+  fn make_writer_clone_and_flush_forward_to_non_blocking_writer() -> Result<(), TestError> {
     let (mock_writer, receiver) = MockWriter::new(2);
     let (non_blocking, guard) = ensure_ok(
       NonBlocking::try_new(mock_writer),
@@ -782,16 +840,20 @@ mod test {
 
     let line = ensure_ok(receiver.recv_timeout(EVENT_RECV_TIMEOUT), "worker flushes cloned writer line")?;
     ensure(line == "cloned writer", "cloned make_writer line is forwarded")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn error_counter_increments_without_overflowing() -> Result<(), TestFailure> {
+  fn error_counter_increments_without_overflowing() -> Result<(), TestError> {
     let counter = ErrorCounter::new();
     counter.incr_saturating();
-    ensure_eq(&counter.dropped_lines(), &1, "dropped-line counter increments")?;
+    ensure_eq(counter.dropped_lines(), 1, "dropped-line counter increments").map(drop)?;
 
     counter.0.store(usize::MAX, Ordering::Release);
     counter.incr_saturating();
-    ensure_eq(&counter.dropped_lines(), &usize::MAX, "dropped-line counter saturates at usize max")
+    ensure_eq(counter.dropped_lines(), usize::MAX, "dropped-line counter saturates at usize max")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

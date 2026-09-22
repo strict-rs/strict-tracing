@@ -3,7 +3,22 @@
 // separate file.
 #![cfg(feature = "env-filter")]
 
-use strict_test_support::TestFailure;
+use tracing_core::subscriber::SubscriberError;
+use tracing_subscriber::filter;
+/// Native failures from these behavioral checks.
+#[derive(Debug, thiserror::Error)]
+enum TestError {
+  /// A boolean expectation failed.
+  #[error(transparent)]
+  Condition(#[from] strict_test_support::ConditionFailure),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  /// Retains the native parse failure.
+  #[error(transparent)]
+  Parse(#[from] strict_test_support::ResultFailure<filter::ParseError>),
+}
+
 use strict_test_support::ensure_ok;
 use tracing::Level;
 use tracing::subscriber::with_default;
@@ -16,7 +31,7 @@ mod tests {
   use super::*;
 
   #[test]
-  fn same_length_targets() -> Result<(), TestFailure> {
+  fn same_length_targets() -> Result<(), TestError> {
     let filter: EnvFilter = ensure_ok("foo=trace,bar=trace".parse(), "same-length target filter parses")?;
     let (mock_subscriber, mock_handle) = subscriber::mock()
       .event(expect::event().at_level(Level::TRACE))
@@ -35,7 +50,7 @@ mod tests {
   }
 
   #[test]
-  fn same_num_fields_event() -> Result<(), TestFailure> {
+  fn same_num_fields_event() -> Result<(), TestError> {
     let filter: EnvFilter = ensure_ok("[{foo}]=trace,[{bar}]=trace".parse(), "same-number field filter parses")?;
     let (mock_subscriber, mock_handle) = subscriber::mock()
       .event(expect::event().at_level(Level::TRACE).with_fields(expect::field("foo")))
@@ -53,7 +68,7 @@ mod tests {
   }
 
   #[test]
-  fn same_num_fields_and_name_len() -> Result<(), TestFailure> {
+  fn same_num_fields_and_name_len() -> Result<(), TestError> {
     let filter: EnvFilter = ensure_ok(
       "[foo{bar=1}]=trace,[baz{boz=1}]=trace".parse(),
       "same-length field-and-name filter parses",

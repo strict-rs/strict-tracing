@@ -1,6 +1,7 @@
-use strict_test_support::TestFailure;
+use strict_test_support::ResultFailure;
 use strict_test_support::ensure_ok;
 use tracing::subscriber::set_default;
+use tracing_core::subscriber::SubscriberError;
 use tracing_mock::layer::MockLayer;
 use tracing_subscriber::Layer;
 use tracing_subscriber::filter;
@@ -20,7 +21,7 @@ fn filter<S>() -> filter::DynFilterFn<S> {
 
 /// reproduces <https://github.com/tokio-rs/tracing/issues/1563#issuecomment-921363629>
 #[test]
-fn box_works() -> Result<(), TestFailure> {
+fn box_works() -> Result<(), ResultFailure<SubscriberError>> {
   let (mock_layer, handle) = layer();
   let filtered_layer = Box::new(mock_layer.with_filter(filter()));
 
@@ -36,7 +37,7 @@ fn box_works() -> Result<(), TestFailure> {
 
 /// the same as `box_works` but with a type-erased `Box`.
 #[test]
-fn dyn_box_works() -> Result<(), TestFailure> {
+fn dyn_box_works() -> Result<(), ResultFailure<SubscriberError>> {
   let (mock_layer, handle) = layer();
   let filtered_layer: Box<dyn Layer<_> + Send + Sync + 'static> = Box::new(mock_layer.with_filter(filter()));
 

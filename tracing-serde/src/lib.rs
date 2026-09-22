@@ -183,6 +183,7 @@ use serde::ser::SerializeSeq as _;
 use serde::ser::SerializeStruct;
 use serde::ser::SerializeTupleStruct as _;
 use serde::ser::Serializer;
+use tracing_core::Parent;
 use tracing_core::event::Event;
 use tracing_core::field::Field;
 use tracing_core::field::FieldSet;
@@ -192,6 +193,8 @@ use tracing_core::metadata::Metadata;
 use tracing_core::span::Attributes;
 use tracing_core::span::Id;
 use tracing_core::span::Record;
+
+use crate::fields::AsMap as _;
 
 pub mod fields;
 
@@ -253,6 +256,36 @@ impl Serialize for SerializeId<'_> {
   }
 }
 
+/// A `serde::Serialize` adapter for the complete requested [`Parent`] relationship.
+#[derive(Debug)]
+pub struct SerializeParent<'a>(&'a Parent);
+
+impl Serialize for SerializeParent<'_> {
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+  {
+    match *self.0 {
+      Parent::Root => serializer.serialize_unit_variant("Parent", 0, "Root"),
+      Parent::Current => serializer.serialize_unit_variant("Parent", 1, "Current"),
+      Parent::Explicit(ref id) => serializer.serialize_newtype_variant("Parent", 2, "Explicit", &SerializeId(id)),
+    }
+  }
+}
+
+/// Borrows a native byte field for the serializer's byte-specific operation.
+#[derive(Debug)]
+struct SerializeBytes<'a>(&'a [u8]);
+
+impl Serialize for SerializeBytes<'_> {
+  fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+  where
+    S: Serializer,
+  {
+    serializer.serialize_bytes(self.0)
+  }
+}
+
 /// A `serde::Serialize` adapter for tracing [`Metadata`].
 #[derive(Debug)]
 pub struct SerializeMetadata<'a>(&'a Metadata<'a>);
@@ -276,7 +309,10 @@ impl Serialize for SerializeMetadata<'_> {
   }
 }
 
-/// Implements `serde::Serialize` to write `Event` data to a serializer.
+/// Serializes an [`Event`]'s metadata, typed parent, and recorded fields separately.
+///
+/// Recorded fields are nested under `fields`, so a user field cannot replace
+/// the event's `metadata` or `parent` in serializers that collect map entries.
 #[derive(Debug)]
 pub struct SerializeEvent<'a>(&'a Event<'a>);
 
@@ -285,18 +321,15 @@ impl Serialize for SerializeEvent<'_> {
   where
     S: Serializer,
   {
-    let mut event = serializer.serialize_struct("Event", 2)?;
+    let mut event = serializer.serialize_struct("Event", 3)?;
     event.serialize_field("metadata", &SerializeMetadata(self.0.metadata()))?;
-    let mut visitor = SerdeStructVisitor {
-      serializer: event,
-      state:      Ok(()),
-    };
-    self.0.record(&mut visitor);
-    visitor.finish()
+    event.serialize_field("parent", &SerializeParent(self.0.parent_relationship()))?;
+    event.serialize_field("fields", &self.0.field_map())?;
+    event.end()
   }
 }
 
-/// Implements `serde::Serialize` to write `Attributes` data to a serializer.
+/// Serializes span [`Attributes`] with metadata, a typed parent, and a separate field map.
 #[derive(Debug)]
 pub struct SerializeAttributes<'a>(&'a Attributes<'a>);
 
@@ -307,15 +340,9 @@ impl Serialize for SerializeAttributes<'_> {
   {
     let mut attributes = serializer.serialize_struct("Attributes", 3)?;
     attributes.serialize_field("metadata", &SerializeMetadata(self.0.metadata()))?;
-    attributes.serialize_field("parent", &self.0.parent().map(SerializeId))?;
-    attributes.serialize_field("is_root", &self.0.is_root())?;
-
-    let mut visitor = SerdeStructVisitor {
-      serializer: attributes,
-      state:      Ok(()),
-    };
-    self.0.record(&mut visitor);
-    visitor.finish()
+    attributes.serialize_field("parent", &SerializeParent(self.0.parent_relationship()))?;
+    attributes.serialize_field("fields", &self.0.field_map())?;
+    attributes.end()
   }
 }
 
@@ -422,6 +449,18 @@ where
     }
   }
 
+  fn record_u128(&mut self, field: &Field, field_value: u128) {
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_entry(field.name(), &field_value);
+    }
+  }
+
+  fn record_i128(&mut self, field: &Field, field_value: i128) {
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_entry(field.name(), &field_value);
+    }
+  }
+
   fn record_f64(&mut self, field: &Field, field_value: f64) {
     if self.state.is_ok() {
       self.state = self.serializer.serialize_entry(field.name(), &field_value);
@@ -431,6 +470,12 @@ where
   fn record_str(&mut self, field: &Field, field_value: &str) {
     if self.state.is_ok() {
       self.state = self.serializer.serialize_entry(field.name(), &field_value);
+    }
+  }
+
+  fn record_bytes(&mut self, field: &Field, field_value: &[u8]) {
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_entry(field.name(), &SerializeBytes(field_value));
     }
   }
 }
@@ -484,6 +529,18 @@ where
     }
   }
 
+  fn record_u128(&mut self, field: &Field, field_value: u128) {
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_field(field.name(), &field_value);
+    }
+  }
+
+  fn record_i128(&mut self, field: &Field, field_value: i128) {
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_field(field.name(), &field_value);
+    }
+  }
+
   fn record_f64(&mut self, field: &Field, field_value: f64) {
     if self.state.is_ok() {
       self.state = self.serializer.serialize_field(field.name(), &field_value);
@@ -493,6 +550,12 @@ where
   fn record_str(&mut self, field: &Field, field_value: &str) {
     if self.state.is_ok() {
       self.state = self.serializer.serialize_field(field.name(), &field_value);
+    }
+  }
+
+  fn record_bytes(&mut self, field: &Field, field_value: &[u8]) {
+    if self.state.is_ok() {
+      self.state = self.serializer.serialize_field(field.name(), &SerializeBytes(field_value));
     }
   }
 }
@@ -553,6 +616,14 @@ impl<'a> AsSerde<'a> for Id {
   }
 }
 
+impl<'a> AsSerde<'a> for Parent {
+  type Serializable = SerializeParent<'a>;
+
+  fn as_serde(&'a self) -> Self::Serializable {
+    SerializeParent(self)
+  }
+}
+
 impl<'a> AsSerde<'a> for Record<'a> {
   type Serializable = SerializeRecord<'a>;
 
@@ -590,6 +661,8 @@ impl sealed::Sealed for Event<'_> {}
 impl sealed::Sealed for Attributes<'_> {}
 
 impl sealed::Sealed for Id {}
+
+impl sealed::Sealed for Parent {}
 
 impl sealed::Sealed for Level {}
 

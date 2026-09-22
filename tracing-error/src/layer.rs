@@ -156,7 +156,17 @@ mod tests {
   use std::any::TypeId;
   use std::fmt;
 
-  use strict_test_support::TestFailure;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonString(#[from] strict_test_support::ComparisonFailure<String, String>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use tracing::subscriber::with_default;
@@ -174,27 +184,31 @@ mod tests {
   use crate::WithContext;
 
   #[test]
-  fn downcast_ref_by_id_exposes_layer_and_context_only() -> Result<(), TestFailure> {
+  fn downcast_ref_by_id_exposes_layer_and_context_only() -> Result<(), TestError> {
     let layer = ErrorLayer::<Registry>::default();
 
     let layer_ref = <ErrorLayer<Registry> as Layer<Registry>>::downcast_ref_by_id(&layer, TypeId::of::<ErrorLayer<Registry>>());
     let context_ref = <ErrorLayer<Registry> as Layer<Registry>>::downcast_ref_by_id(&layer, TypeId::of::<WithContext>());
     let unrelated_ref = <ErrorLayer<Registry> as Layer<Registry>>::downcast_ref_by_id(&layer, TypeId::of::<String>());
 
-    ensure(layer_ref.is_some(), "error layer downcasts to its concrete type")?;
-    ensure(context_ref.is_some(), "error layer downcasts to its context callback")?;
+    ensure(layer_ref.is_some(), "error layer downcasts to its concrete type").map(drop)?;
+    ensure(context_ref.is_some(), "error layer downcasts to its context callback").map(drop)?;
     ensure(unrelated_ref.is_none(), "error layer rejects unrelated downcast types")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn debug_output_names_formatter_context_and_subscriber_type() -> Result<(), TestFailure> {
+  fn debug_output_names_formatter_context_and_subscriber_type() -> Result<(), TestError> {
     let layer = ErrorLayer::<Registry>::new(DefaultFields::default());
     let rendered = format!("{layer:?}");
 
-    ensure(rendered.contains("ErrorLayer"), "debug output names the layer type")?;
-    ensure(rendered.contains("DefaultFields"), "debug output names the field formatter")?;
-    ensure(rendered.contains("WithContext"), "debug output includes the context callback")?;
+    ensure(rendered.contains("ErrorLayer"), "debug output names the layer type").map(drop)?;
+    ensure(rendered.contains("DefaultFields"), "debug output names the field formatter").map(drop)?;
+    ensure(rendered.contains("WithContext"), "debug output includes the context callback").map(drop)?;
     ensure(rendered.contains("Registry"), "debug output includes the subscriber type")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[derive(Debug)]
@@ -207,7 +221,7 @@ mod tests {
   }
 
   #[test]
-  fn formatting_failure_keeps_span_trace_visitable_with_empty_fields() -> Result<(), TestFailure> {
+  fn formatting_failure_keeps_span_trace_visitable_with_empty_fields() -> Result<(), TestError> {
     let subscriber = Registry::default().with(ErrorLayer::<Registry, FailingFields>::new(FailingFields));
     let trace = with_default(subscriber, || {
       let span = tracing::info_span!("failing fields", answer = 42);
@@ -226,12 +240,16 @@ mod tests {
     ensure(
       trace.status() == SpanTraceStatus::CAPTURED,
       "formatter failures still capture the span",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &visited_name,
-      &"failing fields".to_owned(),
+      visited_name,
+      "failing fields".to_owned(),
       "span trace still visits the captured span",
-    )?;
+    )
+    .map(drop)?;
     ensure(visited_fields.is_empty(), "formatter failures leave captured fields empty")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

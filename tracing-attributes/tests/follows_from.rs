@@ -1,12 +1,14 @@
 //! Example binary for tracing workspace checks.
 #![cfg(test)]
-use strict_test_support::TestFailure;
+
+use strict_test_support::ResultFailure;
 use strict_test_support::ensure_ok;
 use tracing::Id;
 use tracing::Level;
 use tracing::Span;
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
+use tracing_core::subscriber::SubscriberError;
 use tracing_mock::expect;
 use tracing_mock::subscriber;
 use tracing_test::block_on_future;
@@ -33,7 +35,7 @@ async fn with_follows_from_async(causes: impl IntoIterator<Item = impl Into<Opti
 fn follows_from_current() {}
 
 #[test]
-fn follows_from_sync_test() -> Result<(), TestFailure> {
+fn follows_from_sync_test() -> Result<(), ResultFailure<SubscriberError>> {
   let cause_a = expect::span().named("cause_a");
   let cause_b = expect::span().named("cause_b");
   let cause_c = expect::span().named("cause_c");
@@ -65,7 +67,7 @@ fn follows_from_sync_test() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn follows_from_async_test() -> Result<(), TestFailure> {
+fn follows_from_async_test() -> Result<(), ResultFailure<SubscriberError>> {
   let cause_a = expect::span().named("cause_a");
   let cause_b = expect::span().named("cause_b");
   let cause_c = expect::span().named("cause_c");
@@ -101,7 +103,7 @@ fn follows_from_async_test() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn follows_from_current_test() -> Result<(), TestFailure> {
+fn follows_from_current_test() -> Result<(), ResultFailure<SubscriberError>> {
   let cause = expect::span().named("cause");
   let consequence = expect::span().named("follows_from_current");
 

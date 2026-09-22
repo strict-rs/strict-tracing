@@ -6,7 +6,7 @@ authors = [
     "David Barsky <me@davidbarsky.com>",
     "Tokio Contributors <team@tokio.rs>",
 ]
-edition.workspace = true
+edition = { workspace = true }
 license.workspace = true
 readme = "README.md"
 repository.workspace = true
@@ -20,7 +20,7 @@ categories = [
     "asynchronous",
 ]
 keywords = ["logging", "tracing", "metrics", "subscriber"]
-rust-version.workspace = true
+rust-version = { workspace = true }
 
 [features]
 
@@ -73,6 +73,7 @@ valuable_crate = { workspace = true, optional = true }
 valuable-serde = { workspace = true, optional = true }
 
 [dev-dependencies]
+thiserror = { workspace = true }
 tracing = { workspace = true, default-features = true }
 tracing-mock = { workspace = true, features = ["tracing-subscriber"] }
 log = { workspace = true }
@@ -110,18 +111,22 @@ development = ["time"]
 [[bench]]
 name = "filter"
 harness = false
+required-features = ["env-filter"]
 
 [[bench]]
 name = "filter_log"
 harness = false
+required-features = ["env-filter"]
 
 [[bench]]
 name = "fmt"
 harness = false
+required-features = ["fmt"]
 
 [[bench]]
 name = "enter"
 harness = false
+required-features = ["fmt"]
 
 [lints]
 workspace = true

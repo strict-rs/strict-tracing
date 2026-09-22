@@ -14,7 +14,27 @@ mod tests {
   use std::task;
 
   use futures::FutureExt as _;
-  use strict_test_support::TestFailure;
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonU64(#[from] strict_test_support::ComparisonFailure<u64, u64>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionU64(#[from] strict_test_support::OptionFailure<u64>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionFutureReadyU64(#[from] strict_test_support::OptionFailure<future::Ready<u64>>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
@@ -28,7 +48,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn span_on_drop() -> Result<(), TestFailure> {
+  fn span_on_drop() -> Result<(), TestError> {
     #[derive(Clone, Debug)]
     struct AssertSpanOnDrop;
 
@@ -73,14 +93,14 @@ mod tests {
       .only()
       .run();
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), TestError> {
       // polled once
       let poll_result = Fut {
         span_on_drop: Some(AssertSpanOnDrop),
       }
       .instrument(tracing::span!(Level::TRACE, "foo"))
       .now_or_never();
-      ensure(poll_result.is_some(), "instrumented future should complete when polled once")?;
+      ensure(poll_result.is_some(), "instrumented future should complete when polled once").map(drop)?;
 
       // never polled
       drop(
@@ -94,39 +114,50 @@ mod tests {
   }
 
   #[test]
-  fn instrumented_accessors_reflect_inner_state_before_into_inner() -> Result<(), TestFailure> {
+  fn instrumented_accessors_reflect_inner_state_before_into_inner() -> Result<(), TestError> {
     let span = tracing::info_span!("accessor_span");
     let mut instrumented = future::ready(13_u64).instrument(span);
 
-    ensure(instrumented.inner().is_some(), "inner is available before consumption")?;
-    let inner_mut = ensure_some(instrumented.inner_mut(), "mutable inner is available before consumption")?;
+    ensure(instrumented.inner().is_some(), "inner is available before consumption").map(drop)?;
+    let inner_mut = ensure_some(instrumented.inner_mut(), "mutable inner is available before consumption").map_err(|failure| {
+      strict_test_support::OptionFailure {
+        context: failure.context,
+        option:  failure.option.map(|value| value.clone()),
+      }
+    })?;
     *inner_mut = future::ready(21_u64);
     ensure(
       instrumented.span().metadata().is_some(),
       "span accessor returns the instrumenting span",
-    )?;
+    )
+    .map(drop)?;
     *instrumented.span_mut() = tracing::Span::none();
     ensure(
       instrumented.span().metadata().is_none(),
       "mutable span accessor replaces the instrumenting span",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       Pin::new(&instrumented).inner_pin_ref().is_some(),
       "pinned shared inner is available before consumption",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       Pin::new(&mut instrumented).inner_pin_mut().is_some(),
       "pinned mutable inner is available before consumption",
-    )?;
+    )
+    .map(drop)?;
 
     let inner = ensure_some(instrumented.into_inner(), "into_inner returns the wrapped future")?;
     let output = ensure_some(inner.now_or_never(), "returned future completes")?;
 
-    ensure_eq(&output, &21_u64, "inner_mut updates the wrapped future")
+    ensure_eq(output, 21_u64, "inner_mut updates the wrapped future")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn instrumented_future_enters_span_while_polled() -> Result<(), TestFailure> {
+  fn instrumented_future_enters_span_while_polled() -> Result<(), TestError> {
     let subscriber = subscriber::mock()
       .enter(expect::span().named("poll_span"))
       .event(
@@ -148,12 +179,14 @@ mod tests {
       .now_or_never();
 
       let ready_output = ensure_some(poll_output, "instrumented future completes")?;
-      ensure_eq(&ready_output, &7_u64, "instrumented future output is preserved")
+      ensure_eq(ready_output, 7_u64, "instrumented future output is preserved")
+        .map(drop)
+        .map_err(TestError::from)
     })
   }
 
   #[test]
-  fn in_current_span_uses_the_current_span_for_later_polls() -> Result<(), TestFailure> {
+  fn in_current_span_uses_the_current_span_for_later_polls() -> Result<(), TestError> {
     let subscriber = subscriber::mock()
       .enter(expect::span().named("current_span"))
       .enter(expect::span().named("current_span"))
@@ -178,30 +211,35 @@ mod tests {
       drop(guard);
 
       ensure(instrumented.now_or_never().is_some(), "future with current span completes")
+        .map(drop)
+        .map_err(TestError::from)
     })
   }
 
   #[test]
-  fn with_dispatch_accessors_expose_dispatch_and_inner_future() -> Result<(), TestFailure> {
+  fn with_dispatch_accessors_expose_dispatch_and_inner_future() -> Result<(), TestError> {
     let subscriber = subscriber::mock().run();
     let mut with_dispatch = 5_u64.with_subscriber(subscriber);
 
-    ensure_eq(with_dispatch.inner(), &5_u64, "shared inner accessor exposes the value")?;
+    ensure_eq(*with_dispatch.inner(), 5_u64, "shared inner accessor exposes the value").map(drop)?;
     *with_dispatch.inner_mut() = 8_u64;
     ensure_eq(
-      &*Pin::new(&with_dispatch).inner_pin_ref(),
-      &8_u64,
+      *Pin::new(&with_dispatch).inner_pin_ref(),
+      8_u64,
       "pinned shared inner exposes the value",
-    )?;
+    )
+    .map(drop)?;
     *Pin::new(&mut with_dispatch).inner_pin_mut() = 13_u64;
     let _dispatch = with_dispatch.dispatcher();
     let inner = with_dispatch.into_inner();
 
-    ensure_eq(&inner, &13_u64, "with_dispatch preserves mutations to the wrapped value")
+    ensure_eq(inner, 13_u64, "with_dispatch preserves mutations to the wrapped value")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn with_current_subscriber_polls_with_the_captured_dispatch() -> Result<(), TestFailure> {
+  fn with_current_subscriber_polls_with_the_captured_dispatch() -> Result<(), TestError> {
     let (captured_subscriber, captured_handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::ERROR), |builder| {
         builder.event(
@@ -224,7 +262,7 @@ mod tests {
 
     let maybe_output = with_default(other_subscriber, || with_dispatch.now_or_never());
     let output = ensure_some(maybe_output, "with_current_subscriber future completes")?;
-    ensure_eq(&output, &144_u64, "with_current_subscriber preserves future output")?;
-    ensure_ok(captured_handle.finished(), "captured subscriber should receive the event")
+    ensure_eq(output, 144_u64, "with_current_subscriber preserves future output").map(drop)?;
+    ensure_ok(captured_handle.finished(), "captured subscriber should receive the event").map_err(TestError::from)
   }
 }

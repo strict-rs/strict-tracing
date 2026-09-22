@@ -1,3 +1,5 @@
+<!-- Do not edit; generated file. -->
+
 ![Tracing — Structured, application-level diagnostics][splash]
 
 [splash]: https://raw.githubusercontent.com/tokio-rs/tracing/main/assets/splash.svg

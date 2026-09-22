@@ -147,7 +147,8 @@ const fn select_max_level(
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use strict_test_support::ComparisonFailure;
   use strict_test_support::ensure_eq;
 
   use super::FeatureState;
@@ -158,59 +159,68 @@ mod tests {
   const ENABLED: FeatureState = FeatureState::Enabled;
 
   #[test]
-  fn select_max_level_defaults_to_trace() -> Result<(), TestFailure> {
+  fn select_max_level_defaults_to_trace() -> Result<(), ComparisonFailure<LevelFilter, LevelFilter>> {
     ensure_eq(
-      &select_max_level(DISABLED, DISABLED, DISABLED, DISABLED, DISABLED, DISABLED),
-      &LevelFilter::TRACE,
+      select_max_level(DISABLED, DISABLED, DISABLED, DISABLED, DISABLED, DISABLED),
+      LevelFilter::TRACE,
       "no max-level feature defaults to TRACE",
     )
+    .map(drop)
   }
 
   #[test]
-  fn select_max_level_preserves_single_restrictive_features() -> Result<(), TestFailure> {
+  fn select_max_level_preserves_single_restrictive_features() -> Result<(), ComparisonFailure<LevelFilter, LevelFilter>> {
     ensure_eq(
-      &select_max_level(ENABLED, DISABLED, DISABLED, DISABLED, DISABLED, DISABLED),
-      &LevelFilter::OFF,
+      select_max_level(ENABLED, DISABLED, DISABLED, DISABLED, DISABLED, DISABLED),
+      LevelFilter::OFF,
       "max_level_off maps to OFF",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &select_max_level(DISABLED, ENABLED, DISABLED, DISABLED, DISABLED, DISABLED),
-      &LevelFilter::ERROR,
+      select_max_level(DISABLED, ENABLED, DISABLED, DISABLED, DISABLED, DISABLED),
+      LevelFilter::ERROR,
       "max_level_error maps to ERROR",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &select_max_level(DISABLED, DISABLED, ENABLED, DISABLED, DISABLED, DISABLED),
-      &LevelFilter::WARN,
+      select_max_level(DISABLED, DISABLED, ENABLED, DISABLED, DISABLED, DISABLED),
+      LevelFilter::WARN,
       "max_level_warn maps to WARN",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &select_max_level(DISABLED, DISABLED, DISABLED, ENABLED, DISABLED, DISABLED),
-      &LevelFilter::INFO,
+      select_max_level(DISABLED, DISABLED, DISABLED, ENABLED, DISABLED, DISABLED),
+      LevelFilter::INFO,
       "max_level_info maps to INFO",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &select_max_level(DISABLED, DISABLED, DISABLED, DISABLED, ENABLED, DISABLED),
-      &LevelFilter::DEBUG,
+      select_max_level(DISABLED, DISABLED, DISABLED, DISABLED, ENABLED, DISABLED),
+      LevelFilter::DEBUG,
       "max_level_debug maps to DEBUG",
     )
+    .map(drop)
   }
 
   #[test]
-  fn select_max_level_uses_most_permissive_enabled_feature() -> Result<(), TestFailure> {
+  fn select_max_level_uses_most_permissive_enabled_feature() -> Result<(), ComparisonFailure<LevelFilter, LevelFilter>> {
     ensure_eq(
-      &select_max_level(ENABLED, DISABLED, DISABLED, ENABLED, DISABLED, DISABLED),
-      &LevelFilter::INFO,
+      select_max_level(ENABLED, DISABLED, DISABLED, ENABLED, DISABLED, DISABLED),
+      LevelFilter::INFO,
       "more permissive INFO wins over OFF",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &select_max_level(ENABLED, ENABLED, ENABLED, ENABLED, ENABLED, DISABLED),
-      &LevelFilter::DEBUG,
+      select_max_level(ENABLED, ENABLED, ENABLED, ENABLED, ENABLED, DISABLED),
+      LevelFilter::DEBUG,
       "more permissive DEBUG wins over lower levels",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &select_max_level(ENABLED, ENABLED, ENABLED, ENABLED, ENABLED, ENABLED),
-      &LevelFilter::TRACE,
+      select_max_level(ENABLED, ENABLED, ENABLED, ENABLED, ENABLED, ENABLED),
+      LevelFilter::TRACE,
       "TRACE is the most permissive static level",
     )
+    .map(drop)
   }
 }

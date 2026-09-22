@@ -238,7 +238,6 @@ pub struct RecordFieldsMarker {
 pub(in crate::field) mod test_util {
   pub(in crate::field) use alloc::string::String;
 
-  use strict_test_support::TestFailure;
   use strict_test_support::ensure_some;
   use tracing_core::callsite::Callsite;
   use tracing_core::field::Field;
@@ -255,7 +254,7 @@ pub(in crate::field) mod test_util {
   pub(in crate::field) struct TestAttrs2;
 
   impl TestAttrs1 {
-    pub(in crate::field) fn with<T>(f: impl FnOnce(Attributes<'_>) -> T) -> Result<T, TestFailure> {
+    pub(in crate::field) fn with<T>(f: impl FnOnce(Attributes<'_>) -> T) -> Result<T, strict_test_support::OptionFailure<Field>> {
       let fieldset = TEST_META_1.fields();
       let question: &dyn Value = &"life, the universe, and everything";
       let tricky: &dyn Value = &true;
@@ -281,7 +280,7 @@ pub(in crate::field) mod test_util {
       clippy::single_call_fn,
       reason = "field tests keep alternate attribute fixtures behind named builders"
     )]
-    pub(in crate::field) fn with<T>(f: impl FnOnce(Attributes<'_>) -> T) -> Result<T, TestFailure> {
+    pub(in crate::field) fn with<T>(f: impl FnOnce(Attributes<'_>) -> T) -> Result<T, strict_test_support::OptionFailure<Field>> {
       let fieldset = TEST_META_1.fields();
       let empty_question = debug(&Option::<&str>::None);
       let question: &dyn Value = &empty_question;

@@ -1,10 +1,11 @@
 //! Example binary for tracing workspace checks.
 #![cfg(test)]
 
-use strict_test_support::TestFailure;
+use strict_test_support::ResultFailure;
 use strict_test_support::ensure_ok;
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
+use tracing_core::subscriber::SubscriberError;
 use tracing_mock::*;
 
 /// Pair destructured by instrumentation tests.
@@ -14,7 +15,7 @@ type Pair = (usize, usize);
 type NestedPair = (Pair, Pair);
 
 #[test]
-fn destructure_tuples() -> Result<(), TestFailure> {
+fn destructure_tuples() -> Result<(), ResultFailure<SubscriberError>> {
   #[instrument]
   fn my_fn((arg1, arg2): (usize, usize)) {}
 
@@ -44,7 +45,7 @@ fn destructure_tuples() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn destructure_nested_tuples() -> Result<(), TestFailure> {
+fn destructure_nested_tuples() -> Result<(), ResultFailure<SubscriberError>> {
   #[instrument]
   fn my_fn(((arg1, arg2), (arg3, arg4)): NestedPair) {}
 
@@ -76,7 +77,7 @@ fn destructure_nested_tuples() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn destructure_refs() -> Result<(), TestFailure> {
+fn destructure_refs() -> Result<(), ResultFailure<SubscriberError>> {
   #[instrument]
   fn my_fn(&arg1: &[usize; 3]) {}
 
@@ -103,7 +104,7 @@ fn destructure_refs() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn destructure_tuple_structs() -> Result<(), TestFailure> {
+fn destructure_tuple_structs() -> Result<(), ResultFailure<SubscriberError>> {
   struct Foo(usize, usize);
 
   #[instrument]
@@ -135,7 +136,7 @@ fn destructure_tuple_structs() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn destructure_structs() -> Result<(), TestFailure> {
+fn destructure_structs() -> Result<(), ResultFailure<SubscriberError>> {
   struct Foo {
     bar: usize,
     baz: usize,
@@ -180,7 +181,7 @@ fn destructure_structs() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn destructure_everything() -> Result<(), TestFailure> {
+fn destructure_everything() -> Result<(), ResultFailure<SubscriberError>> {
   struct Foo {
     bar: Bar,
     baz: (usize, usize),

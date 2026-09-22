@@ -6,7 +6,25 @@
 //!
 //! [`ExpectedEvent`]: crate::event::ExpectedEvent
 
-use strict_test_support::TestFailure;
+use tracing_core::subscriber::SubscriberError;
+
+/// Native failures from these behavioral checks.
+#[derive(Debug, thiserror::Error)]
+enum TestError {
+  /// A boolean expectation failed.
+  #[error(transparent)]
+  Condition(#[from] strict_test_support::ConditionFailure),
+  /// Retains the searched text and expected substring.
+  #[error(transparent)]
+  Substring(#[from] strict_test_support::SubstringFailure<String, String>),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  OptionSubscriberError(#[from] strict_test_support::OptionFailure<SubscriberError>),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+}
+
 use strict_test_support::ensure_contains;
 use strict_test_support::ensure_ok;
 use strict_test_support::ensure_some;
@@ -19,13 +37,19 @@ use tracing_mock::subscriber;
 mod tests {
   use super::*;
 
-  fn ensure_finished_error(handle: &subscriber::MockHandle, expected: &str) -> Result<(), TestFailure> {
+  fn ensure_finished_error(handle: &subscriber::MockHandle, expected: &str) -> Result<(), TestError> {
     let error = ensure_some(handle.finished().err(), "mock expectations should return an ancestry mismatch")?;
-    ensure_contains(&error.to_string(), expected, "mock expectation error includes ancestry mismatch")
+    ensure_contains(
+      error.to_string(),
+      String::from(expected),
+      "mock expectation error includes ancestry mismatch",
+    )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn contextual_parent() -> Result<(), TestFailure> {
+  fn contextual_parent() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::has_contextual_parent("contextual parent"));
 
     let (subscriber, handle) = subscriber::mock().enter(expect::span()).event(event).run_with_handle();
@@ -40,7 +64,7 @@ mod tests {
   }
 
   #[test]
-  fn contextual_parent_wrong_name() -> Result<(), TestFailure> {
+  fn contextual_parent_wrong_name() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::has_contextual_parent("contextual parent"));
 
     let (subscriber, handle) = subscriber::mock().enter(expect::span()).event(event).run_with_handle();
@@ -58,7 +82,7 @@ mod tests {
   }
 
   #[test]
-  fn contextual_parent_wrong_id() -> Result<(), TestFailure> {
+  fn contextual_parent_wrong_id() -> Result<(), TestError> {
     let id = expect::id();
     let event = expect::event().with_ancestry(expect::has_contextual_parent(&id));
 
@@ -81,7 +105,7 @@ mod tests {
   }
 
   #[test]
-  fn contextual_parent_wrong_level() -> Result<(), TestFailure> {
+  fn contextual_parent_wrong_level() -> Result<(), TestError> {
     let parent = expect::span().at_level(Level::INFO);
     let event = expect::event().with_ancestry(expect::has_contextual_parent(parent));
 
@@ -100,7 +124,7 @@ mod tests {
   }
 
   #[test]
-  fn expect_contextual_parent_actual_contextual_root() -> Result<(), TestFailure> {
+  fn expect_contextual_parent_actual_contextual_root() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::has_contextual_parent("contextual parent"));
 
     let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
@@ -113,7 +137,7 @@ mod tests {
   }
 
   #[test]
-  fn expect_contextual_parent_actual_explicit_parent() -> Result<(), TestFailure> {
+  fn expect_contextual_parent_actual_explicit_parent() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::has_contextual_parent("contextual parent"));
 
     let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
@@ -130,7 +154,7 @@ mod tests {
   }
 
   #[test]
-  fn expect_contextual_parent_actual_explicit_root() -> Result<(), TestFailure> {
+  fn expect_contextual_parent_actual_explicit_root() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::has_contextual_parent("contextual parent"));
 
     let (subscriber, handle) = subscriber::mock().enter(expect::span()).event(event).run_with_handle();
@@ -144,7 +168,7 @@ mod tests {
   }
 
   #[test]
-  fn contextual_root() -> Result<(), TestFailure> {
+  fn contextual_root() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::is_contextual_root());
 
     let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
@@ -158,7 +182,7 @@ mod tests {
   }
 
   #[test]
-  fn expect_contextual_root_actual_contextual_parent() -> Result<(), TestFailure> {
+  fn expect_contextual_root_actual_contextual_parent() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::is_contextual_root());
 
     let (subscriber, handle) = subscriber::mock().enter(expect::span()).event(event).run_with_handle();
@@ -172,7 +196,7 @@ mod tests {
   }
 
   #[test]
-  fn expect_contextual_root_actual_explicit_parent() -> Result<(), TestFailure> {
+  fn expect_contextual_root_actual_explicit_parent() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::is_contextual_root());
 
     let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
@@ -186,7 +210,7 @@ mod tests {
   }
 
   #[test]
-  fn expect_contextual_root_actual_explicit_root() -> Result<(), TestFailure> {
+  fn expect_contextual_root_actual_explicit_root() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::is_contextual_root());
 
     let (subscriber, handle) = subscriber::mock().enter(expect::span()).event(event).run_with_handle();
@@ -200,7 +224,7 @@ mod tests {
   }
 
   #[test]
-  fn explicit_parent() -> Result<(), TestFailure> {
+  fn explicit_parent() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::has_explicit_parent("explicit parent"));
 
     let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
@@ -215,7 +239,7 @@ mod tests {
   }
 
   #[test]
-  fn explicit_parent_wrong_name() -> Result<(), TestFailure> {
+  fn explicit_parent_wrong_name() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::has_explicit_parent("explicit parent"));
 
     let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
@@ -233,7 +257,7 @@ mod tests {
   }
 
   #[test]
-  fn explicit_parent_wrong_id() -> Result<(), TestFailure> {
+  fn explicit_parent_wrong_id() -> Result<(), TestError> {
     let id = expect::id();
     let event = expect::event().with_ancestry(expect::has_explicit_parent(&id));
 
@@ -256,7 +280,7 @@ mod tests {
   }
 
   #[test]
-  fn explicit_parent_wrong_level() -> Result<(), TestFailure> {
+  fn explicit_parent_wrong_level() -> Result<(), TestError> {
     let parent = expect::span().at_level(Level::INFO);
     let event = expect::event().with_ancestry(expect::has_explicit_parent(parent));
 
@@ -275,7 +299,7 @@ mod tests {
   }
 
   #[test]
-  fn expect_explicit_parent_actual_contextual_parent() -> Result<(), TestFailure> {
+  fn expect_explicit_parent_actual_contextual_parent() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::has_explicit_parent("explicit parent"));
 
     let (subscriber, handle) = subscriber::mock().enter(expect::span()).event(event).run_with_handle();
@@ -292,7 +316,7 @@ mod tests {
   }
 
   #[test]
-  fn expect_explicit_parent_actual_contextual_root() -> Result<(), TestFailure> {
+  fn expect_explicit_parent_actual_contextual_root() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::has_explicit_parent("explicit parent"));
 
     let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
@@ -305,7 +329,7 @@ mod tests {
   }
 
   #[test]
-  fn expect_explicit_parent_actual_explicit_root() -> Result<(), TestFailure> {
+  fn expect_explicit_parent_actual_explicit_root() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::has_explicit_parent("explicit parent"));
 
     let (subscriber, handle) = subscriber::mock().enter(expect::span()).event(event).run_with_handle();
@@ -319,7 +343,7 @@ mod tests {
   }
 
   #[test]
-  fn explicit_root() -> Result<(), TestFailure> {
+  fn explicit_root() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::is_explicit_root());
 
     let (subscriber, handle) = subscriber::mock().enter(expect::span()).event(event).run_with_handle();
@@ -334,7 +358,7 @@ mod tests {
   }
 
   #[test]
-  fn expect_explicit_root_actual_contextual_parent() -> Result<(), TestFailure> {
+  fn expect_explicit_root_actual_contextual_parent() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::is_explicit_root());
 
     let (subscriber, handle) = subscriber::mock().enter(expect::span()).event(event).run_with_handle();
@@ -348,7 +372,7 @@ mod tests {
   }
 
   #[test]
-  fn expect_explicit_root_actual_contextual_root() -> Result<(), TestFailure> {
+  fn expect_explicit_root_actual_contextual_root() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::is_explicit_root());
 
     let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
@@ -361,7 +385,7 @@ mod tests {
   }
 
   #[test]
-  fn expect_explicit_root_actual_explicit_parent() -> Result<(), TestFailure> {
+  fn expect_explicit_root_actual_explicit_parent() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::is_explicit_root());
 
     let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
@@ -375,7 +399,7 @@ mod tests {
   }
 
   #[test]
-  fn explicit_and_contextual_root_is_explicit() -> Result<(), TestFailure> {
+  fn explicit_and_contextual_root_is_explicit() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(expect::is_explicit_root());
 
     let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();

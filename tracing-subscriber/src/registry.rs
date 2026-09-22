@@ -568,7 +568,7 @@ mod tests {
     use std::vec::Vec;
 
     use parking_lot::Mutex;
-    use strict_test_support::TestFailure;
+    use strict_test_support::ConditionFailure;
     use strict_test_support::ensure;
     use tracing::Subscriber;
     use tracing::span;
@@ -613,7 +613,7 @@ mod tests {
     }
 
     #[test]
-    fn spanref_scope_iteration_order() -> Result<(), TestFailure> {
+    fn spanref_scope_iteration_order() -> Result<(), ConditionFailure> {
       let last_entered_scope = Arc::new(Mutex::new(Vec::new()));
       let _guard = subscriber::set_default(crate::registry().with(PrintingLayer {
         last_entered_scope: Arc::clone(&last_entered_scope),
@@ -624,21 +624,24 @@ mod tests {
       ensure(
         last_entered_scope.lock().as_slice() == ["root"],
         "root scope iterates from current span",
-      )?;
+      )
+      .map(drop)?;
       let _child = tracing::info_span!("child").entered();
       ensure(
         last_entered_scope.lock().as_slice() == ["child", "root"],
         "child scope iterates current to root",
-      )?;
+      )
+      .map(drop)?;
       let _leaf = tracing::info_span!("leaf").entered();
       ensure(
         last_entered_scope.lock().as_slice() == ["leaf", "child", "root"],
         "leaf scope iterates current to root",
       )
+      .map(drop)
     }
 
     #[test]
-    fn spanref_scope_fromroot_iteration_order() -> Result<(), TestFailure> {
+    fn spanref_scope_fromroot_iteration_order() -> Result<(), ConditionFailure> {
       let last_entered_scope = Arc::new(Mutex::new(Vec::new()));
       let _guard = subscriber::set_default(crate::registry().with(PrintingLayer {
         last_entered_scope: Arc::clone(&last_entered_scope),
@@ -646,17 +649,19 @@ mod tests {
       }));
 
       let _root = tracing::info_span!("root").entered();
-      ensure(last_entered_scope.lock().as_slice() == ["root"], "root scope iterates from root")?;
+      ensure(last_entered_scope.lock().as_slice() == ["root"], "root scope iterates from root").map(drop)?;
       let _child = tracing::info_span!("child").entered();
       ensure(
         last_entered_scope.lock().as_slice() == ["root", "child"],
         "child scope iterates root to current",
-      )?;
+      )
+      .map(drop)?;
       let _leaf = tracing::info_span!("leaf").entered();
       ensure(
         last_entered_scope.lock().as_slice() == ["root", "child", "leaf"],
         "leaf scope iterates root to current",
       )
+      .map(drop)
     }
   }
 }

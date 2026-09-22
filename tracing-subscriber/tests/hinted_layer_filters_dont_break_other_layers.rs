@@ -3,7 +3,19 @@
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use tracing::Level;
@@ -19,7 +31,7 @@ mod tests {
   use tracing_subscriber::prelude::*;
 
   #[test]
-  fn layer_filters() -> Result<(), TestFailure> {
+  fn layer_filters() -> Result<(), TestError> {
     let (unfiltered, unfiltered_handle) = unfiltered("unfiltered");
     let (filtered, filtered_handle) = filtered("filtered");
 
@@ -29,7 +41,8 @@ mod tests {
     ensure(
       subscriber.max_level_hint().is_none(),
       "hinted layer filters produce no combined max level hint",
-    )?;
+    )
+    .map(drop)?;
     let _subscriber = set_default(subscriber);
 
     events();
@@ -40,7 +53,7 @@ mod tests {
   }
 
   #[test]
-  fn layered_layer_filters() -> Result<(), TestFailure> {
+  fn layered_layer_filters() -> Result<(), TestError> {
     let (unfiltered1, unfiltered1_handle) = unfiltered("unfiltered_1");
     let (unfiltered2, unfiltered2_handle) = unfiltered("unfiltered_2");
     let unfiltered = unfiltered1.and_then(unfiltered2);
@@ -53,7 +66,8 @@ mod tests {
     ensure(
       subscriber.max_level_hint().is_none(),
       "layered hinted filters produce no combined max level hint",
-    )?;
+    )
+    .map(drop)?;
     let _subscriber = set_default(subscriber);
 
     events();
@@ -66,7 +80,7 @@ mod tests {
   }
 
   #[test]
-  fn out_of_order() -> Result<(), TestFailure> {
+  fn out_of_order() -> Result<(), TestError> {
     let (unfiltered1, unfiltered1_handle) = unfiltered("unfiltered_1");
     let (unfiltered2, unfiltered2_handle) = unfiltered("unfiltered_2");
 
@@ -81,7 +95,8 @@ mod tests {
     ensure(
       subscriber.max_level_hint().is_none(),
       "out-of-order hinted filters produce no combined max level hint",
-    )?;
+    )
+    .map(drop)?;
     let _subscriber = set_default(subscriber);
 
     events();
@@ -94,7 +109,7 @@ mod tests {
   }
 
   #[test]
-  fn mixed_layered() -> Result<(), TestFailure> {
+  fn mixed_layered() -> Result<(), TestError> {
     let (unfiltered1, unfiltered1_handle) = unfiltered("unfiltered_1");
     let (unfiltered2, unfiltered2_handle) = unfiltered("unfiltered_2");
     let (filtered1, filtered1_handle) = filtered("filtered_1");
@@ -107,7 +122,8 @@ mod tests {
     ensure(
       subscriber.max_level_hint().is_none(),
       "mixed hinted filters produce no combined max level hint",
-    )?;
+    )
+    .map(drop)?;
     let _subscriber = set_default(subscriber);
 
     events();

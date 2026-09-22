@@ -957,13 +957,61 @@ fn parse_date_from_filename(
 
 #[cfg(test)]
 mod test {
+  use std::ffi;
   use std::fs;
   use std::sync::Arc;
   use std::thread;
   use std::time::Duration as StdDuration;
 
   use parking_lot::Mutex;
-  use strict_test_support::TestFailure;
+  use time::error;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A conflicting latest directory unexpectedly produced a writer.
+    #[error("latest symlink replacement accepted a directory: {0:?}")]
+    UnexpectedWriter(File),
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonI64(#[from] strict_test_support::ComparisonFailure<i64, i64>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonU8(#[from] strict_test_support::ComparisonFailure<u8, u8>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionError(#[from] strict_test_support::OptionFailure<io::Error>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionSystemTime(#[from] strict_test_support::OptionFailure<SystemTime>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionOffsetDateTime(#[from] strict_test_support::OptionFailure<OffsetDateTime>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultInitError(#[from] strict_test_support::ResultFailure<InitError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultError(#[from] strict_test_support::ResultFailure<io::Error>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultInvalidFormatDescription(#[from] strict_test_support::ResultFailure<error::InvalidFormatDescription>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultParse(#[from] strict_test_support::ResultFailure<error::Parse>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonString(#[from] strict_test_support::ComparisonFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionString(#[from] strict_test_support::OptionFailure<String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionFfiOsString(#[from] strict_test_support::OptionFailure<ffi::OsString>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
@@ -978,7 +1026,7 @@ mod test {
   type InstalledAppender = (Arc<Mutex<OffsetDateTime>>, DefaultGuard);
 
   /// Builds an appender for `rotation` and verifies a single write reaches disk.
-  fn test_appender(rotation: Rotation, file_prefix: &str) -> Result<(), TestFailure> {
+  fn test_appender(rotation: Rotation, file_prefix: &str) -> Result<(), TestError> {
     let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
     let mut appender = ensure_ok(
       RollingFileAppender::new(rotation, directory.path(), file_prefix),
@@ -1000,91 +1048,95 @@ mod test {
       }
     }
 
-    ensure(found_expected_value, "expected value is written to a log file")?;
+    ensure(found_expected_value, "expected value is written to a log file").map(drop)?;
 
-    ensure_ok(directory.close(), "close tempdir")
+    ensure_ok(directory.close(), "close tempdir").map_err(TestError::from)
   }
 
   /// Verifies minutely logs can be written.
   #[test]
-  fn write_minutely_log() -> Result<(), TestFailure> {
+  fn write_minutely_log() -> Result<(), TestError> {
     test_appender(Rotation::MINUTELY, "minutely.log")
   }
 
   /// Verifies hourly logs can be written.
   #[test]
-  fn write_hourly_log() -> Result<(), TestFailure> {
+  fn write_hourly_log() -> Result<(), TestError> {
     test_appender(Rotation::HOURLY, "hourly.log")
   }
 
   /// Verifies daily logs can be written.
   #[test]
-  fn write_daily_log() -> Result<(), TestFailure> {
+  fn write_daily_log() -> Result<(), TestError> {
     test_appender(Rotation::DAILY, "daily.log")
   }
 
   /// Verifies weekly logs can be written.
   #[test]
-  fn write_weekly_log() -> Result<(), TestFailure> {
+  fn write_weekly_log() -> Result<(), TestError> {
     test_appender(Rotation::WEEKLY, "weekly.log")
   }
 
   /// Verifies non-rolling logs can be written.
   #[test]
-  fn write_never_log() -> Result<(), TestFailure> {
+  fn write_never_log() -> Result<(), TestError> {
     test_appender(Rotation::NEVER, "never.log")
   }
 
   /// Verifies each rotation computes the expected next timestamp.
   #[test]
-  fn test_rotations() -> Result<(), TestFailure> {
+  fn test_rotations() -> Result<(), TestError> {
     // per-minute basis
     let minutely_now = OffsetDateTime::now_utc();
     let minutely_next = ensure_some(Rotation::MINUTELY.next_date(minutely_now), "minutely next date")?;
     let minutely_expected_next = ensure_some(minutely_now.checked_add(Duration::MINUTE), "compute expected minutely next date")?;
     ensure_eq(
-      &minutely_expected_next.minute(),
-      &minutely_next.minute(),
+      minutely_expected_next.minute(),
+      minutely_next.minute(),
       "minutely rotation advances minute",
-    )?;
+    )
+    .map(drop)?;
 
     // per-hour basis
     let hourly_now = OffsetDateTime::now_utc();
     let hourly_next = ensure_some(Rotation::HOURLY.next_date(hourly_now), "hourly next date")?;
     let hourly_expected_next = ensure_some(hourly_now.checked_add(Duration::HOUR), "compute expected hourly next date")?;
-    ensure_eq(&hourly_expected_next.hour(), &hourly_next.hour(), "hourly rotation advances hour")?;
+    ensure_eq(hourly_expected_next.hour(), hourly_next.hour(), "hourly rotation advances hour").map(drop)?;
 
     // per-day basis
     let daily_now = OffsetDateTime::now_utc();
     let daily_next = ensure_some(Rotation::DAILY.next_date(daily_now), "daily next date")?;
     let daily_expected_next = ensure_some(daily_now.checked_add(Duration::DAY), "compute expected daily next date")?;
-    ensure_eq(&daily_expected_next.day(), &daily_next.day(), "daily rotation advances day")?;
+    ensure_eq(daily_expected_next.day(), daily_next.day(), "daily rotation advances day").map(drop)?;
 
     // per-week basis
     let weekly_now = OffsetDateTime::now_utc();
     let weekly_now_rounded = ensure_some(Rotation::WEEKLY.round_date(weekly_now), "weekly rounded date")?;
     let weekly_next = ensure_some(Rotation::WEEKLY.next_date(weekly_now), "weekly next date")?;
-    ensure(weekly_now_rounded < weekly_next, "weekly rotation advances after rounded now")?;
+    ensure(weekly_now_rounded < weekly_next, "weekly rotation advances after rounded now").map(drop)?;
 
     // never
     let never_now = OffsetDateTime::now_utc();
     let never_next = Rotation::NEVER.next_date(never_now);
     ensure(never_next.is_none(), "never rotation has no next date")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   /// Builds the timestamp format used by fixed-date tests.
-  fn test_datetime_format() -> Result<DateFormat, TestFailure> {
+  fn test_datetime_format() -> Result<DateFormat, TestError> {
     ensure_ok(
       format_description::parse_borrowed::<1>(
         "[year]-[month]-[day] [hour]:[minute]:[second] [offset_hour sign:mandatory]:[offset_minute]:[offset_second]",
       ),
       "parse test datetime format",
     )
+    .map_err(TestError::from)
   }
 
   /// Parses a fixed UTC timestamp used by rollover tests.
-  fn parse_test_datetime(input: &str, format: &DateFormat) -> Result<OffsetDateTime, TestFailure> {
-    ensure_ok(OffsetDateTime::parse(input, format), "parse fixed test datetime")
+  fn parse_test_datetime(input: &str, format: &DateFormat) -> Result<OffsetDateTime, TestError> {
+    ensure_ok(OffsetDateTime::parse(input, format), "parse fixed test datetime").map_err(TestError::from)
   }
 
   /// Builds [`Inner`] with test-controlled configuration.
@@ -1096,7 +1148,7 @@ mod test {
     suffix: Option<&str>,
     latest_symlink_name: Option<&str>,
     max_files: Option<usize>,
-  ) -> Result<(Inner, RwLock<File>), TestFailure> {
+  ) -> Result<(Inner, RwLock<File>), TestError> {
     ensure_ok(
       Inner::new(
         now,
@@ -1109,16 +1161,25 @@ mod test {
       ),
       "initialize rolling appender inner state",
     )
+    .map_err(TestError::from)
   }
 
   /// Returns the extension containing a test log file's rolling timestamp.
-  fn file_date_extension(path: &Path) -> Result<&str, TestFailure> {
-    let extension = ensure_some(path.extension(), "log file has date extension")?;
+  fn file_date_extension(path: &Path) -> Result<&str, TestError> {
+    let extension = ensure_some(path.extension(), "log file has date extension").map_err(|failure| strict_test_support::OptionFailure {
+      context: failure.context,
+      option:  failure.option.map(ffi::OsStr::to_os_string),
+    })?;
     ensure_some(extension.to_str(), "log file extension is UTF-8")
+      .map_err(|failure| strict_test_support::OptionFailure {
+        context: failure.context,
+        option:  failure.option.map(String::from),
+      })
+      .map_err(TestError::from)
   }
 
   /// Reads all log files in `directory` with their paths.
-  fn read_log_entries(directory: &Path) -> Result<Vec<(PathBuf, String)>, TestFailure> {
+  fn read_log_entries(directory: &Path) -> Result<Vec<(PathBuf, String)>, TestError> {
     let dir_contents = ensure_ok(fs::read_dir(directory), "read log directory")?;
     dir_contents
       .map(|entry| {
@@ -1136,7 +1197,7 @@ mod test {
   }
 
   /// Advances a shared test clock by `duration`.
-  fn advance_clock(clock: &Mutex<OffsetDateTime>, duration: Duration) -> Result<(), TestFailure> {
+  fn advance_clock(clock: &Mutex<OffsetDateTime>, duration: Duration) -> Result<(), TestError> {
     let current_time = *clock.lock();
     let advanced_time = ensure_some(current_time.checked_add(duration), "advance test clock")?;
     *clock.lock() = advanced_time;
@@ -1144,16 +1205,17 @@ mod test {
   }
 
   /// Builds a [`SystemTime`] offset from the Unix epoch by `seconds`.
-  fn unix_time(seconds: u64) -> Result<SystemTime, TestFailure> {
+  fn unix_time(seconds: u64) -> Result<SystemTime, TestError> {
     ensure_some(
       SystemTime::UNIX_EPOCH.checked_add(StdDuration::from_secs(seconds)),
       "build expected unix timestamp",
     )
+    .map_err(TestError::from)
   }
 
   /// Verifies date joining for each rotation kind.
   #[test]
-  fn test_join_date() -> Result<(), TestFailure> {
+  fn test_join_date() -> Result<(), TestError> {
     /// Expected filename for a joined-date test case.
     struct TestCase {
       /// Expected joined filename.
@@ -1229,7 +1291,12 @@ mod test {
       )?;
       let path = ensure_ok(inner.join_date(test_case.now), "join rolling date")?;
 
-      ensure_eq(&path.as_str(), &test_case.expected, "joined path matches expected rotation format")?;
+      ensure_eq(
+        String::from(path.as_str()),
+        String::from(test_case.expected),
+        "joined path matches expected rotation format",
+      )
+      .map(drop)?;
     }
 
     Ok(())
@@ -1237,9 +1304,11 @@ mod test {
 
   /// Verifies non-rolling rotation has no rounded rollover timestamp.
   #[test]
-  fn test_never_date_rounding() -> Result<(), TestFailure> {
+  fn test_never_date_rounding() -> Result<(), TestError> {
     let now = OffsetDateTime::now_utc();
     ensure(Rotation::NEVER.round_date(now).is_none(), "never rotation cannot be rounded")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   /// Expected filename for a prefix/suffix layout case.
@@ -1255,11 +1324,11 @@ mod test {
   }
 
   /// Checks path concatenation cases against a shared timestamp and directory.
-  fn check_path_cases(now: OffsetDateTime, directory: &Path, test_cases: &[PathTestCase]) -> Result<(), TestFailure> {
+  fn check_path_cases(now: OffsetDateTime, directory: &Path, test_cases: &[PathTestCase]) -> Result<(), TestError> {
     for test_case in test_cases {
       let (inner, _) = build_inner(now, test_case.rotation, directory, test_case.prefix, test_case.suffix, None, None)?;
       let path = ensure_ok(inner.join_date(now), "join rolling date")?;
-      ensure(test_case.expected == path, "joined path matches expected prefix and suffix layout")?;
+      ensure(test_case.expected == path, "joined path matches expected prefix and suffix layout").map(drop)?;
     }
 
     Ok(())
@@ -1267,7 +1336,7 @@ mod test {
 
   /// Verifies filename layouts with only a prefix.
   #[test]
-  fn test_path_concatenation_prefix_only() -> Result<(), TestFailure> {
+  fn test_path_concatenation_prefix_only() -> Result<(), TestError> {
     let format = test_datetime_format()?;
     let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
     let now = parse_test_datetime("2020-02-01 10:01:00 +00:00:00", &format)?;
@@ -1303,7 +1372,7 @@ mod test {
 
   /// Verifies filename layouts with a prefix and suffix.
   #[test]
-  fn test_path_concatenation_prefix_and_suffix() -> Result<(), TestFailure> {
+  fn test_path_concatenation_prefix_and_suffix() -> Result<(), TestError> {
     let format = test_datetime_format()?;
     let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
     let now = parse_test_datetime("2020-02-01 10:01:00 +00:00:00", &format)?;
@@ -1339,7 +1408,7 @@ mod test {
 
   /// Verifies filename layouts with only a suffix.
   #[test]
-  fn test_path_concatenation_suffix_only() -> Result<(), TestFailure> {
+  fn test_path_concatenation_suffix_only() -> Result<(), TestError> {
     let format = test_datetime_format()?;
     let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
     let now = parse_test_datetime("2020-02-01 10:01:00 +00:00:00", &format)?;
@@ -1375,7 +1444,7 @@ mod test {
 
   /// Verifies filename layouts with no explicit prefix or suffix.
   #[test]
-  fn test_path_concatenation_without_prefix_or_suffix() -> Result<(), TestFailure> {
+  fn test_path_concatenation_without_prefix_or_suffix() -> Result<(), TestError> {
     let format = test_datetime_format()?;
     let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
     let now = parse_test_datetime("2020-02-01 10:01:00 +00:00:00", &format)?;
@@ -1418,7 +1487,7 @@ mod test {
     directory: &Path,
     prefix: &str,
     max_files: Option<usize>,
-  ) -> Result<InstalledAppender, TestFailure> {
+  ) -> Result<InstalledAppender, TestError> {
     let (state, writer) = build_inner(start_time, Rotation::HOURLY, directory, Some(prefix), None, None, max_files)?;
     let clock = Arc::new(Mutex::new(start_time));
     let now_fn = clocked_now(&clock);
@@ -1439,7 +1508,7 @@ mod test {
 
   /// Verifies `MakeWriter` rolls files as the clock crosses an hourly boundary.
   #[test]
-  fn test_make_writer() -> Result<(), TestFailure> {
+  fn test_make_writer() -> Result<(), TestError> {
     let format = test_datetime_format()?;
     let start_time = parse_test_datetime("2020-02-01 10:01:00 +00:00:00", &format)?;
     let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
@@ -1467,12 +1536,22 @@ mod test {
     for (path, file) in read_log_entries(directory.path())? {
       match file_date_extension(&path)? {
         "2020-02-01-10" => {
-          ensure_eq(&"file 1\nfile 1\n", &file.as_str(), "first hourly log file contents")?;
+          ensure_eq(
+            String::from("file 1\nfile 1\n"),
+            String::from(file.as_str()),
+            "first hourly log file contents",
+          )
+          .map(drop)?;
         }
         "2020-02-01-11" => {
-          ensure_eq(&"file 2\nfile 2\n", &file.as_str(), "second hourly log file contents")?;
+          ensure_eq(
+            String::from("file 2\nfile 2\n"),
+            String::from(file.as_str()),
+            "second hourly log file contents",
+          )
+          .map(drop)?;
         }
-        _other => ensure(false, "unexpected log file date extension")?,
+        _other => ensure(false, "unexpected log file date extension").map(drop)?,
       }
     }
 
@@ -1481,7 +1560,7 @@ mod test {
 
   /// Verifies retention pruning keeps the newest matching hourly log files.
   #[test]
-  fn test_max_log_files() -> Result<(), TestFailure> {
+  fn test_max_log_files() -> Result<(), TestError> {
     let format = test_datetime_format()?;
 
     let start_time = parse_test_datetime("2020-02-01 10:01:00 +00:00:00", &format)?;
@@ -1528,15 +1607,25 @@ mod test {
     for (path, file) in read_log_entries(directory.path())? {
       match file_date_extension(&path)? {
         "2020-02-01-10" => {
-          ensure(false, "oldest log file should have been pruned")?;
+          ensure(false, "oldest log file should have been pruned").map(drop)?;
         }
         "2020-02-01-11" => {
-          ensure_eq(&"file 2\nfile 2\n", &file.as_str(), "retained second log file contents")?;
+          ensure_eq(
+            String::from("file 2\nfile 2\n"),
+            String::from(file.as_str()),
+            "retained second log file contents",
+          )
+          .map(drop)?;
         }
         "2020-02-01-12" => {
-          ensure_eq(&"file 3\nfile 3\n", &file.as_str(), "retained third log file contents")?;
+          ensure_eq(
+            String::from("file 3\nfile 3\n"),
+            String::from(file.as_str()),
+            "retained third log file contents",
+          )
+          .map(drop)?;
         }
-        _other => ensure(false, "unexpected log file date extension")?,
+        _other => ensure(false, "unexpected log file date extension").map(drop)?,
       }
     }
 
@@ -1545,56 +1634,66 @@ mod test {
 
   /// Verifies daily filenames can be parsed back to UTC midnight.
   #[test]
-  fn test_parse_date_from_filename_daily() -> Result<(), TestFailure> {
+  fn test_parse_date_from_filename_daily() -> Result<(), TestError> {
     let date_format = ensure_ok(Rotation::DAILY.date_format(), "build daily date format")?;
     let filename = "app.2020-02-01.log";
     let created = parse_date_from_filename(filename, &date_format, Some("app"), Some("log"));
     let expected = Some(unix_time(1_580_515_200)?);
     ensure(created == expected, "daily filename parses to midnight UTC")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   /// Verifies hourly filenames can be parsed back to their UTC hour.
   #[test]
-  fn test_parse_date_from_filename_hourly() -> Result<(), TestFailure> {
+  fn test_parse_date_from_filename_hourly() -> Result<(), TestError> {
     let date_format = ensure_ok(Rotation::HOURLY.date_format(), "build hourly date format")?;
     let filename = "app.2020-02-01-10.log";
     let created = parse_date_from_filename(filename, &date_format, Some("app"), Some("log"));
     let expected = Some(unix_time(1_580_551_200)?);
     ensure(created == expected, "hourly filename parses to hour UTC")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   /// Verifies minutely filenames can be parsed back to their UTC minute.
   #[test]
-  fn test_parse_date_from_filename_minutely() -> Result<(), TestFailure> {
+  fn test_parse_date_from_filename_minutely() -> Result<(), TestError> {
     let date_format = ensure_ok(Rotation::MINUTELY.date_format(), "build minutely date format")?;
     let filename = "app.2020-02-01-10-01.log";
     let created = parse_date_from_filename(filename, &date_format, Some("app"), Some("log"));
     let expected = Some(unix_time(1_580_551_260)?);
     ensure(created == expected, "minutely filename parses to minute UTC")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   /// Verifies malformed filenames do not parse as retention timestamps.
   #[test]
-  fn parse_date_from_filename_rejects_mismatched_parts() -> Result<(), TestFailure> {
+  fn parse_date_from_filename_rejects_mismatched_parts() -> Result<(), TestError> {
     let date_format = ensure_ok(Rotation::HOURLY.date_format(), "build hourly date format")?;
 
     ensure(
       parse_date_from_filename("other.2020-02-01-10.log", &date_format, Some("app"), Some("log")).is_none(),
       "mismatched prefix is rejected",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       parse_date_from_filename("app.2020-02-01-10.txt", &date_format, Some("app"), Some("log")).is_none(),
       "mismatched suffix is rejected",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       parse_date_from_filename("app.not-a-date.log", &date_format, Some("app"), Some("log")).is_none(),
       "invalid timestamp is rejected",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   /// Verifies retention pruning ignores directories and files outside the configured name shape.
   #[test]
-  fn prune_old_logs_only_removes_matching_files() -> Result<(), TestFailure> {
+  fn prune_old_logs_only_removes_matching_files() -> Result<(), TestError> {
     let format = test_datetime_format()?;
     let now = parse_test_datetime("2020-02-03 00:00:00 +00:00:00", &format)?;
     let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
@@ -1612,24 +1711,27 @@ mod test {
 
     let _inner = build_inner(now, Rotation::DAILY, directory.path(), Some("app"), Some("log"), None, Some(1))?;
 
-    ensure(!matching_old.exists(), "old matching file is pruned")?;
+    ensure(!matching_old.exists(), "old matching file is pruned").map(drop)?;
     ensure(
       !matching_newer.exists(),
       "newer matching file is pruned before current file creation",
-    )?;
-    ensure(wrong_prefix.exists(), "wrong-prefix file is retained")?;
-    ensure(wrong_suffix.exists(), "wrong-suffix file is retained")?;
-    ensure(matching_directory.is_dir(), "matching-name directory is retained")?;
+    )
+    .map(drop)?;
+    ensure(wrong_prefix.exists(), "wrong-prefix file is retained").map(drop)?;
+    ensure(wrong_suffix.exists(), "wrong-suffix file is retained").map(drop)?;
+    ensure(matching_directory.is_dir(), "matching-name directory is retained").map(drop)?;
     ensure(
       directory.path().join("app.2020-02-03.log").exists(),
       "current log file is created after pruning",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   /// Verifies retention pruning ignores invalid date filenames when no prefix or suffix is
   /// configured.
   #[test]
-  fn prune_old_logs_without_name_parts_only_removes_parseable_dates() -> Result<(), TestFailure> {
+  fn prune_old_logs_without_name_parts_only_removes_parseable_dates() -> Result<(), TestError> {
     let format = test_datetime_format()?;
     let now = parse_test_datetime("2020-02-03 00:00:00 +00:00:00", &format)?;
     let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
@@ -1641,17 +1743,19 @@ mod test {
 
     let _inner = build_inner(now, Rotation::DAILY, directory.path(), None, None, None, Some(1))?;
 
-    ensure(!parseable_old.exists(), "parseable old file is pruned")?;
-    ensure(invalid_name.exists(), "invalid date filename is retained")?;
+    ensure(!parseable_old.exists(), "parseable old file is pruned").map(drop)?;
+    ensure(invalid_name.exists(), "invalid date filename is retained").map(drop)?;
     ensure(
       directory.path().join("2020-02-03").exists(),
       "current no-prefix log file is created after pruning",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   /// Verifies latest-log symlink creation and rollover updates.
   #[test]
-  fn test_latest_symlink() -> Result<(), TestFailure> {
+  fn test_latest_symlink() -> Result<(), TestError> {
     let format = test_datetime_format()?;
 
     let now = parse_test_datetime("2020-02-01 10:01:00 +00:00:00", &format)?;
@@ -1668,12 +1772,13 @@ mod test {
 
     // Verify symlink was created pointing to the initial log file
     let symlink_path = directory.path().join("latest.log");
-    ensure(symlink_path.is_symlink(), "latest.log should be a symlink")?;
+    ensure(symlink_path.is_symlink(), "latest.log should be a symlink").map(drop)?;
     let initial_target = ensure_ok(fs::read_link(&symlink_path), "read initial symlink")?;
     ensure(
       initial_target.to_string_lossy().contains("2020-02-01-10"),
       "symlink points to initial log file",
-    )?;
+    )
+    .map(drop)?;
 
     // Set up appender with mock clock to test rotation
     let clock = Arc::new(Mutex::new(now));
@@ -1694,16 +1799,23 @@ mod test {
     ensure(
       rotated_target.to_string_lossy().contains("2020-02-01-11"),
       "symlink points to rotated log file",
-    )?;
+    )
+    .map(drop)?;
 
     // Verify the symlink is functional
     let content = ensure_ok(fs::read_to_string(&symlink_path), "read through symlink")?;
-    ensure_eq(&"test\n", &content.as_str(), "symlink reads rotated log contents")
+    ensure_eq(
+      String::from("test\n"),
+      String::from(content.as_str()),
+      "symlink reads rotated log contents",
+    )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   /// Verifies symlink replacement failures are reported with initialization context.
   #[test]
-  fn create_writer_reports_context_when_previous_latest_path_is_not_a_symlink_file() -> Result<(), TestFailure> {
+  fn create_writer_reports_context_when_previous_latest_path_is_not_a_symlink_file() -> Result<(), TestError> {
     let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
     ensure_ok(
       fs::create_dir_all(directory.path().join("latest.log")),
@@ -1711,10 +1823,8 @@ mod test {
     )?;
 
     let error = match create_writer(directory.path(), "app.log", Some("latest.log")) {
-      Ok(_file) => {
-        return Err(TestFailure::Condition {
-          context: "latest symlink replacement should reject a directory",
-        });
+      Ok(file) => {
+        return Err(TestError::UnexpectedWriter(file));
       }
       Err(error) => error,
     };
@@ -1723,11 +1833,13 @@ mod test {
       error.to_string().contains("failed to remove previous latest log symlink"),
       "symlink removal failure includes operation context",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   /// Verifies direct writes restore the rollover timestamp after a refresh failure.
   #[test]
-  fn direct_write_restores_rollover_deadline_after_refresh_failure() -> Result<(), TestFailure> {
+  fn direct_write_restores_rollover_deadline_after_refresh_failure() -> Result<(), TestError> {
     let format = test_datetime_format()?;
     let now = parse_test_datetime("2020-02-01 10:01:00 +00:00:00", &format)?;
     let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
@@ -1757,17 +1869,20 @@ mod test {
     ensure(
       error.kind() == io::ErrorKind::Other,
       "rollover failure is mapped to generic write error",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &appender.state.next_date.load(Ordering::Acquire),
-      &original_next,
+      appender.state.next_date.load(Ordering::Acquire),
+      original_next,
       "failed rollover restores previous deadline",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   /// Verifies `MakeWriter` returns an erroring writer when rollover refresh fails.
   #[test]
-  fn make_writer_returns_error_writer_when_rollover_refresh_fails() -> Result<(), TestFailure> {
+  fn make_writer_returns_error_writer_when_rollover_refresh_fails() -> Result<(), TestError> {
     let format = test_datetime_format()?;
     let now = parse_test_datetime("2020-02-01 10:01:00 +00:00:00", &format)?;
     let directory = ensure_ok(tempfile::tempdir(), "create tempdir")?;
@@ -1796,7 +1911,9 @@ mod test {
     let write_error = ensure_some(rolling_writer.write_all(b"not written").err(), "rollover writer rejects writes")?;
     let flush_error = ensure_some(rolling_writer.flush().err(), "rollover writer rejects flush")?;
     drop(rolling_writer);
-    ensure(write_error.kind() == io::ErrorKind::Other, "rollover writer write error kind")?;
+    ensure(write_error.kind() == io::ErrorKind::Other, "rollover writer write error kind").map(drop)?;
     ensure(flush_error.kind() == io::ErrorKind::Other, "rollover writer flush error kind")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

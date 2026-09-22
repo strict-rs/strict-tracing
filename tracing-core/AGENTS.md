@@ -9,7 +9,7 @@
 - `callsite.rs` — the `Callsite` trait, `Identifier`, `DefaultCallsite` (the ready-made impl macros generate), and the **global callsite registry**. Each callsite caches a combined `Interest` so per-event filtering avoids calling `enabled`; `rebuild_interest_cache` invalidates it (also triggered automatically when a `Dispatch` is created/dropped). `dispatchers::Dispatchers` tracks active subscribers under `sync::Mutex`.
 - `metadata.rs` — `Metadata` (static name/target/level/fields/file/line/module/`Kind`), the `Level`/`LevelFilter` ordering types, and `Kind` (bit-flag consts `SPAN`/`EVENT`/`HINT`).
 - `field.rs` — `Field`/`FieldSet` (keys are array indices into a callsite's field list), `Value`/`ValueSet`, the `Visit` visitor trait, and `Empty`. Optionally bridges to `valuable` under `--cfg tracing_unstable`.
-- `event.rs`/`span.rs` — `Event` and span `Id` (`NonZeroU64`), `Attributes`/`Record`. `parent.rs` is the internal `Parent` enum (`Root`/`Current`/`Explicit(Id)`) carried by `Attributes`/`Event`.
+- `event.rs`/`span.rs` — `Event` and span `Id` (`NonZeroU64`), `Attributes`/`Record`. The public core-owned `Parent` enum in `lib.rs` distinguishes `Root`, `Current`, and `Explicit(Id)`. `Event` and `Attributes` expose their complete stored relationship through borrowing `const` `parent_relationship()` accessors; parent-ID and boolean queries are derived views.
 - `lib.rs` exports the `metadata!` and `identify_callsite!` constructor macros and inlines the central types at the crate root.
 
 Data flow: instrumentation builds a static `Callsite`+`Metadata`; first use registers it and caches `Interest`; if enabled, it constructs `Attributes`/`Event` and hands them to the current `Dispatch`'s `Subscriber`.

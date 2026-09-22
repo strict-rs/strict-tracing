@@ -3,7 +3,23 @@
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use tracing_core::subscriber::SubscriberError;
+  use tracing_subscriber::reload;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultTracingSubscriberReloadReloadError(#[from] strict_test_support::ResultFailure<reload::ReloadError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use tracing::subscriber::with_default;
@@ -34,21 +50,23 @@ mod tests {
     }
   }
 
-  fn ensure_hint<S>(subscriber: &S, expected: Option<LevelFilter>, context: &'static str) -> Result<(), TestFailure>
+  fn ensure_hint<S>(subscriber: &S, expected: Option<LevelFilter>, context: &'static str) -> Result<(), TestError>
   where
     S: Subscriber,
   {
     ensure(subscriber.max_level_hint() == expected, context)
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn just_layer() -> Result<(), TestFailure> {
+  fn just_layer() -> Result<(), TestError> {
     let subscriber = tracing_subscriber::registry().with(LevelFilter::INFO);
     ensure_hint(&subscriber, Some(LevelFilter::INFO), "plain layer reports info")
   }
 
   #[test]
-  fn subscriber_and_option_some_layer() -> Result<(), TestFailure> {
+  fn subscriber_and_option_some_layer() -> Result<(), TestError> {
     let subscriber = tracing_subscriber::registry()
       .with(LevelFilter::INFO)
       .with(Some(LevelFilter::DEBUG));
@@ -56,7 +74,7 @@ mod tests {
   }
 
   #[test]
-  fn subscriber_and_option_none_layer() -> Result<(), TestFailure> {
+  fn subscriber_and_option_none_layer() -> Result<(), TestError> {
     let subscriber = tracing_subscriber::registry()
       .with(LevelFilter::ERROR)
       .with(None::<LevelFilter>);
@@ -64,19 +82,19 @@ mod tests {
   }
 
   #[test]
-  fn just_option_some_layer() -> Result<(), TestFailure> {
+  fn just_option_some_layer() -> Result<(), TestError> {
     let subscriber = tracing_subscriber::registry().with(None::<LevelFilter>);
     ensure_hint(&subscriber, Some(LevelFilter::OFF), "standalone None layer disables all levels")
   }
 
   #[test]
-  fn just_option_none_layer() -> Result<(), TestFailure> {
+  fn just_option_none_layer() -> Result<(), TestError> {
     let subscriber = tracing_subscriber::registry().with(Some(LevelFilter::ERROR));
     ensure_hint(&subscriber, Some(LevelFilter::ERROR), "standalone Some layer reports its level")
   }
 
   #[test]
-  fn none_outside_doesnt_override_max_level() -> Result<(), TestFailure> {
+  fn none_outside_doesnt_override_max_level() -> Result<(), TestError> {
     let none_outside = tracing_subscriber::registry().with(BasicLayer(None)).with(None::<LevelFilter>);
     ensure_hint(&none_outside, None, "outer None preserves inner None hint")?;
 
@@ -137,7 +155,7 @@ mod tests {
   }
 
   #[test]
-  fn none_inside_doesnt_override_max_level() -> Result<(), TestFailure> {
+  fn none_inside_doesnt_override_max_level() -> Result<(), TestError> {
     let none_inside = tracing_subscriber::registry().with(None::<LevelFilter>).with(BasicLayer(None));
     ensure_hint(&none_inside, None, "inner None preserves outer None hint")?;
 
@@ -190,7 +208,7 @@ mod tests {
   }
 
   #[test]
-  fn reload_works_with_none() -> Result<(), TestFailure> {
+  fn reload_works_with_none() -> Result<(), TestError> {
     let (layer1, handle1) = Layer::new(None::<BasicLayer>);
     let (layer2, _handle2) = Layer::new(None::<BasicLayer>);
 
@@ -212,7 +230,7 @@ mod tests {
   }
 
   #[test]
-  fn on_register_dispatch_is_called() -> Result<(), TestFailure> {
+  fn on_register_dispatch_is_called() -> Result<(), TestError> {
     let (inner_layer, inner_handle) = named("inner").on_register_dispatch().run_with_handle();
 
     let subscriber = tracing_subscriber::registry().with(Some(inner_layer));

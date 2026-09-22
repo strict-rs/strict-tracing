@@ -69,7 +69,25 @@ impl Sealed for str {}
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+  use std::string::String;
+
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonField(#[from] strict_test_support::ComparisonFailure<tracing_core::Field, tracing_core::Field>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionField(#[from] strict_test_support::OptionFailure<tracing_core::Field>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonString(#[from] strict_test_support::ComparisonFailure<String, String>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_some;
@@ -101,28 +119,42 @@ mod tests {
   };
 
   #[test]
-  fn string_keys_find_matching_fields_and_reject_missing_fields() -> Result<(), TestFailure> {
+  fn string_keys_find_matching_fields_and_reject_missing_fields() -> Result<(), TestError> {
     let alpha = ensure_some("alpha".as_field(&FIRST_METADATA), "string key finds matching field")?;
     let beta = ensure_some("beta".as_field(&FIRST_METADATA), "string key finds second matching field")?;
 
-    ensure_eq(&alpha.name(), &"alpha", "string lookup returns the requested field")?;
-    ensure_eq(&beta.name(), &"beta", "string lookup returns the second requested field")?;
+    ensure_eq(
+      String::from(alpha.name()),
+      String::from("alpha"),
+      "string lookup returns the requested field",
+    )
+    .map(drop)?;
+    ensure_eq(
+      String::from(beta.name()),
+      String::from("beta"),
+      "string lookup returns the second requested field",
+    )
+    .map(drop)?;
     ensure("gamma".as_field(&FIRST_METADATA).is_none(), "string lookup rejects missing fields")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn resolved_fields_match_only_their_original_callsite() -> Result<(), TestFailure> {
+  fn resolved_fields_match_only_their_original_callsite() -> Result<(), TestError> {
     let alpha = ensure_some("alpha".as_field(&FIRST_METADATA), "alpha field exists")?;
     let alpha_ref = &alpha;
     let same = ensure_some(alpha.as_field(&FIRST_METADATA), "field key matches its original metadata")?;
     let by_ref = ensure_some(alpha_ref.as_field(&FIRST_METADATA), "field reference matches its original metadata")?;
 
-    ensure_eq(&same, &alpha, "field key returns itself for matching metadata")?;
-    ensure_eq(&by_ref, &alpha, "field reference returns the copied field for matching metadata")?;
-    ensure(alpha.as_field(&SECOND_METADATA).is_none(), "field key rejects a different callsite")?;
+    ensure_eq(same, alpha, "field key returns itself for matching metadata").map(drop)?;
+    ensure_eq(by_ref, alpha, "field reference returns the copied field for matching metadata").map(drop)?;
+    ensure(alpha.as_field(&SECOND_METADATA).is_none(), "field key rejects a different callsite").map(drop)?;
     ensure(
       alpha_ref.as_field(&SECOND_METADATA).is_none(),
       "field reference rejects a different callsite",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

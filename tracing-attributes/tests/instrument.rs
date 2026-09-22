@@ -4,7 +4,21 @@
 use std::fmt::Debug;
 use std::hint::black_box;
 
-use strict_test_support::TestFailure;
+use tracing_core::subscriber::SubscriberError;
+/// Native failures from these behavioral checks.
+#[derive(Debug, thiserror::Error)]
+enum TestError {
+  /// A boolean expectation failed.
+  #[error(transparent)]
+  Condition(#[from] strict_test_support::ConditionFailure),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  ComparisonString(#[from] strict_test_support::ComparisonFailure<String, String>),
+}
+
 use strict_test_support::ensure_eq;
 use strict_test_support::ensure_ok;
 use tracing::Level;
@@ -31,7 +45,7 @@ fn repro_2294_runs() {
 }
 
 #[test]
-fn override_everything() -> Result<(), TestFailure> {
+fn override_everything() -> Result<(), TestError> {
   #[instrument(target = "my_target", level = "debug")]
   fn my_fn() {}
 
@@ -65,7 +79,7 @@ fn override_everything() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn fields() -> Result<(), TestFailure> {
+fn fields() -> Result<(), TestError> {
   #[instrument(target = "my_target", level = "debug")]
   fn my_fn(arg1: usize, arg2: bool, arg3: String) {
     drop(arg3);
@@ -112,7 +126,7 @@ fn fields() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn skip() -> Result<(), TestFailure> {
+fn skip() -> Result<(), TestError> {
   struct UnDebug;
 
   #[instrument(target = "my_target", level = "debug", skip(_arg2, _arg3))]
@@ -154,7 +168,7 @@ fn skip() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn generics() -> Result<(), TestFailure> {
+fn generics() -> Result<(), TestError> {
   #[derive(Debug)]
   struct Foo;
 
@@ -190,7 +204,7 @@ fn generics() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn methods() -> Result<(), TestFailure> {
+fn methods() -> Result<(), TestError> {
   #[derive(Debug)]
   struct Foo;
 
@@ -225,7 +239,7 @@ fn methods() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn impl_trait_return_type() -> Result<(), TestFailure> {
+fn impl_trait_return_type() -> Result<(), TestError> {
   #[instrument]
   fn returns_impl_trait(x: usize) -> impl Iterator<Item = usize> {
     0..x
@@ -252,7 +266,7 @@ fn impl_trait_return_type() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn name_ident() -> Result<(), TestFailure> {
+fn name_ident() -> Result<(), TestError> {
   const MY_NAME: &str = "my_name";
   #[instrument(name = MY_NAME)]
   fn name() {}
@@ -276,7 +290,7 @@ fn name_ident() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn target_ident() -> Result<(), TestFailure> {
+fn target_ident() -> Result<(), TestError> {
   const MY_TARGET: &str = "my_target";
 
   #[instrument(target = MY_TARGET)]
@@ -301,7 +315,7 @@ fn target_ident() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn target_name_ident() -> Result<(), TestFailure> {
+fn target_name_ident() -> Result<(), TestError> {
   const MY_NAME: &str = "my_name";
   const MY_TARGET: &str = "my_target";
 
@@ -330,7 +344,7 @@ fn target_name_ident() -> Result<(), TestFailure> {
 pub mod user_tracing_module_regression {
   use tracing_attributes::instrument;
 
-  use super::TestFailure;
+  use super::TestError;
   use super::ensure_eq;
 
   /// User-defined module whose name intentionally shadows the external crate.
@@ -347,17 +361,19 @@ pub mod user_tracing_module_regression {
   }
 
   #[test]
-  fn user_tracing_module() -> Result<(), TestFailure> {
+  fn user_tracing_module() -> Result<(), TestError> {
     use ::tracing::field::Empty;
 
     // Reproduces https://github.com/tokio-rs/tracing/issues/3119
     #[instrument(fields(f = Empty))]
-    fn my_fn() -> Result<(), TestFailure> {
+    fn my_fn() -> Result<(), TestError> {
       ensure_eq(
-        &tracing::my_other_fn(),
-        &"test",
+        String::from(tracing::my_other_fn()),
+        String::from("test"),
         "user-defined tracing module should remain visible",
       )
+      .map(drop)
+      .map_err(TestError::from)
     }
 
     my_fn()

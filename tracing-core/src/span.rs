@@ -167,6 +167,15 @@ impl<'a> Attributes<'a> {
     self.values
   }
 
+  /// Borrows the complete requested parent relationship.
+  ///
+  /// The returned value distinguishes an explicit root from inheritance of
+  /// the current context and retains the identifier of an explicit parent.
+  #[must_use]
+  pub const fn parent_relationship(&self) -> &Parent {
+    &self.parent
+  }
+
   /// Returns true if the new span should be a root.
   #[must_use]
   pub const fn is_root(&self) -> bool {
@@ -402,7 +411,32 @@ mod tests {
   use core::fmt;
   use core::num::NonZeroU64;
 
-  use strict_test_support::TestFailure;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Retains the native idcomparison failure.
+    #[error(transparent)]
+    IdComparison(#[from] strict_test_support::ComparisonFailure<u64, u64>),
+    /// Retains the native nonzerocomparison failure.
+    #[error(transparent)]
+    NonzeroComparison(#[from] strict_test_support::ComparisonFailure<NonZeroU64, NonZeroU64>),
+    /// Retains the native id failure.
+    #[error(transparent)]
+    Id(#[from] strict_test_support::OptionFailure<Id>),
+    /// Retains the native field failure.
+    #[error(transparent)]
+    Field(#[from] strict_test_support::OptionFailure<Field>),
+    /// Retains the native countcomparison failure.
+    #[error(transparent)]
+    CountComparison(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+    /// Retains the native current failure.
+    #[error(transparent)]
+    Current(#[from] strict_test_support::OptionFailure<(Id, &'static Metadata<'static>)>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_some;
@@ -470,22 +504,24 @@ mod tests {
   }
 
   #[test]
-  fn span_id_round_trips_through_checked_and_nonzero_constructors() -> Result<(), TestFailure> {
+  fn span_id_round_trips_through_checked_and_nonzero_constructors() -> Result<(), TestError> {
     let id = Id::from_non_zero_u64(NonZeroU64::MIN);
 
-    ensure(Id::try_from_u64(0).is_none(), "zero is rejected as a span id")?;
-    ensure_eq(&id.into_u64(), &1_u64, "nonzero id converts to raw u64")?;
-    ensure_eq(&id.into_non_zero_u64(), &NonZeroU64::MIN, "nonzero id converts back to NonZeroU64")?;
+    ensure(Id::try_from_u64(0).is_none(), "zero is rejected as a span id").map(drop)?;
+    ensure_eq(id.into_u64(), 1_u64, "nonzero id converts to raw u64").map(drop)?;
+    ensure_eq(id.into_non_zero_u64(), NonZeroU64::MIN, "nonzero id converts back to NonZeroU64").map(drop)?;
 
     let from_raw = ensure_some(Id::try_from_u64(1), "one is accepted as a span id")?;
     let from_ref: Option<Id> = Option::from(&from_raw);
 
-    ensure(from_raw == id, "checked and nonzero constructors agree")?;
+    ensure(from_raw == id, "checked and nonzero constructors agree").map(drop)?;
     ensure(from_ref == Some(id), "span id converts from reference to copied option")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn attributes_report_contextual_root_and_explicit_parent_contracts() -> Result<(), TestFailure> {
+  fn attributes_report_contextual_root_and_explicit_parent_contracts() -> Result<(), TestError> {
     let fields = SPAN_TEST_META.fields();
     let alpha = ensure_some(fields.field("alpha"), "alpha field exists")?;
     let beta = ensure_some(fields.field("beta"), "beta field exists")?;
@@ -494,35 +530,38 @@ mod tests {
     let value_set = fields.value_set(&values);
 
     let contextual = Attributes::new(&SPAN_TEST_META, &value_set);
-    ensure(contextual.is_contextual(), "new attributes use contextual parenting")?;
-    ensure(!contextual.is_root(), "contextual attributes are not explicit roots")?;
-    ensure(contextual.parent().is_none(), "contextual attributes have no explicit parent")?;
-    ensure(contextual.metadata().name() == "core_span", "attributes expose metadata")?;
-    ensure(contextual.values().contains(&alpha), "attributes expose recorded values")?;
-    ensure(contextual.contains(&alpha), "attributes contain present fields")?;
-    ensure(!contextual.contains(&beta), "attributes do not contain empty fields")?;
+    ensure(contextual.is_contextual(), "new attributes use contextual parenting").map(drop)?;
+    ensure(!contextual.is_root(), "contextual attributes are not explicit roots").map(drop)?;
+    ensure(contextual.parent().is_none(), "contextual attributes have no explicit parent").map(drop)?;
+    ensure(contextual.metadata().name() == "core_span", "attributes expose metadata").map(drop)?;
+    ensure(contextual.values().contains(&alpha), "attributes expose recorded values").map(drop)?;
+    ensure(contextual.contains(&alpha), "attributes contain present fields").map(drop)?;
+    ensure(!contextual.contains(&beta), "attributes do not contain empty fields").map(drop)?;
     ensure(
       contextual.fields().contains(&beta),
       "attributes field set includes empty declared fields",
-    )?;
-    ensure(!contextual.is_empty(), "attributes with a present value are not empty")?;
+    )
+    .map(drop)?;
+    ensure(!contextual.is_empty(), "attributes with a present value are not empty").map(drop)?;
 
     let root = Attributes::new_root(&SPAN_TEST_META, &value_set);
-    ensure(root.is_root(), "root attributes report explicit root parenting")?;
-    ensure(!root.is_contextual(), "root attributes are not contextual")?;
-    ensure(root.parent().is_none(), "root attributes have no explicit parent")?;
+    ensure(root.is_root(), "root attributes report explicit root parenting").map(drop)?;
+    ensure(!root.is_contextual(), "root attributes are not contextual").map(drop)?;
+    ensure(root.parent().is_none(), "root attributes have no explicit parent").map(drop)?;
 
     let parent_id = Id::from_non_zero_u64(NonZeroU64::MIN);
     let child = Attributes::child_of(parent_id, &SPAN_TEST_META, &value_set);
-    let explicit_parent = ensure_some(child.parent(), "child attributes expose an explicit parent")?;
+    let explicit_parent = ensure_some(child.parent().copied(), "child attributes expose an explicit parent")?;
 
-    ensure(!child.is_root(), "child attributes are not roots")?;
-    ensure(!child.is_contextual(), "child attributes are not contextual")?;
-    ensure(*explicit_parent == parent_id, "child attributes preserve the explicit parent id")
+    ensure(!child.is_root(), "child attributes are not roots").map(drop)?;
+    ensure(!child.is_contextual(), "child attributes are not contextual").map(drop)?;
+    ensure(explicit_parent == parent_id, "child attributes preserve the explicit parent id")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn attributes_and_records_forward_present_values_to_visitors() -> Result<(), TestFailure> {
+  fn attributes_and_records_forward_present_values_to_visitors() -> Result<(), TestError> {
     let fields = SPAN_TEST_META.fields();
     let alpha = ensure_some(fields.field("alpha"), "alpha field exists")?;
     let beta = ensure_some(fields.field("beta"), "beta field exists")?;
@@ -532,80 +571,86 @@ mod tests {
     let value_set = fields.value_set(&values);
 
     let attributes = Attributes::new_root(&SPAN_TEST_META, &value_set);
-    ensure(attributes.is_root(), "recorded attributes can be explicit roots")?;
+    ensure(attributes.is_root(), "recorded attributes can be explicit roots").map(drop)?;
     let mut attributes_visitor = FieldNameVisitor::default();
     attributes.record(&mut attributes_visitor);
 
-    ensure(attributes_visitor.seen & SAW_ALPHA != 0, "attributes record alpha")?;
-    ensure(attributes_visitor.seen & SAW_BETA != 0, "attributes record beta")?;
-    ensure(attributes_visitor.seen & SAW_OTHER == 0, "attributes record no undeclared fields")?;
+    ensure(attributes_visitor.seen & SAW_ALPHA != 0, "attributes record alpha").map(drop)?;
+    ensure(attributes_visitor.seen & SAW_BETA != 0, "attributes record beta").map(drop)?;
+    ensure(attributes_visitor.seen & SAW_OTHER == 0, "attributes record no undeclared fields").map(drop)?;
 
     let parent_id = Id::from_non_zero_u64(NonZeroU64::MIN);
     let child_attributes = Attributes::child_of(parent_id, &SPAN_TEST_META, &value_set);
-    let child_parent = ensure_some(child_attributes.parent(), "recorded child attributes expose parent")?;
-    ensure(*child_parent == parent_id, "recorded child attributes preserve parent")?;
+    let child_parent = ensure_some(child_attributes.parent().copied(), "recorded child attributes expose parent")?;
+    ensure(child_parent == parent_id, "recorded child attributes preserve parent").map(drop)?;
 
     let record = Record::new(&value_set);
     let mut record_visitor = FieldNameVisitor::default();
     record.record(&mut record_visitor);
 
-    ensure_eq(&record.len(), &2_usize, "record reports present value count")?;
-    ensure(record.contains(&alpha), "record contains alpha")?;
-    ensure(record.contains(&beta), "record contains beta")?;
-    ensure(!record.is_empty(), "record with present values is not empty")?;
-    ensure(record_visitor.seen & SAW_ALPHA != 0, "record forwards alpha")?;
-    ensure(record_visitor.seen & SAW_BETA != 0, "record forwards beta")?;
-    ensure(record_visitor.seen & SAW_OTHER == 0, "record forwards no undeclared fields")?;
+    ensure_eq(record.len(), 2_usize, "record reports present value count").map(drop)?;
+    ensure(record.contains(&alpha), "record contains alpha").map(drop)?;
+    ensure(record.contains(&beta), "record contains beta").map(drop)?;
+    ensure(!record.is_empty(), "record with present values is not empty").map(drop)?;
+    ensure(record_visitor.seen & SAW_ALPHA != 0, "record forwards alpha").map(drop)?;
+    ensure(record_visitor.seen & SAW_BETA != 0, "record forwards beta").map(drop)?;
+    ensure(record_visitor.seen & SAW_OTHER == 0, "record forwards no undeclared fields").map(drop)?;
 
     let empty_value_set = fields.value_set(&[]);
     let empty_record = Record::new(&empty_value_set);
-    ensure_eq(&empty_record.len(), &0_usize, "empty record has no values")?;
-    ensure(empty_record.is_empty(), "empty record reports empty")?;
+    ensure_eq(empty_record.len(), 0_usize, "empty record has no values").map(drop)?;
+    ensure(empty_record.is_empty(), "empty record reports empty").map(drop)?;
     ensure(!empty_record.contains(&alpha), "empty record contains no fields")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn current_span_states_distinguish_known_none_and_unknown() -> Result<(), TestFailure> {
+  fn current_span_states_distinguish_known_none_and_unknown() -> Result<(), TestError> {
     let id = Id::from_non_zero_u64(NonZeroU64::MIN);
     let current = Current::new(id, &SPAN_TEST_META);
 
-    ensure(current.is_known(), "current span state is known")?;
-    ensure(current.id().is_some_and(|current_id| *current_id == id), "current exposes id")?;
+    ensure(current.is_known(), "current span state is known").map(drop)?;
+    ensure(current.id().is_some_and(|current_id| *current_id == id), "current exposes id").map(drop)?;
     ensure(
       current.metadata().is_some_and(|metadata| metadata.name() == "core_span"),
       "current exposes metadata",
-    )?;
+    )
+    .map(drop)?;
 
     let by_ref: Option<&Id> = Option::from(&current);
     let by_ref_owned: Option<Id> = Option::from(&current);
     let by_ref_metadata: Option<&'static Metadata<'static>> = Option::from(&current);
     let owned_current_id: Option<Id> = Option::from(Current::new(id, &SPAN_TEST_META));
-    ensure(by_ref.is_some(), "current converts by reference to id")?;
-    ensure(by_ref_owned == Some(id), "current converts by reference to copied id")?;
-    ensure(owned_current_id == Some(id), "current converts by value to copied id")?;
+    ensure(by_ref.is_some(), "current converts by reference to id").map(drop)?;
+    ensure(by_ref_owned == Some(id), "current converts by reference to copied id").map(drop)?;
+    ensure(owned_current_id == Some(id), "current converts by value to copied id").map(drop)?;
     ensure(
       by_ref_metadata.is_some_and(|metadata| metadata.name() == "core_span"),
       "current converts by reference to metadata",
-    )?;
+    )
+    .map(drop)?;
 
     let inner = ensure_some(current.into_inner(), "current consumes into id and metadata")?;
-    ensure(inner.0 == id, "current inner id is preserved")?;
-    ensure(inner.1.name() == "core_span", "current inner metadata is preserved")?;
+    ensure(inner.0 == id, "current inner id is preserved").map(drop)?;
+    ensure(inner.1.name() == "core_span", "current inner metadata is preserved").map(drop)?;
 
     let none = Current::none();
-    ensure(none.is_known(), "known-none current state is known")?;
-    ensure(none.id().is_none(), "known-none current has no id")?;
-    ensure(none.metadata().is_none(), "known-none current has no metadata")?;
+    ensure(none.is_known(), "known-none current state is known").map(drop)?;
+    ensure(none.id().is_none(), "known-none current has no id").map(drop)?;
+    ensure(none.metadata().is_none(), "known-none current has no metadata").map(drop)?;
     let none_id: Option<Id> = Option::from(none);
-    ensure(none_id.is_none(), "known-none current converts to no id")?;
+    ensure(none_id.is_none(), "known-none current converts to no id").map(drop)?;
     let another_none = Current::none();
-    ensure(another_none.into_inner().is_none(), "known-none current consumes to no inner span")?;
+    ensure(another_none.into_inner().is_none(), "known-none current consumes to no inner span").map(drop)?;
 
     let unknown = Current::unknown();
-    ensure(!unknown.is_known(), "unknown current state is not known")?;
-    ensure(unknown.id().is_none(), "unknown current has no id")?;
-    ensure(unknown.metadata().is_none(), "unknown current has no metadata")?;
+    ensure(!unknown.is_known(), "unknown current state is not known").map(drop)?;
+    ensure(unknown.id().is_none(), "unknown current has no id").map(drop)?;
+    ensure(unknown.metadata().is_none(), "unknown current has no metadata").map(drop)?;
     let unknown_id: Option<Id> = Option::from(unknown);
     ensure(unknown_id.is_none(), "unknown current converts to no id")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

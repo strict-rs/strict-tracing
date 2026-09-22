@@ -193,7 +193,9 @@
 // obstacle to adoption, that text has been removed.
 
 use std::fmt;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 /// Nanoseconds in one whole second.
 const NANOS_PER_SECOND: u32 = 1_000_000_000;
@@ -230,257 +232,228 @@ const DAYS_IN_MONTH: [i8; 12] = [31, 30, 31, 30, 31, 31, 30, 31, 30, 31, 31, 29]
 /// [3] <https://github.com/danburkert/kudu-rs/blob/c9660067e5f4c1a54143f169b5eeb49446f82e54/src/timestamp.rs#L5-L18>
 /// [4] <https://github.com/tokio-rs/tracing/issues/1644#issuecomment-963888244>
 ///
-/// All existing `strftime`-like APIs I found were unable to handle the full range of timestamps representable
-/// by `SystemTime`, including `strftime` itself, since `tm.tm_year` is an int.
+/// All existing `strftime`-like APIs I found were unable to handle the full range of timestamps
+/// representable by `SystemTime`, including `strftime` itself, since `tm.tm_year` is an int.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) struct DateTime {
-    /// The astronomical calendar year.
-    year: i64,
-    /// The one-indexed calendar month.
-    month: u8,
-    /// The one-indexed day within the calendar month.
-    day: u8,
-    /// The zero-indexed hour within the day.
-    hour: u8,
-    /// The zero-indexed minute within the hour.
-    minute: u8,
-    /// The zero-indexed second within the minute.
-    second: u8,
-    /// The nanosecond component within the second.
-    nanos: u32,
+  /// The astronomical calendar year.
+  year:   i64,
+  /// The one-indexed calendar month.
+  month:  u8,
+  /// The one-indexed day within the calendar month.
+  day:    u8,
+  /// The zero-indexed hour within the day.
+  hour:   u8,
+  /// The zero-indexed minute within the hour.
+  minute: u8,
+  /// The zero-indexed second within the minute.
+  second: u8,
+  /// The nanosecond component within the second.
+  nanos:  u32,
 }
 
 impl fmt::Display for DateTime {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.year > 9999 {
-            write!(f, "+{}", self.year)?;
-        } else if self.year < 0 {
-            write!(f, "{:05}", self.year)?;
-        } else {
-            write!(f, "{:04}", self.year)?;
-        }
-
-        write!(
-            f,
-            "-{:02}-{:02}T{:02}:{:02}:{:02}.{:06}Z",
-            self.month,
-            self.day,
-            self.hour,
-            self.minute,
-            self.second,
-            self.nanos.div_euclid(MICROS_PER_NANO_DIVISOR)
-        )
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    if self.year > 9999 {
+      write!(f, "+{}", self.year)?;
+    } else if self.year < 0 {
+      write!(f, "{:05}", self.year)?;
+    } else {
+      write!(f, "{:04}", self.year)?;
     }
+
+    write!(
+      f,
+      "-{:02}-{:02}T{:02}:{:02}:{:02}.{:06}Z",
+      self.month,
+      self.day,
+      self.hour,
+      self.minute,
+      self.second,
+      self.nanos.div_euclid(MICROS_PER_NANO_DIVISOR)
+    )
+  }
 }
 
 impl From<SystemTime> for DateTime {
-    fn from(timestamp: SystemTime) -> Self {
-        let (timestamp_secs, nanos) = match timestamp.duration_since(UNIX_EPOCH) {
-            Ok(duration) => (duration_seconds_i64(duration), duration.subsec_nanos()),
-            Err(error) => {
-                let duration = error.duration();
-                let secs = duration_seconds_i64(duration);
-                let nanos = duration.subsec_nanos();
-                if nanos == 0 {
-                    (secs.saturating_neg(), 0)
-                } else {
-                    (
-                        secs.saturating_neg().saturating_sub(1),
-                        NANOS_PER_SECOND.saturating_sub(nanos),
-                    )
-                }
-            }
-        };
-
-        let days_since_leapoch = timestamp_secs
-            .div_euclid(SECONDS_PER_DAY)
-            .saturating_sub(LEAPOCH_DAYS);
-        let remaining_secs =
-            i32::try_from(timestamp_secs.rem_euclid(SECONDS_PER_DAY)).unwrap_or_default();
-
-        let quadricentennial_cycles = i32::try_from(
-            days_since_leapoch.div_euclid(i64::from(DAYS_PER_400_YEARS)),
-        )
-        .unwrap_or_default();
-        let mut remaining_days = i32::try_from(
-            days_since_leapoch.rem_euclid(i64::from(DAYS_PER_400_YEARS)),
-        )
-        .unwrap_or_default();
-
-        let century_cycles = clamped_cycle_count(remaining_days, DAYS_PER_100_YEARS, 4);
-        remaining_days = subtract_cycle_days(remaining_days, century_cycles, DAYS_PER_100_YEARS);
-
-        let quadrennial_cycles = clamped_cycle_count(remaining_days, DAYS_PER_4_YEARS, 25);
-        remaining_days =
-            subtract_cycle_days(remaining_days, quadrennial_cycles, DAYS_PER_4_YEARS);
-
-        let remaining_years = clamped_cycle_count(remaining_days, DAYS_PER_YEAR, 4);
-        remaining_days = subtract_cycle_days(remaining_days, remaining_years, DAYS_PER_YEAR);
-
-        let mut years = i64::from(remaining_years)
-            .saturating_add(i64::from(quadrennial_cycles).saturating_mul(4))
-            .saturating_add(i64::from(century_cycles).saturating_mul(100))
-            .saturating_add(i64::from(quadricentennial_cycles).saturating_mul(400));
-
-        let mut month_index = 0_i32;
-        for month_length_i8 in DAYS_IN_MONTH {
-            let month_length = i32::from(month_length_i8);
-            if month_length > remaining_days {
-                break;
-            }
-
-            remaining_days = remaining_days.saturating_sub(month_length);
-            month_index = month_index.saturating_add(1);
+  fn from(timestamp: SystemTime) -> Self {
+    let (timestamp_secs, nanos) = match timestamp.duration_since(UNIX_EPOCH) {
+      Ok(duration) => (duration_seconds_i64(duration), duration.subsec_nanos()),
+      Err(error) => {
+        let duration = error.duration();
+        let secs = duration_seconds_i64(duration);
+        let nanos = duration.subsec_nanos();
+        if nanos == 0 {
+          (secs.saturating_neg(), 0)
+        } else {
+          (secs.saturating_neg().saturating_sub(1), NANOS_PER_SECOND.saturating_sub(nanos))
         }
+      }
+    };
 
-        if month_index >= 10 {
-            month_index = month_index.saturating_sub(12);
-            years = years.saturating_add(1);
-        }
+    let days_since_leapoch = timestamp_secs.div_euclid(SECONDS_PER_DAY).saturating_sub(LEAPOCH_DAYS);
+    let remaining_secs = i32::try_from(timestamp_secs.rem_euclid(SECONDS_PER_DAY)).unwrap_or_default();
 
-        Self {
-            year: years.saturating_add(2000),
-            month: u8::try_from(month_index.saturating_add(3)).unwrap_or_default(),
-            day: u8::try_from(remaining_days.saturating_add(1)).unwrap_or_default(),
-            hour: u8::try_from(remaining_secs.div_euclid(SECONDS_PER_HOUR)).unwrap_or_default(),
-            minute: u8::try_from(
-                remaining_secs
-                    .rem_euclid(SECONDS_PER_HOUR)
-                    .div_euclid(SECONDS_PER_MINUTE),
-            )
-            .unwrap_or_default(),
-            second: u8::try_from(remaining_secs.rem_euclid(SECONDS_PER_MINUTE))
-                .unwrap_or_default(),
-            nanos,
-        }
+    let quadricentennial_cycles = i32::try_from(days_since_leapoch.div_euclid(i64::from(DAYS_PER_400_YEARS))).unwrap_or_default();
+    let mut remaining_days = i32::try_from(days_since_leapoch.rem_euclid(i64::from(DAYS_PER_400_YEARS))).unwrap_or_default();
+
+    let century_cycles = clamped_cycle_count(remaining_days, DAYS_PER_100_YEARS, 4);
+    remaining_days = subtract_cycle_days(remaining_days, century_cycles, DAYS_PER_100_YEARS);
+
+    let quadrennial_cycles = clamped_cycle_count(remaining_days, DAYS_PER_4_YEARS, 25);
+    remaining_days = subtract_cycle_days(remaining_days, quadrennial_cycles, DAYS_PER_4_YEARS);
+
+    let remaining_years = clamped_cycle_count(remaining_days, DAYS_PER_YEAR, 4);
+    remaining_days = subtract_cycle_days(remaining_days, remaining_years, DAYS_PER_YEAR);
+
+    let mut years = i64::from(remaining_years)
+      .saturating_add(i64::from(quadrennial_cycles).saturating_mul(4))
+      .saturating_add(i64::from(century_cycles).saturating_mul(100))
+      .saturating_add(i64::from(quadricentennial_cycles).saturating_mul(400));
+
+    let mut month_index = 0_i32;
+    for month_length_i8 in DAYS_IN_MONTH {
+      let month_length = i32::from(month_length_i8);
+      if month_length > remaining_days {
+        break;
+      }
+
+      remaining_days = remaining_days.saturating_sub(month_length);
+      month_index = month_index.saturating_add(1);
     }
+
+    if month_index >= 10 {
+      month_index = month_index.saturating_sub(12);
+      years = years.saturating_add(1);
+    }
+
+    Self {
+      year: years.saturating_add(2000),
+      month: u8::try_from(month_index.saturating_add(3)).unwrap_or_default(),
+      day: u8::try_from(remaining_days.saturating_add(1)).unwrap_or_default(),
+      hour: u8::try_from(remaining_secs.div_euclid(SECONDS_PER_HOUR)).unwrap_or_default(),
+      minute: u8::try_from(remaining_secs.rem_euclid(SECONDS_PER_HOUR).div_euclid(SECONDS_PER_MINUTE)).unwrap_or_default(),
+      second: u8::try_from(remaining_secs.rem_euclid(SECONDS_PER_MINUTE)).unwrap_or_default(),
+      nanos,
+    }
+  }
 }
 
 #[cfg(feature = "chrono")]
 impl From<chrono::DateTime<chrono::Utc>> for DateTime {
-    fn from(timestamp: chrono::DateTime<chrono::Utc>) -> Self {
-        use chrono::{Datelike as _, Timelike as _};
+  fn from(timestamp: chrono::DateTime<chrono::Utc>) -> Self {
+    use chrono::Datelike as _;
+    use chrono::Timelike as _;
 
-        Self {
-            year: i64::from(timestamp.year()),
-            month: u8::try_from(timestamp.month()).unwrap_or_default(),
-            day: u8::try_from(timestamp.day()).unwrap_or_default(),
-            hour: u8::try_from(timestamp.hour()).unwrap_or_default(),
-            minute: u8::try_from(timestamp.minute()).unwrap_or_default(),
-            second: u8::try_from(timestamp.second()).unwrap_or_default(),
-            nanos: timestamp.timestamp_subsec_nanos(),
-        }
+    Self {
+      year:   i64::from(timestamp.year()),
+      month:  u8::try_from(timestamp.month()).unwrap_or_default(),
+      day:    u8::try_from(timestamp.day()).unwrap_or_default(),
+      hour:   u8::try_from(timestamp.hour()).unwrap_or_default(),
+      minute: u8::try_from(timestamp.minute()).unwrap_or_default(),
+      second: u8::try_from(timestamp.second()).unwrap_or_default(),
+      nanos:  timestamp.timestamp_subsec_nanos(),
     }
+  }
 }
 
 /// Converts a [`Duration`] second count into the signed range used by this converter.
 fn duration_seconds_i64(duration: Duration) -> i64 {
-    i64::try_from(duration.as_secs()).unwrap_or(i64::MAX)
+  i64::try_from(duration.as_secs()).unwrap_or(i64::MAX)
 }
 
 /// Counts calendar cycles, clamping the exclusive boundary case from musl's algorithm.
-const fn clamped_cycle_count(
-    remaining_days: i32,
-    cycle_days: i32,
-    exclusive_upper_bound: i32,
-) -> i32 {
-    let cycles = remaining_days.div_euclid(cycle_days);
-    if cycles == exclusive_upper_bound {
-        cycles.saturating_sub(1)
-    } else {
-        cycles
-    }
+const fn clamped_cycle_count(remaining_days: i32, cycle_days: i32, exclusive_upper_bound: i32) -> i32 {
+  let cycles = remaining_days.div_euclid(cycle_days);
+  if cycles == exclusive_upper_bound {
+    cycles.saturating_sub(1)
+  } else {
+    cycles
+  }
 }
 
 /// Removes the days represented by complete calendar cycles.
 const fn subtract_cycle_days(remaining_days: i32, cycles: i32, cycle_days: i32) -> i32 {
-    remaining_days.saturating_sub(cycles.saturating_mul(cycle_days))
+  remaining_days.saturating_sub(cycles.saturating_mul(cycle_days))
 }
 
 #[cfg(test)]
 mod tests {
-    use i32;
-    use std::{
-        format,
-        time::{Duration, UNIX_EPOCH},
+  use std::format;
+  use std::time::Duration;
+  use std::time::UNIX_EPOCH;
+
+  use i32;
+  use strict_test_support::ConditionFailure;
+  use strict_test_support::ensure;
+
+  use super::*;
+
+  #[test]
+  fn test_datetime() -> Result<(), ConditionFailure> {
+    let case = |expected: &str, secs: i64, micros: u32| -> Result<(), ConditionFailure> {
+      let timestamp = if secs >= 0 {
+        UNIX_EPOCH + Duration::new(secs.cast_unsigned(), micros * 1_000)
+      } else {
+        (UNIX_EPOCH - Duration::new((!secs).cast_unsigned() + 1, 0)) + Duration::new(0, micros * 1_000)
+      };
+      ensure(
+        expected == format!("{}", DateTime::from(timestamp)),
+        "datetime renders expected timestamp",
+      )
+      .map(drop)
     };
 
-    use super::*;
-    use strict_test_support::{TestFailure, ensure};
+    // Mostly generated with:
+    //  - date -jur <secs> +"%Y-%m-%dT%H:%M:%S.000000Z"
+    //  - http://unixtimestamp.50x.eu/
 
-    #[test]
-    fn test_datetime() -> Result<(), TestFailure> {
-        let case = |expected: &str, secs: i64, micros: u32| -> Result<(), TestFailure> {
-            let timestamp = if secs >= 0 {
-                UNIX_EPOCH + Duration::new(secs.cast_unsigned(), micros * 1_000)
-            } else {
-                (UNIX_EPOCH - Duration::new((!secs).cast_unsigned() + 1, 0))
-                    + Duration::new(0, micros * 1_000)
-            };
-            ensure(
-                expected == format!("{}", DateTime::from(timestamp)),
-                "datetime renders expected timestamp",
-            )
-        };
+    case("1970-01-01T00:00:00.000000Z", 0, 0)?;
 
-        // Mostly generated with:
-        //  - date -jur <secs> +"%Y-%m-%dT%H:%M:%S.000000Z"
-        //  - http://unixtimestamp.50x.eu/
+    case("1970-01-01T00:00:00.000001Z", 0, 1)?;
+    case("1970-01-01T00:00:00.500000Z", 0, 500_000)?;
+    case("1970-01-01T00:00:01.000001Z", 1, 1)?;
+    case("1970-01-01T00:01:01.000001Z", 60 + 1, 1)?;
+    case("1970-01-01T01:01:01.000001Z", 60 * 60 + 60 + 1, 1)?;
+    case("1970-01-02T01:01:01.000001Z", 24 * 60 * 60 + 60 * 60 + 60 + 1, 1)?;
 
-        case("1970-01-01T00:00:00.000000Z", 0, 0)?;
+    case("1969-12-31T23:59:59.000000Z", -1, 0)?;
+    case("1969-12-31T23:59:59.000001Z", -1, 1)?;
+    case("1969-12-31T23:59:59.500000Z", -1, 500_000)?;
+    case("1969-12-31T23:58:59.000001Z", -60 - 1, 1)?;
+    case("1969-12-31T22:58:59.000001Z", -60 * 60 - 60 - 1, 1)?;
+    case("1969-12-30T22:58:59.000001Z", -24 * 60 * 60 - 60 * 60 - 60 - 1, 1)?;
 
-        case("1970-01-01T00:00:00.000001Z", 0, 1)?;
-        case("1970-01-01T00:00:00.500000Z", 0, 500_000)?;
-        case("1970-01-01T00:00:01.000001Z", 1, 1)?;
-        case("1970-01-01T00:01:01.000001Z", 60 + 1, 1)?;
-        case("1970-01-01T01:01:01.000001Z", 60 * 60 + 60 + 1, 1)?;
-        case(
-            "1970-01-02T01:01:01.000001Z",
-            24 * 60 * 60 + 60 * 60 + 60 + 1,
-            1,
-        )?;
+    case("2038-01-19T03:14:07.000000Z", i64::from(i32::MAX), 0)?;
+    case("2038-01-19T03:14:08.000000Z", i64::from(i32::MAX) + 1, 0)?;
+    case("1901-12-13T20:45:52.000000Z", i64::from(i32::MIN), 0)?;
+    case("1901-12-13T20:45:51.000000Z", i64::from(i32::MIN) - 1, 0)?;
 
-        case("1969-12-31T23:59:59.000000Z", -1, 0)?;
-        case("1969-12-31T23:59:59.000001Z", -1, 1)?;
-        case("1969-12-31T23:59:59.500000Z", -1, 500_000)?;
-        case("1969-12-31T23:58:59.000001Z", -60 - 1, 1)?;
-        case("1969-12-31T22:58:59.000001Z", -60 * 60 - 60 - 1, 1)?;
-        case(
-            "1969-12-30T22:58:59.000001Z",
-            -24 * 60 * 60 - 60 * 60 - 60 - 1,
-            1,
-        )?;
+    // Skipping these tests on windows as std::time::SystemTime range is low
+    // on Windows compared with that of Unix which can cause the following
+    // high date value tests to panic
+    #[cfg(not(target_os = "windows"))]
+    {
+      case("+292277026596-12-04T15:30:07.000000Z", i64::MAX, 0)?;
+      case("+292277026596-12-04T15:30:06.000000Z", i64::MAX - 1, 0)?;
+      case("-292277022657-01-27T08:29:53.000000Z", i64::MIN + 1, 0)
+    }?;
 
-        case("2038-01-19T03:14:07.000000Z", i64::from(i32::MAX), 0)?;
-        case("2038-01-19T03:14:08.000000Z", i64::from(i32::MAX) + 1, 0)?;
-        case("1901-12-13T20:45:52.000000Z", i64::from(i32::MIN), 0)?;
-        case("1901-12-13T20:45:51.000000Z", i64::from(i32::MIN) - 1, 0)?;
+    case("1900-01-01T00:00:00.000000Z", -2_208_988_800, 0)?;
+    case("1899-12-31T23:59:59.000000Z", -2_208_988_801, 0)?;
+    case("2345-06-07T08:09:01.000000Z", 11_847_456_541, 0)?;
 
-        // Skipping these tests on windows as std::time::SystemTime range is low
-        // on Windows compared with that of Unix which can cause the following
-        // high date value tests to panic
-        #[cfg(not(target_os = "windows"))]
-        {
-            case("+292277026596-12-04T15:30:07.000000Z", i64::MAX, 0)?;
-            case("+292277026596-12-04T15:30:06.000000Z", i64::MAX - 1, 0)?;
-            case("-292277022657-01-27T08:29:53.000000Z", i64::MIN + 1, 0)
-        }?;
-
-        case("1900-01-01T00:00:00.000000Z", -2_208_988_800, 0)?;
-        case("1899-12-31T23:59:59.000000Z", -2_208_988_801, 0)?;
-        case("2345-06-07T08:09:01.000000Z", 11_847_456_541, 0)?;
-
-        // Skipping pre-1601 dates on Windows: as of Rust 1.94, SystemTime
-        // subtraction panics when the result would be before the Windows
-        // FILETIME epoch (1601-01-01). See Rust 1.94.0 compatibility notes.
-        #[cfg(not(target_os = "windows"))]
-        {
-            case("1234-05-06T07:08:09.000000Z", -23_215_049_511, 0)?;
-            case("0000-01-01T00:00:00.000000Z", -62_167_219_200, 0)?;
-            case("-0001-12-31T23:59:59.000000Z", -62_167_219_201, 0)?;
-            case("-1234-05-06T07:08:09.000000Z", -101_097_651_111, 0)?;
-            case("-2345-06-07T08:09:01.000000Z", -136_154_620_259, 0)
-        }?;
-        Ok(())
-    }
+    // Skipping pre-1601 dates on Windows: as of Rust 1.94, SystemTime
+    // subtraction panics when the result would be before the Windows
+    // FILETIME epoch (1601-01-01). See Rust 1.94.0 compatibility notes.
+    #[cfg(not(target_os = "windows"))]
+    {
+      case("1234-05-06T07:08:09.000000Z", -23_215_049_511, 0)?;
+      case("0000-01-01T00:00:00.000000Z", -62_167_219_200, 0)?;
+      case("-0001-12-31T23:59:59.000000Z", -62_167_219_201, 0)?;
+      case("-1234-05-06T07:08:09.000000Z", -101_097_651_111, 0)?;
+      case("-2345-06-07T08:09:01.000000Z", -136_154_620_259, 0)
+    }?;
+    Ok(())
+  }
 }

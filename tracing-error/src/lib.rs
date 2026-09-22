@@ -274,7 +274,26 @@ mod tests {
   use std::string::String;
   use std::vec::Vec;
 
-  use strict_test_support::TestFailure;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonString(#[from] strict_test_support::ComparisonFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonUsize(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+    /// Retains the searched text and expected substring.
+    #[error(transparent)]
+    Substring(#[from] strict_test_support::SubstringFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionString(#[from] strict_test_support::OptionFailure<(String, String)>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_contains;
   use strict_test_support::ensure_eq;
@@ -328,14 +347,20 @@ mod tests {
   }
 
   #[test]
-  fn with_context_debug_names_erased_bridge() -> Result<(), TestFailure> {
+  fn with_context_debug_names_erased_bridge() -> Result<(), TestError> {
     let bridge = WithContext::new(visit_context_for_test);
     let debugged = format!("{bridge:?}");
-    ensure_contains(&debugged, "WithContext", "debug output should name the erased context bridge")
+    ensure_contains(
+      debugged,
+      String::from("WithContext"),
+      "debug output should name the erased context bridge",
+    )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn with_context_visits_metadata_and_honors_early_stop() -> Result<(), TestFailure> {
+  fn with_context_visits_metadata_and_honors_early_stop() -> Result<(), TestError> {
     let bridge = WithContext::new(visit_context_for_test);
     let dispatch = Dispatch::new(NoSubscriber::new());
     let context_id = context_span_id();
@@ -345,27 +370,42 @@ mod tests {
       true
     });
 
-    ensure_eq(&visits.len(), &2_usize, "continuing visitor should receive both callback entries")?;
-    let first = ensure_some(visits.first(), "first bridge visit should be present")?;
-    ensure_eq(&first.0, &String::from("context_span"), "bridge visitor should receive metadata")?;
+    ensure_eq(visits.len(), 2_usize, "continuing visitor should receive both callback entries").map(drop)?;
+    let first =
+      ensure_some(visits.first(), "first bridge visit should be present").map_err(|failure| strict_test_support::OptionFailure {
+        context: failure.context,
+        option:  failure.option.cloned(),
+      })?;
     ensure_eq(
-      &first.1,
-      &String::from("answer=42"),
+      (first.0).clone(),
+      String::from("context_span"),
+      "bridge visitor should receive metadata",
+    )
+    .map(drop)?;
+    ensure_eq(
+      (first.1).clone(),
+      String::from("answer=42"),
       "bridge visitor should receive formatted fields",
-    )?;
-    let second = ensure_some(visits.get(1), "second bridge visit should be present")?;
+    )
+    .map(drop)?;
+    let second =
+      ensure_some(visits.get(1), "second bridge visit should be present").map_err(|failure| strict_test_support::OptionFailure {
+        context: failure.context,
+        option:  failure.option.cloned(),
+      })?;
     ensure_eq(
-      &second.1,
-      &String::from("second=true"),
+      (second.1).clone(),
+      String::from("second=true"),
       "bridge should continue while the visitor returns true",
-    )?;
+    )
+    .map(drop)?;
 
     let mut stopped = Vec::new();
     bridge.with_context(&dispatch, context_id, |metadata, fields| {
       stopped.push((String::from(metadata.name()), String::from(fields)));
       false
     });
-    ensure_eq(&stopped.len(), &1_usize, "false from the visitor should stop callback iteration")?;
+    ensure_eq(stopped.len(), 1_usize, "false from the visitor should stop callback iteration").map(drop)?;
 
     let mut ignored = Vec::new();
     bridge.with_context(&dispatch, span::Id::from_non_zero_u64(NonZeroU64::MAX), |metadata, fields| {
@@ -373,5 +413,7 @@ mod tests {
       true
     });
     ensure(ignored.is_empty(), "callback should not visit metadata for another span ID")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

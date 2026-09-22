@@ -281,7 +281,8 @@ impl fmt::Debug for SpanTrace {
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use strict_test_support::ConditionFailure;
   use strict_test_support::ensure;
   use tracing::Level;
   use tracing::span;
@@ -293,10 +294,10 @@ mod tests {
   use crate::ErrorLayer;
 
   #[test]
-  fn capture_supported() -> Result<(), TestFailure> {
+  fn capture_supported() -> Result<(), ConditionFailure> {
     let subscriber = Registry::default().with(ErrorLayer::default());
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), ConditionFailure> {
       let span = span!(Level::ERROR, "test span");
       let _guard = span.enter();
 
@@ -306,28 +307,30 @@ mod tests {
         span_trace.status() == SpanTraceStatus::CAPTURED,
         "active span with error layer captures a span trace",
       )
+      .map(drop)
     })
   }
 
   #[test]
-  fn capture_empty() -> Result<(), TestFailure> {
+  fn capture_empty() -> Result<(), ConditionFailure> {
     let subscriber = Registry::default().with(ErrorLayer::default());
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), ConditionFailure> {
       let span_trace = SpanTrace::capture();
 
       ensure(
         span_trace.status() == SpanTraceStatus::EMPTY,
         "error layer without an active span captures an empty trace",
       )
+      .map(drop)
     })
   }
 
   #[test]
-  fn capture_unsupported() -> Result<(), TestFailure> {
+  fn capture_unsupported() -> Result<(), ConditionFailure> {
     let subscriber = Registry::default();
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), ConditionFailure> {
       let span = span!(Level::ERROR, "test span");
       let _guard = span.enter();
 
@@ -337,6 +340,7 @@ mod tests {
         span_trace.status() == SpanTraceStatus::UNSUPPORTED,
         "subscriber without error layer cannot capture span traces",
       )
+      .map(drop)
     })
   }
 }

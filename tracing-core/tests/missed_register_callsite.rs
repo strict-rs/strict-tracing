@@ -3,11 +3,33 @@
 
 #[cfg(test)]
 mod tests {
+  use std::any;
+  use std::io;
   use std::thread;
   use std::thread::JoinHandle;
   use std::time::Duration;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// A worker could not be created.
+    #[error(transparent)]
+    Spawn(#[from] io::Error),
+    /// A worker panicked, retaining the thread's original payload.
+    #[error("{context}")]
+    Thread {
+      /// Which worker failed.
+      context: &'static str,
+      /// Original native panic payload from `JoinHandle::join`.
+      payload: Box<dyn any::Any + Send>,
+    },
+    /// Retains the native field failure.
+    #[error(transparent)]
+    Field(#[from] strict_test_support::OptionFailure<tracing_core::Field>),
+  }
 
-  use strict_test_support::TestFailure;
   use strict_test_support::ensure;
   use strict_test_support::ensure_some;
   use tracing_core::Dispatch;
@@ -24,7 +46,7 @@ mod tests {
   use tracing_core::metadata::SourceLocation;
   use tracing_core::test_util::CallsiteTrackingSubscriber;
 
-  fn subscriber_thread(index: usize, register_sleep_micros: u64) -> Result<JoinHandle<Result<(), TestFailure>>, TestFailure> {
+  fn subscriber_thread(index: usize, register_sleep_micros: u64) -> Result<JoinHandle<Result<(), TestError>>, TestError> {
     thread::Builder::new()
       .name(format!("subscriber-{index}"))
       .spawn(move || {
@@ -63,6 +85,8 @@ mod tests {
           !handle.saw_callsite_mismatch(),
           "event must be called after register_callsite records the callsite",
         )
+        .map(drop)
+        .map_err(TestError::from)
       })
       .map_err(Into::into)
   }
@@ -75,7 +99,7 @@ mod tests {
   /// Because the test depends on the interaction of multiple dispatchers in different threads,
   /// it needs to be in a test file by itself.
   #[test]
-  fn event_before_register() -> Result<(), TestFailure> {
+  fn event_before_register() -> Result<(), TestError> {
     let subscriber_1_register_sleep_micros = 100;
     let subscriber_2_register_sleep_micros = 0;
 
@@ -85,10 +109,12 @@ mod tests {
     thread::sleep(Duration::from_micros(50));
     let jh2 = subscriber_thread(2, subscriber_2_register_sleep_micros)?;
 
-    jh1.join().map_err(|_panic| TestFailure::Condition {
+    jh1.join().map_err(|payload| TestError::Thread {
+      payload,
       context: "subscriber 1 thread must not panic",
     })??;
-    jh2.join().map_err(|_panic| TestFailure::Condition {
+    jh2.join().map_err(|payload| TestError::Thread {
+      payload,
       context: "subscriber 2 thread must not panic",
     })?
   }

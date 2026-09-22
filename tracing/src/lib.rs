@@ -1176,7 +1176,34 @@ pub mod __macro_support {
 
   #[cfg(test)]
   mod tests {
-    use strict_test_support::TestFailure;
+    use std::string::String;
+    use std::vec;
+    /// Native failures from these behavioral checks.
+    #[derive(Debug, thiserror::Error)]
+    enum TestError {
+      /// A boolean expectation failed.
+      #[error(transparent)]
+      Condition(#[from] strict_test_support::ConditionFailure),
+      /// Preserves the complete native failure and its inputs.
+      #[error(transparent)]
+      ComparisonU8(#[from] strict_test_support::ComparisonFailure<u8, u8>),
+      /// Preserves the complete native failure and its inputs.
+      #[error(transparent)]
+      ComparisonUsize(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+      /// Preserves the complete native failure and its inputs.
+      #[error(transparent)]
+      ComparisonString(#[from] strict_test_support::ComparisonFailure<String, String>),
+      /// Preserves the complete native failure and its inputs.
+      #[error(transparent)]
+      OptionStaticMetadata(#[from] strict_test_support::OptionFailure<&'static tracing_core::Metadata<'static>>),
+      /// Preserves the complete native failure and its inputs.
+      #[error(transparent)]
+      OptionU8Vec(#[from] strict_test_support::OptionFailure<(u8, vec::Vec<u8>)>),
+      /// Preserves the complete native failure and its inputs.
+      #[error(transparent)]
+      OptionVecU8(#[from] strict_test_support::OptionFailure<vec::Vec<u8>>),
+    }
+
     use strict_test_support::ensure;
     use strict_test_support::ensure_eq;
     use strict_test_support::ensure_some;
@@ -1189,42 +1216,58 @@ pub mod __macro_support {
     use super::write_byte;
 
     #[test]
-    fn disabled_macro_span_retains_metadata_and_is_not_null() -> Result<(), TestFailure> {
+    fn disabled_macro_span_retains_metadata_and_is_not_null() -> Result<(), TestError> {
       let span = __disabled_span(&META);
       let second_span = __disabled_span(&META);
       let metadata = ensure_some(span.metadata(), "disabled macro span keeps metadata")?;
 
-      ensure_eq(&metadata.name(), &META.name(), "disabled span metadata name is preserved")?;
-      ensure(span == second_span, "disabled macro spans from the same callsite compare equal")?;
-      ensure(span != crate::Span::none(), "disabled macro span is distinct from the null span")?;
+      ensure_eq(
+        String::from(metadata.name()),
+        String::from(META.name()),
+        "disabled span metadata name is preserved",
+      )
+      .map(drop)?;
+      ensure(span == second_span, "disabled macro spans from the same callsite compare equal").map(drop)?;
+      ensure(span != crate::Span::none(), "disabled macro span is distinct from the null span").map(drop)?;
       ensure(!span.is_none(), "disabled macro span does not report as the null span")
+        .map(drop)
+        .map_err(TestError::from)
     }
 
     #[test]
-    fn field_name_len_and_new_strip_raw_identifier_markers() -> Result<(), TestFailure> {
+    fn field_name_len_and_new_strip_raw_identifier_markers() -> Result<(), TestError> {
       ensure_eq(
-        &FieldName::<0>::len("span.r#type.r#async"),
-        &15_usize,
+        FieldName::<0>::len("span.r#type.r#async"),
+        15_usize,
         "raw identifier markers do not contribute to field name length",
-      )?;
-      ensure_eq(&FieldName::<0>::len("plain"), &5_usize, "plain field name length is unchanged")?;
+      )
+      .map(drop)?;
+      ensure_eq(FieldName::<0>::len("plain"), 5_usize, "plain field name length is unchanged").map(drop)?;
 
       let field_name = FieldName::<15>::new("span.r#type.r#async");
       ensure_eq(
-        &field_name.as_str(),
-        &"span.type.async",
+        String::from(field_name.as_str()),
+        String::from("span.type.async"),
         "raw identifier markers are stripped from field names",
-      )?;
+      )
+      .map(drop)?;
       ensure(
         std::format!("{field_name:?}") == "FieldName(\"span.type.async\")",
         "field name debug output renders the normalized name",
       )
+      .map(drop)
+      .map_err(TestError::from)
     }
 
     #[test]
-    fn field_name_new_truncates_full_buffers_and_zeroes_oversized_buffers() -> Result<(), TestFailure> {
+    fn field_name_new_truncates_full_buffers_and_zeroes_oversized_buffers() -> Result<(), TestError> {
       let truncated = FieldName::<4>::new("abcdef");
-      ensure_eq(&truncated.as_str(), &"abcd", "short buffers keep the leading normalized bytes")?;
+      ensure_eq(
+        String::from(truncated.as_str()),
+        String::from("abcd"),
+        "short buffers keep the leading normalized bytes",
+      )
+      .map(drop)?;
 
       let zeroed = FieldName::<6>::new("abc");
       let expected_bytes = [0_u8; 6];
@@ -1232,44 +1275,68 @@ pub mod __macro_support {
         zeroed.as_str().as_bytes() == expected_bytes.as_slice(),
         "oversized field-name buffers are zero-filled rather than partially initialized",
       )
+      .map(drop)
+      .map_err(TestError::from)
     }
 
     #[test]
-    fn field_name_as_str_returns_empty_for_invalid_utf8() -> Result<(), TestFailure> {
+    fn field_name_as_str_returns_empty_for_invalid_utf8() -> Result<(), TestError> {
       let invalid = FieldName::<3>([b'a', 0xff, b'c']);
-      ensure_eq(&invalid.as_str(), &"", "invalid utf8 field name buffers render as empty strings")
+      ensure_eq(
+        String::from(invalid.as_str()),
+        String::new(),
+        "invalid utf8 field name buffers render as empty strings",
+      )
+      .map(drop)
+      .map_err(TestError::from)
     }
 
     #[test]
-    fn identifier_byte_helpers_skip_raw_markers_and_report_full_buffers() -> Result<(), TestFailure> {
-      let (first, identifier_rest) = ensure_some(next_ident_byte(b"r#r#type"), "identifier byte helper skips repeated raw markers")?;
-      ensure_eq(&first, &b't', "first normalized identifier byte is returned")?;
-      ensure(identifier_rest == b"ype", "remaining input follows the normalized byte")?;
+    fn identifier_byte_helpers_skip_raw_markers_and_report_full_buffers() -> Result<(), TestError> {
+      let (first, identifier_rest) = ensure_some(next_ident_byte(b"r#r#type"), "identifier byte helper skips repeated raw markers")
+        .map_err(|failure| strict_test_support::OptionFailure {
+          context: failure.context,
+          option:  failure.option.map(|(byte, remaining)| (byte, remaining.to_vec())),
+        })?;
+      ensure_eq(first, b't', "first normalized identifier byte is returned").map(drop)?;
+      ensure(identifier_rest == b"ype", "remaining input follows the normalized byte").map(drop)?;
       ensure(
         next_ident_byte(b"r#r#").is_none(),
         "identifier byte helper returns none for marker-only input",
-      )?;
+      )
+      .map(drop)?;
 
       let mut output = [0_u8; 2];
-      let full_buffer_rejected = {
-        let output_rest = ensure_some(write_byte(&mut output, b'a'), "first byte writes into buffer")?;
-        let empty = ensure_some(write_byte(output_rest, b'b'), "second byte fills the buffer")?;
-        ensure(empty.is_empty(), "second write leaves no remaining output slots")?;
-        write_byte(empty, b'c').is_none()
-      };
-
-      ensure(full_buffer_rejected, "full buffers reject additional bytes")?;
+      let output_rest = ensure_some(write_byte(&mut output, b'a'), "first byte writes into buffer").map_err(|failure| {
+        strict_test_support::OptionFailure {
+          context: failure.context,
+          option:  failure.option.map(|value| value.to_vec()),
+        }
+      })?;
+      let empty = ensure_some(write_byte(output_rest, b'b'), "second byte fills the buffer").map_err(|failure| {
+        strict_test_support::OptionFailure {
+          context: failure.context,
+          option:  failure.option.map(|value| value.to_vec()),
+        }
+      })?;
+      ensure(empty.is_empty(), "second write leaves no remaining output slots").map(drop)?;
+      let full_buffer_rejected = write_byte(empty, b'c').is_none();
+      ensure(full_buffer_rejected, "full buffers reject additional bytes").map(drop)?;
       ensure(output == *b"ab", "write helper stores bytes in order")
+        .map(drop)
+        .map_err(TestError::from)
     }
 
     #[test]
-    fn fake_field_uses_callsite_but_is_not_a_real_field() -> Result<(), TestFailure> {
-      ensure(FAKE_FIELD.callsite() == META.callsite(), "fake field points at the fake callsite")?;
-      ensure_eq(&FAKE_FIELD.index(), &usize::MAX, "fake field uses the sentinel index")?;
+    fn fake_field_uses_callsite_but_is_not_a_real_field() -> Result<(), TestError> {
+      ensure(FAKE_FIELD.callsite() == META.callsite(), "fake field points at the fake callsite").map(drop)?;
+      ensure_eq(FAKE_FIELD.index(), usize::MAX, "fake field uses the sentinel index").map(drop)?;
       ensure(
         !META.fields().contains(&FAKE_FIELD),
         "fake field is not contained in the metadata field set",
       )
+      .map(drop)
+      .map_err(TestError::from)
     }
   }
 }
@@ -1351,7 +1418,19 @@ pub mod log {
 
   #[cfg(test)]
   mod tests {
-    use strict_test_support::TestFailure;
+    use std::string::String;
+
+    /// Native failures from these behavioral checks.
+    #[derive(Debug, thiserror::Error)]
+    enum TestError {
+      /// Preserves the complete native failure and its inputs.
+      #[error(transparent)]
+      OptionField(#[from] strict_test_support::OptionFailure<Field>),
+      /// Preserves the complete native failure and its inputs.
+      #[error(transparent)]
+      ComparisonString(#[from] strict_test_support::ComparisonFailure<String, String>),
+    }
+
     use strict_test_support::ensure_eq;
     use strict_test_support::ensure_some;
     use tracing_core::field::Field;
@@ -1372,7 +1451,7 @@ pub mod log {
         kind: Kind::EVENT,
     };
 
-    fn log_fields() -> Result<(Field, Field, Field), TestFailure> {
+    fn log_fields() -> Result<(Field, Field, Field), TestError> {
       let fields = LOG_META.fields();
       let message = ensure_some(fields.field("message"), "message field exists")?;
       let answer = ensure_some(fields.field("answer"), "answer field exists")?;
@@ -1382,7 +1461,7 @@ pub mod log {
     }
 
     #[test]
-    fn log_value_set_formats_initial_message_without_field_name() -> Result<(), TestFailure> {
+    fn log_value_set_formats_initial_message_without_field_name() -> Result<(), TestError> {
       let fields = LOG_META.fields();
       let (message, answer, label) = log_fields()?;
       let message_value = "ready";
@@ -1403,14 +1482,16 @@ pub mod log {
       });
 
       ensure_eq(
-        &rendered.as_str(),
-        &"ready answer=7 label=\"tag\"",
+        String::from(rendered.as_str()),
+        String::from("ready answer=7 label=\"tag\""),
         "initial message field renders as log text followed by key-values",
       )
+      .map(drop)
+      .map_err(TestError::from)
     }
 
     #[test]
-    fn log_value_set_formats_initial_non_message_with_field_name() -> Result<(), TestFailure> {
+    fn log_value_set_formats_initial_non_message_with_field_name() -> Result<(), TestError> {
       let fields = LOG_META.fields();
       let (_message, answer, label) = log_fields()?;
       let answer_value = 7_i64;
@@ -1425,14 +1506,16 @@ pub mod log {
       });
 
       ensure_eq(
-        &rendered.as_str(),
-        &"label=\"tag\" answer=7",
+        String::from(rendered.as_str()),
+        String::from("label=\"tag\" answer=7"),
         "initial non-message field renders with its field name",
       )
+      .map(drop)
+      .map_err(TestError::from)
     }
 
     #[test]
-    fn log_value_set_formats_non_initial_message_as_key_value() -> Result<(), TestFailure> {
+    fn log_value_set_formats_non_initial_message_as_key_value() -> Result<(), TestError> {
       let fields = LOG_META.fields();
       let (message, answer, _label) = log_fields()?;
       let message_value = "ready";
@@ -1447,10 +1530,12 @@ pub mod log {
       });
 
       ensure_eq(
-        &rendered.as_str(),
-        &" message=ready answer=7",
+        String::from(rendered.as_str()),
+        String::from(" message=ready answer=7"),
         "non-initial message field renders as a key-value continuation",
       )
+      .map(drop)
+      .map_err(TestError::from)
     }
   }
 }

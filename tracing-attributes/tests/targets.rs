@@ -19,10 +19,12 @@ fn default_target() {}
 fn custom_target() {}
 
 mod nested_target_tests {
-  use strict_test_support::TestFailure;
+
+  use strict_test_support::ResultFailure;
   use strict_test_support::ensure_ok;
   use tracing::subscriber::with_default;
   use tracing_attributes::instrument;
+  use tracing_core::subscriber::SubscriberError;
   use tracing_mock::*;
 
   use super::ROOT_MODULE_PATH;
@@ -46,7 +48,7 @@ mod nested_target_tests {
   fn nested_custom_target() {}
 
   #[test]
-  fn default_targets() -> Result<(), TestFailure> {
+  fn default_targets() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .new_span(expect::span().named("default_target").with_target(ROOT_MODULE_PATH))
       .enter(expect::span().named("default_target").with_target(ROOT_MODULE_PATH))
@@ -67,7 +69,7 @@ mod nested_target_tests {
   }
 
   #[test]
-  fn custom_targets() -> Result<(), TestFailure> {
+  fn custom_targets() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .new_span(expect::span().named("custom_target").with_target("my_target"))
       .enter(expect::span().named("custom_target").with_target("my_target"))

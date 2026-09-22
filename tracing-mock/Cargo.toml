@@ -21,8 +21,8 @@ keywords = [
     "mock",
     "testing"
 ]
-edition.workspace = true
-rust-version.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
 
 [dependencies]
 parking_lot = { workspace = true }
@@ -34,6 +34,7 @@ tracing-subscriber = { workspace = true, features = ["registry"], optional = tru
 tokio-stream = { workspace = true, optional = true }
 
 [dev-dependencies]
+thiserror = { workspace = true }
 strict-test-support = { workspace = true }
 trybuild = { workspace = true }
 

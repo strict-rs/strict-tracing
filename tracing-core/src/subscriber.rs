@@ -887,7 +887,23 @@ mod tests {
   use core::sync::atomic::AtomicUsize;
   use core::sync::atomic::Ordering;
 
-  use strict_test_support::TestFailure;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Retains the native subscriber failure.
+    #[error(transparent)]
+    Subscriber(#[from] strict_test_support::ResultFailure<SubscriberError>),
+    /// Retains the native idcomparison failure.
+    #[error(transparent)]
+    IdComparison(#[from] strict_test_support::ComparisonFailure<u64, u64>),
+    /// Retains the native countcomparison failure.
+    #[error(transparent)]
+    CountComparison(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
@@ -979,7 +995,7 @@ mod tests {
     }
   }
 
-  fn exercise_forwarded_hooks(subscriber: &impl Subscriber) -> Result<(), TestFailure> {
+  fn exercise_forwarded_hooks(subscriber: &impl Subscriber) -> Result<(), TestError> {
     let valueset = TEST_META.fields().value_set(&[]);
     let attrs = span::Attributes::new(&TEST_META, &valueset);
     let event = Event::new(&TEST_META, &valueset);
@@ -989,35 +1005,39 @@ mod tests {
     ensure(
       ensure_ok(subscriber.register_callsite(&TEST_META), "register_callsite should succeed")?.is_always(),
       "register_callsite forwards returned interest",
-    )?;
+    )
+    .map(drop)?;
     let enabled = ensure_ok(subscriber.enabled(&TEST_META), "enabled should succeed")?;
-    ensure(enabled, "enabled forwards the subscriber's result")?;
+    ensure(enabled, "enabled forwards the subscriber's result").map(drop)?;
     let new_span = ensure_ok(subscriber.new_span(&attrs), "new_span should succeed")?;
-    ensure_eq(&new_span.into_u64(), &1_u64, "new_span forwards the subscriber's span id")?;
+    ensure_eq(new_span.into_u64(), 1_u64, "new_span forwards the subscriber's span id").map(drop)?;
     ensure_ok(subscriber.record(id, &record), "record should succeed")?;
     ensure_ok(subscriber.record_follows_from(id, id), "record_follows_from should succeed")?;
     ensure_ok(subscriber.event(&event), "event should succeed")?;
     ensure_ok(subscriber.enter(id), "enter should succeed")?;
-    ensure_ok(subscriber.exit(id), "exit should succeed")
+    ensure_ok(subscriber.exit(id), "exit should succeed").map_err(TestError::from)
   }
 
-  fn ensure_forwarded_once(subscriber: &CountingSubscriber) -> Result<(), TestFailure> {
+  fn ensure_forwarded_once(subscriber: &CountingSubscriber) -> Result<(), TestError> {
     ensure_eq(
-      &subscriber.register_callsite.load(Ordering::Relaxed),
-      &1_usize,
+      subscriber.register_callsite.load(Ordering::Relaxed),
+      1_usize,
       "register_callsite count",
-    )?;
-    ensure_eq(&subscriber.enabled.load(Ordering::Relaxed), &1_usize, "enabled count")?;
-    ensure_eq(&subscriber.new_span.load(Ordering::Relaxed), &1_usize, "new_span count")?;
-    ensure_eq(&subscriber.record.load(Ordering::Relaxed), &1_usize, "record count")?;
-    ensure_eq(&subscriber.follows.load(Ordering::Relaxed), &1_usize, "record_follows_from count")?;
-    ensure_eq(&subscriber.event.load(Ordering::Relaxed), &1_usize, "event count")?;
-    ensure_eq(&subscriber.enter.load(Ordering::Relaxed), &1_usize, "enter count")?;
-    ensure_eq(&subscriber.exit.load(Ordering::Relaxed), &1_usize, "exit count")
+    )
+    .map(drop)?;
+    ensure_eq(subscriber.enabled.load(Ordering::Relaxed), 1_usize, "enabled count").map(drop)?;
+    ensure_eq(subscriber.new_span.load(Ordering::Relaxed), 1_usize, "new_span count").map(drop)?;
+    ensure_eq(subscriber.record.load(Ordering::Relaxed), 1_usize, "record count").map(drop)?;
+    ensure_eq(subscriber.follows.load(Ordering::Relaxed), 1_usize, "record_follows_from count").map(drop)?;
+    ensure_eq(subscriber.event.load(Ordering::Relaxed), 1_usize, "event count").map(drop)?;
+    ensure_eq(subscriber.enter.load(Ordering::Relaxed), 1_usize, "enter count").map(drop)?;
+    ensure_eq(subscriber.exit.load(Ordering::Relaxed), 1_usize, "exit count")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn boxed_subscriber_forwarding_calls_each_hook() -> Result<(), TestFailure> {
+  fn boxed_subscriber_forwarding_calls_each_hook() -> Result<(), TestError> {
     let subscriber = Box::new(CountingSubscriber::default());
 
     exercise_forwarded_hooks(&subscriber)?;
@@ -1026,7 +1046,7 @@ mod tests {
   }
 
   #[test]
-  fn arc_subscriber_forwarding_calls_each_hook() -> Result<(), TestFailure> {
+  fn arc_subscriber_forwarding_calls_each_hook() -> Result<(), TestError> {
     let subscriber = Arc::new(CountingSubscriber::default());
 
     exercise_forwarded_hooks(&subscriber)?;
@@ -1035,7 +1055,7 @@ mod tests {
   }
 
   #[test]
-  fn dyn_subscriber_downcast_ref_matches_registered_type() -> Result<(), TestFailure> {
+  fn dyn_subscriber_downcast_ref_matches_registered_type() -> Result<(), TestError> {
     let subscriber = CountingSubscriber::default();
     let erased: &dyn Subscriber = &subscriber;
 
@@ -1043,10 +1063,12 @@ mod tests {
       erased.downcast_ref::<CountingSubscriber>().is_some(),
       "trait object downcasts to its concrete subscriber type",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn dyn_subscriber_downcast_ref_rejects_unrelated_type() -> Result<(), TestFailure> {
+  fn dyn_subscriber_downcast_ref_rejects_unrelated_type() -> Result<(), TestError> {
     let subscriber = CountingSubscriber::default();
     let erased: &dyn Subscriber = &subscriber;
 
@@ -1054,5 +1076,7 @@ mod tests {
       erased.downcast_ref::<NoSubscriber>().is_none(),
       "trait object rejects unrelated subscriber type",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

@@ -1,11 +1,12 @@
 //! Example binary for tracing workspace checks.
 #![cfg(test)]
 
-use strict_test_support::TestFailure;
+use strict_test_support::ResultFailure;
 use strict_test_support::ensure_ok;
 use tracing::field::display;
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
+use tracing_core::subscriber::SubscriberError;
 use tracing_mock::expect;
 use tracing_mock::span::NewSpan;
 use tracing_mock::subscriber;
@@ -144,7 +145,7 @@ impl HasField {
 }
 
 #[test]
-fn fields() -> Result<(), TestFailure> {
+fn fields() -> Result<(), ResultFailure<SubscriberError>> {
   let span = expect::span().with_fields(
     expect::field("foo")
       .with_value(&"bar")
@@ -159,7 +160,7 @@ fn fields() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn expr_field() -> Result<(), TestFailure> {
+fn expr_field() -> Result<(), ResultFailure<SubscriberError>> {
   let span = expect::span().with_fields(
     expect::field("s")
       .with_value(&"hello world")
@@ -173,7 +174,7 @@ fn expr_field() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn two_expr_fields() -> Result<(), TestFailure> {
+fn two_expr_fields() -> Result<(), ResultFailure<SubscriberError>> {
   let span = expect::span().with_fields(
     expect::field("s")
       .with_value(&"hello world")
@@ -188,7 +189,7 @@ fn two_expr_fields() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn clashy_expr_field() -> Result<(), TestFailure> {
+fn clashy_expr_field() -> Result<(), ResultFailure<SubscriberError>> {
   let span = expect::span().with_fields(
     // Overriding the `s` field should record `s` as a `Display` value,
     // rather than as a `Debug` value.
@@ -209,7 +210,7 @@ fn clashy_expr_field() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn self_expr_field() -> Result<(), TestFailure> {
+fn self_expr_field() -> Result<(), ResultFailure<SubscriberError>> {
   let span = expect::span().with_fields(expect::field("my_field").with_value(&"hello world").only());
   run_test(span, || {
     let has_field = HasField {
@@ -221,7 +222,7 @@ fn self_expr_field() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn parameters_with_fields() -> Result<(), TestFailure> {
+fn parameters_with_fields() -> Result<(), ResultFailure<SubscriberError>> {
   let span = expect::span().with_fields(
     expect::field("foo")
       .with_value(&"bar")
@@ -235,7 +236,7 @@ fn parameters_with_fields() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn empty_field() -> Result<(), TestFailure> {
+fn empty_field() -> Result<(), ResultFailure<SubscriberError>> {
   let span = expect::span().with_fields(expect::field("foo").with_value(&"bar").only());
   run_test(span, || {
     fn_empty_field();
@@ -244,7 +245,7 @@ fn empty_field() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn string_field() -> Result<(), TestFailure> {
+fn string_field() -> Result<(), ResultFailure<SubscriberError>> {
   let span = expect::span().with_fields(expect::field("s").with_value(&"hello world").only());
   run_test(span, || {
     fn_string(String::from("hello world"));
@@ -253,14 +254,14 @@ fn string_field() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn keyword_ident_in_field_name() -> Result<(), TestFailure> {
+fn keyword_ident_in_field_name() -> Result<(), ResultFailure<SubscriberError>> {
   let span = expect::span().with_fields(expect::field("keywords.impl.type.fn").with_value(&"test").only());
   run_test(span, || fn_keyword_ident_in_field("test"))?;
   Ok(())
 }
 
 #[test]
-fn expr_const_field_name() -> Result<(), TestFailure> {
+fn expr_const_field_name() -> Result<(), ResultFailure<SubscriberError>> {
   let span = expect::span().with_fields(expect::field("foo.bar").with_value(&"baz").only());
   run_test(span, || {
     fn_const_field_name();
@@ -269,7 +270,7 @@ fn expr_const_field_name() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn expr_const_fn_field_name() -> Result<(), TestFailure> {
+fn expr_const_fn_field_name() -> Result<(), ResultFailure<SubscriberError>> {
   let span = expect::span().with_fields(expect::field("foo.bar").with_value(&"baz").only());
   run_test(span, || {
     fn_const_fn_field_name();
@@ -278,7 +279,7 @@ fn expr_const_fn_field_name() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn struct_const_field_name() -> Result<(), TestFailure> {
+fn struct_const_field_name() -> Result<(), ResultFailure<SubscriberError>> {
   let span = expect::span().with_fields(expect::field("foo.bar").with_value(&"baz").only());
   run_test(span, || {
     fn_struct_const_field_name();
@@ -287,7 +288,7 @@ fn struct_const_field_name() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn string_field_name() -> Result<(), TestFailure> {
+fn string_field_name() -> Result<(), ResultFailure<SubscriberError>> {
   let span = expect::span().with_fields(expect::field("foo").with_value(&"bar").only());
   run_test(span, || {
     fn_string_field_name();
@@ -296,7 +297,7 @@ fn string_field_name() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn clashy_const_field_name() -> Result<(), TestFailure> {
+fn clashy_const_field_name() -> Result<(), ResultFailure<SubscriberError>> {
   let span = expect::span().with_fields(
     // #3158: To be consistent with event! and span! macros, the duplicated value should be
     // dropped, but checking for duplicated fields would incur a significant runtime cost, as
@@ -311,7 +312,7 @@ fn clashy_const_field_name() -> Result<(), TestFailure> {
   Ok(())
 }
 
-fn run_test<F: FnOnce() -> T, T>(span: NewSpan, fun: F) -> Result<(), TestFailure> {
+fn run_test<F: FnOnce() -> T, T>(span: NewSpan, fun: F) -> Result<(), ResultFailure<SubscriberError>> {
   let (subscriber, handle) = subscriber::mock()
     .new_span(span)
     .enter(expect::span())

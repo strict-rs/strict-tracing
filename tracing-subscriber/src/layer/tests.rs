@@ -1,10 +1,40 @@
 use alloc::format;
+use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec;
 use core::num::NonZeroU64;
 
 use parking_lot::Mutex;
-use strict_test_support::TestFailure;
+use tracing_core::subscriber::SubscriberError;
+/// Native failures from these behavioral checks.
+#[derive(Debug, thiserror::Error)]
+enum TestError {
+  /// A boolean expectation failed.
+  #[error(transparent)]
+  Condition(#[from] strict_test_support::ConditionFailure),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  /// Retains the searched text and expected substring.
+  #[error(transparent)]
+  Substring(#[from] strict_test_support::SubstringFailure<String, String>),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  OptionStringLayer2(#[from] strict_test_support::OptionFailure<StringLayer2>),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  OptionStringLayer3(#[from] strict_test_support::OptionFailure<StringLayer3>),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  OptionStringLayer(#[from] strict_test_support::OptionFailure<StringLayer>),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  OptionStringSubscriber(#[from] strict_test_support::OptionFailure<StringSubscriber>),
+  /// Retains the native scope failure.
+  #[error(transparent)]
+  Scope(#[from] strict_test_support::OptionFailure<Vec<span::Id>>),
+}
+
 use strict_test_support::ensure;
 use strict_test_support::ensure_contains;
 use strict_test_support::ensure_ok;
@@ -241,8 +271,8 @@ impl Subscriber for RecordingSubscriber {
 
 /// Runs a callback with event/span fixtures for layer wrapper tests.
 fn with_layer_fixtures<R>(
-  f: impl FnOnce(&Event<'_>, &span::Attributes<'_>, &span::Record<'_>, span::Id, span::Id) -> Result<R, TestFailure>,
-) -> Result<R, TestFailure> {
+  f: impl FnOnce(&Event<'_>, &span::Attributes<'_>, &span::Record<'_>, span::Id, span::Id) -> Result<R, TestError>,
+) -> Result<R, TestError> {
   let values = LAYER_TEST_META.fields().value_set_all(&[]);
   let event = Event::new(&LAYER_TEST_META, &values);
   let attrs = span::Attributes::new(&LAYER_TEST_META, &values);
@@ -288,14 +318,18 @@ impl<S: Subscriber> Layer<S> for NopLayer2 {}
 /// A layer that holds a string.
 ///
 /// Used to test that pointers returned by downcasting are actually valid.
+#[derive(Clone, Debug)]
 struct StringLayer(&'static str);
 impl<S: Subscriber> Layer<S> for StringLayer {}
+#[derive(Clone, Debug)]
 struct StringLayer2(&'static str);
 impl<S: Subscriber> Layer<S> for StringLayer2 {}
 
+#[derive(Clone, Debug)]
 struct StringLayer3(&'static str);
 impl<S: Subscriber> Layer<S> for StringLayer3 {}
 
+#[derive(Clone, Debug)]
 struct StringSubscriber(&'static str);
 
 impl Subscriber for StringSubscriber {
@@ -373,7 +407,7 @@ fn box_layer_is_layer() {
 }
 
 #[test]
-fn downcasts_to_subscriber() -> Result<(), TestFailure> {
+fn downcasts_to_subscriber() -> Result<(), TestError> {
   let subscriber = NopLayer
     .and_then(NopLayer)
     .and_then(NopLayer)
@@ -381,12 +415,18 @@ fn downcasts_to_subscriber() -> Result<(), TestFailure> {
   let downcast_subscriber = ensure_some(
     <dyn Subscriber>::downcast_ref::<StringSubscriber>(&subscriber),
     "subscriber should downcast",
-  )?;
+  )
+  .map_err(|failure| strict_test_support::OptionFailure {
+    context: failure.context,
+    option:  failure.option.cloned(),
+  })?;
   ensure(downcast_subscriber.0 == "subscriber", "downcast subscriber preserves inner value")
+    .map(drop)
+    .map_err(TestError::from)
 }
 
 #[test]
-fn downcasts_to_layer() -> Result<(), TestFailure> {
+fn downcasts_to_layer() -> Result<(), TestError> {
   let subscriber = StringLayer("layer_1")
     .and_then(StringLayer2("layer_2"))
     .and_then(StringLayer3("layer_3"))
@@ -394,35 +434,51 @@ fn downcasts_to_layer() -> Result<(), TestFailure> {
   let first_layer = ensure_some(
     <dyn Subscriber>::downcast_ref::<StringLayer>(&subscriber),
     "layer 1 should downcast",
-  )?;
-  ensure(first_layer.0 == "layer_1", "first layer downcasts")?;
+  )
+  .map_err(|failure| strict_test_support::OptionFailure {
+    context: failure.context,
+    option:  failure.option.cloned(),
+  })?;
+  ensure(first_layer.0 == "layer_1", "first layer downcasts").map(drop)?;
   let second_layer = ensure_some(
     <dyn Subscriber>::downcast_ref::<StringLayer2>(&subscriber),
     "layer 2 should downcast",
-  )?;
-  ensure(second_layer.0 == "layer_2", "second layer downcasts")?;
+  )
+  .map_err(|failure| strict_test_support::OptionFailure {
+    context: failure.context,
+    option:  failure.option.cloned(),
+  })?;
+  ensure(second_layer.0 == "layer_2", "second layer downcasts").map(drop)?;
   let third_layer = ensure_some(
     <dyn Subscriber>::downcast_ref::<StringLayer3>(&subscriber),
     "layer 3 should downcast",
-  )?;
+  )
+  .map_err(|failure| strict_test_support::OptionFailure {
+    context: failure.context,
+    option:  failure.option.cloned(),
+  })?;
   ensure(third_layer.0 == "layer_3", "third layer downcasts")
+    .map(drop)
+    .map_err(TestError::from)
 }
 
 #[test]
-fn identity_and_optional_layers_expose_absence_contracts() -> Result<(), TestFailure> {
+fn identity_and_optional_layers_expose_absence_contracts() -> Result<(), TestError> {
   with_layer_fixtures(|event, attrs, record, first_id, second_id| {
     let identity = Identity::new();
     ensure(
       !layer_is_none::<_, NoSubscriber>(&identity),
       "identity is not an absent optional layer",
-    )?;
+    )
+    .map(drop)?;
 
     let none_layer: Option<RecordingLayer> = None;
     let context = Context::<NoSubscriber>::none();
     ensure(
       layer_is_none::<_, NoSubscriber>(&none_layer),
       "none optional layer exposes the absence marker",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       ensure_ok(
         Layer::<NoSubscriber>::register_callsite(&none_layer, &LAYER_TEST_META),
@@ -430,19 +486,23 @@ fn identity_and_optional_layers_expose_absence_contracts() -> Result<(), TestFai
       )?
       .is_always(),
       "none optional layer keeps callsites globally enabled",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       ensure_ok(none_layer.enabled(&LAYER_TEST_META, context.clone()), "none layer enabled")?,
       "none optional layer keeps metadata globally enabled",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       ensure_ok(none_layer.event_enabled(event, context.clone()), "none layer event enabled")?,
       "none optional layer keeps events globally enabled",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       ensure_ok(Layer::<NoSubscriber>::max_level_hint(&none_layer), "none layer max level")? == Some(LevelFilter::OFF),
       "none optional layer reports an OFF max-level hint",
-    )?;
+    )
+    .map(drop)?;
     ensure_ok(none_layer.on_new_span(attrs, first_id, context.clone()), "none layer new span")?;
     ensure_ok(none_layer.on_record(first_id, record, context.clone()), "none layer record")?;
     ensure_ok(
@@ -460,20 +520,24 @@ fn identity_and_optional_layers_expose_absence_contracts() -> Result<(), TestFai
     ensure(
       !layer_is_none::<_, NoSubscriber>(&some_layer),
       "present optional layer is not absent",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       Layer::<NoSubscriber>::downcast_ref_by_id(&some_layer, TypeId::of::<RecordingLayer>()).is_some(),
       "present optional layer forwards downcasts",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       Layer::<NoSubscriber>::downcast_ref_by_id(&some_layer, TypeId::of::<NoneLayerMarker>()).is_none(),
       "present optional layer does not expose the absence marker",
     )
+    .map(drop)
+    .map_err(TestError::from)
   })
 }
 
 #[test]
-fn present_optional_layers_forward_hooks_to_inner_layer() -> Result<(), TestFailure> {
+fn present_optional_layers_forward_hooks_to_inner_layer() -> Result<(), TestError> {
   with_layer_fixtures(|event, attrs, record, first_id, second_id| {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let mut layer = Some(recording_layer("some", &calls));
@@ -491,19 +555,23 @@ fn present_optional_layers_forward_hooks_to_inner_layer() -> Result<(), TestFail
       )?
       .is_always(),
       "some option layer forwards callsite interest",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       ensure_ok(layer.enabled(&LAYER_TEST_META, context.clone()), "some option layer enabled")?,
       "some option layer forwards enabled",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       ensure_ok(layer.event_enabled(event, context.clone()), "some option layer event enabled")?,
       "some option layer forwards event_enabled",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       ensure_ok(Layer::<NoSubscriber>::max_level_hint(&layer), "some option layer max level")? == Some(LevelFilter::INFO),
       "some option layer forwards max-level hint",
-    )?;
+    )
+    .map(drop)?;
     ensure_ok(layer.on_new_span(attrs, first_id, context.clone()), "some option layer new span")?;
     ensure_ok(layer.on_record(first_id, record, context.clone()), "some option layer record")?;
     ensure_ok(
@@ -533,11 +601,13 @@ fn present_optional_layers_forward_hooks_to_inner_layer() -> Result<(), TestFail
       ("some", "on_id_change"),
     ];
     ensure(*calls.lock() == expected, "present optional layers forward every hook")
+      .map(drop)
+      .map_err(TestError::from)
   })
 }
 
 #[test]
-fn vec_layers_combine_filtering_and_fan_out_lifecycle_hooks() -> Result<(), TestFailure> {
+fn vec_layers_combine_filtering_and_fan_out_lifecycle_hooks() -> Result<(), TestError> {
   with_layer_fixtures(|event, attrs, record, first_id, second_id| {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let first = recording_layer("first", &calls);
@@ -557,19 +627,23 @@ fn vec_layers_combine_filtering_and_fan_out_lifecycle_hooks() -> Result<(), Test
       )?
       .is_always(),
       "vec layers promote callsite interest to the highest interest",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       !ensure_ok(layers.enabled(&LAYER_TEST_META, context.clone()), "vec layer enabled")?,
       "vec layers short-circuit metadata filtering on the first false layer",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       !ensure_ok(layers.event_enabled(event, context.clone()), "vec layer event enabled")?,
       "vec layers short-circuit event filtering on the first false layer",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       ensure_ok(Layer::<NoSubscriber>::max_level_hint(&layers), "vec layer max level")? == Some(LevelFilter::DEBUG),
       "vec layers report the most verbose concrete max-level hint",
-    )?;
+    )
+    .map(drop)?;
     ensure_ok(layers.on_new_span(attrs, first_id, context.clone()), "vec layer new span")?;
     ensure_ok(layers.on_record(first_id, record, context.clone()), "vec layer record")?;
     ensure_ok(
@@ -615,16 +689,19 @@ fn vec_layers_combine_filtering_and_fan_out_lifecycle_hooks() -> Result<(), Test
       ("third", "on_close"),
     ];
     ensure(*calls.lock() == expected, "vec layers preserve short-circuit and fan-out order")
+      .map(drop)
+      .map_err(TestError::from)
   })
 }
 
 #[test]
-fn vec_layers_report_off_for_empty_and_none_for_unhinted_max_levels() -> Result<(), TestFailure> {
+fn vec_layers_report_off_for_empty_and_none_for_unhinted_max_levels() -> Result<(), TestError> {
   let empty: Vec<RecordingLayer> = Vec::new();
   ensure(
     ensure_ok(Layer::<NoSubscriber>::max_level_hint(&empty), "empty vec layer max level")? == Some(LevelFilter::OFF),
     "empty vec layers report OFF as their max-level hint",
-  )?;
+  )
+  .map(drop)?;
   let unhinted_calls = Arc::new(Mutex::new(Vec::new()));
   let mut unhinted = recording_layer("unhinted", &unhinted_calls);
   unhinted.max_level = None;
@@ -637,22 +714,28 @@ fn vec_layers_report_off_for_empty_and_none_for_unhinted_max_levels() -> Result<
     .is_none(),
     "vec layers return no hint when any inner layer cannot provide one",
   )
+  .map(drop)
+  .map_err(TestError::from)
 }
 
 #[test]
 #[cfg(any(feature = "alloc", feature = "std"))]
-fn boxed_layers_forward_downcasts_and_debug_contracts() -> Result<(), TestFailure> {
+fn boxed_layers_forward_downcasts_and_debug_contracts() -> Result<(), TestError> {
   let boxed: Box<dyn Layer<NoSubscriber> + Send + Sync> = Box::new(StringLayer("boxed"));
   let downcast = ensure_some(
     boxed
       .downcast_ref_by_id(TypeId::of::<StringLayer>())
       .and_then(<dyn Any>::downcast_ref::<StringLayer>),
     "boxed layer forwards downcasts to the inner layer",
-  )?;
-  ensure(downcast.0 == "boxed", "boxed layer downcast preserves the inner value")?;
+  )
+  .map_err(|failure| strict_test_support::OptionFailure {
+    context: failure.context,
+    option:  failure.option.cloned(),
+  })?;
+  ensure(downcast.0 == "boxed", "boxed layer downcast preserves the inner value").map(drop)?;
 
   let boxed_debug = format!("{:?}", Identity::new());
-  ensure_contains(&boxed_debug, "Identity", "identity debug names the layer")?;
+  ensure_contains(boxed_debug, String::from("Identity"), "identity debug names the layer").map(drop)?;
 
   let calls = Arc::new(Mutex::new(Vec::new()));
   let boxed_recording: Box<dyn Layer<NoSubscriber> + Send + Sync> = recording_layer("boxed", &calls).boxed();
@@ -660,10 +743,12 @@ fn boxed_layers_forward_downcasts_and_debug_contracts() -> Result<(), TestFailur
     boxed_recording.downcast_ref_by_id(TypeId::of::<RecordingLayer>()).is_some(),
     "boxed method erases type while preserving downcast access",
   )
+  .map(drop)
+  .map_err(TestError::from)
 }
 
 #[test]
-fn default_layer_hooks_are_noops_and_leave_filtering_enabled() -> Result<(), TestFailure> {
+fn default_layer_hooks_are_noops_and_leave_filtering_enabled() -> Result<(), TestError> {
   with_layer_fixtures(|event, attrs, record, first_id, second_id| {
     let layer = NopLayer;
     let dispatch = Dispatch::none();
@@ -680,21 +765,24 @@ fn default_layer_hooks_are_noops_and_leave_filtering_enabled() -> Result<(), Tes
       )?
       .is_always(),
       "default layer callsite registration enables metadata",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       ensure_ok(
         Layer::<NoSubscriber>::enabled(&layer, &LAYER_TEST_META, context.clone()),
         "default layer metadata enabled",
       )?,
       "default layer enables metadata",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       ensure_ok(
         Layer::<NoSubscriber>::event_enabled(&layer, event, context.clone()),
         "default layer event enabled",
       )?,
       "default layer enables events",
-    )?;
+    )
+    .map(drop)?;
     ensure_ok(
       Layer::<NoSubscriber>::on_new_span(&layer, attrs, first_id, context.clone()),
       "default layer new-span notification is a no-op",
@@ -731,11 +819,13 @@ fn default_layer_hooks_are_noops_and_leave_filtering_enabled() -> Result<(), Tes
       ensure_ok(Layer::<NoSubscriber>::max_level_hint(&layer), "default layer max-level hint")?.is_none(),
       "default layer reports no max-level hint",
     )
+    .map(drop)
+    .map_err(TestError::from)
   })
 }
 
 #[test]
-fn layered_subscriber_exposes_downcasts_and_query_hooks() -> Result<(), TestFailure> {
+fn layered_subscriber_exposes_downcasts_and_query_hooks() -> Result<(), TestError> {
   with_layer_fixtures(|event, attrs, _record, first_id, second_id| {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let layer = recording_layer("outer", &calls);
@@ -743,11 +833,12 @@ fn layered_subscriber_exposes_downcasts_and_query_hooks() -> Result<(), TestFail
     let layered = layer.with_subscriber(inner);
     let dispatch = Dispatch::none();
 
-    ensure(layered.is::<RecordingLayer>(), "layered subscriber exposes layer downcasts")?;
+    ensure(layered.is::<RecordingLayer>(), "layered subscriber exposes layer downcasts").map(drop)?;
     ensure(
       layered.downcast_ref::<RecordingSubscriber>().is_some(),
       "layered subscriber exposes inner subscriber downcasts",
-    )?;
+    )
+    .map(drop)?;
     ensure_ok(
       Subscriber::on_register_dispatch(&layered, &dispatch),
       "layered subscriber forwards dispatch registration",
@@ -759,23 +850,27 @@ fn layered_subscriber_exposes_downcasts_and_query_hooks() -> Result<(), TestFail
       )?
       .is_always(),
       "layered subscriber combines callsite interest",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       ensure_ok(Subscriber::enabled(&layered, &LAYER_TEST_META), "layered subscriber enabled")?,
       "layered subscriber combines enabled checks",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       Subscriber::max_level_hint(&layered) == Some(LevelFilter::DEBUG),
       "layered subscriber combines max-level hints",
-    )?;
+    )
+    .map(drop)?;
     let new_id = ensure_ok(Subscriber::new_span(&layered, attrs), "layered subscriber new span")?;
-    ensure(new_id == first_id, "layered subscriber returns inner span ID")?;
+    ensure(new_id == first_id, "layered subscriber returns inner span ID").map(drop)?;
     ensure(
       ensure_ok(Subscriber::event_enabled(&layered, event), "layered subscriber event enabled")?,
       "layered subscriber combines event-enabled checks",
-    )?;
+    )
+    .map(drop)?;
     let current = ensure_ok(Subscriber::current_span(&layered), "layered subscriber current span")?;
-    ensure(current.id().is_none(), "layered subscriber forwards current span state")?;
+    ensure(current.id().is_none(), "layered subscriber forwards current span state").map(drop)?;
 
     let expected = vec![
       ("outer", "on_layer"),
@@ -794,11 +889,13 @@ fn layered_subscriber_exposes_downcasts_and_query_hooks() -> Result<(), TestFail
       ("inner", "current_span"),
     ];
     ensure(*calls.lock() == expected, "layered subscriber preserves query hook ordering")
+      .map(drop)
+      .map_err(TestError::from)
   })
 }
 
 #[test]
-fn layered_subscriber_forwards_record_event_and_lifecycle_hooks() -> Result<(), TestFailure> {
+fn layered_subscriber_forwards_record_event_and_lifecycle_hooks() -> Result<(), TestError> {
   with_layer_fixtures(|event, _attrs, record, first_id, second_id| {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let layer = recording_layer("outer", &calls);
@@ -814,11 +911,12 @@ fn layered_subscriber_forwards_record_event_and_lifecycle_hooks() -> Result<(), 
     ensure_ok(Subscriber::enter(&layered, first_id), "layered subscriber enter")?;
     ensure_ok(Subscriber::exit(&layered, first_id), "layered subscriber exit")?;
     let cloned = ensure_ok(Subscriber::clone_span(&layered, first_id), "layered subscriber clone")?;
-    ensure(cloned == second_id, "layered subscriber returns cloned span ID")?;
+    ensure(cloned == second_id, "layered subscriber returns cloned span ID").map(drop)?;
     ensure(
       ensure_ok(Subscriber::try_close(&layered, first_id), "layered subscriber close")?,
       "layered subscriber returns inner close result",
-    )?;
+    )
+    .map(drop)?;
 
     let expected = vec![
       ("outer", "on_layer"),
@@ -838,11 +936,13 @@ fn layered_subscriber_forwards_record_event_and_lifecycle_hooks() -> Result<(), 
       ("outer", "on_close"),
     ];
     ensure(*calls.lock() == expected, "layered subscriber preserves lifecycle hook ordering")
+      .map(drop)
+      .map_err(TestError::from)
   })
 }
 
 #[test]
-fn layered_layer_forwards_query_hooks_in_order() -> Result<(), TestFailure> {
+fn layered_layer_forwards_query_hooks_in_order() -> Result<(), TestError> {
   with_layer_fixtures(|event, _attrs, _record, _first_id, _second_id| {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let mut inner = recording_layer("inner", &calls);
@@ -866,29 +966,34 @@ fn layered_layer_forwards_query_hooks_in_order() -> Result<(), TestFailure> {
       )?
       .is_sometimes(),
       "layered layer combines callsite interest from the inner layer",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       ensure_ok(
         Layer::<NoSubscriber>::enabled(&layered, &LAYER_TEST_META, context.clone()),
         "layered layer enabled",
       )?,
       "layered layer asks both layers when the outer layer enables metadata",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       ensure_ok(Layer::<NoSubscriber>::max_level_hint(&layered), "layered layer max level")? == Some(LevelFilter::DEBUG),
       "layered layer chooses the most verbose max-level hint",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       ensure_ok(
         Layer::<NoSubscriber>::event_enabled(&layered, event, context.clone()),
         "layered layer event enabled",
       )?,
       "layered layer asks both layers when the outer layer enables events",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       Layer::<NoSubscriber>::downcast_ref_by_id(&layered, TypeId::of::<RecordingLayer>()).is_some(),
       "layered layer exposes child layer downcasts",
-    )?;
+    )
+    .map(drop)?;
 
     let expected = vec![
       ("outer", "on_layer"),
@@ -905,11 +1010,13 @@ fn layered_layer_forwards_query_hooks_in_order() -> Result<(), TestFailure> {
       ("inner", "event_enabled"),
     ];
     ensure(*calls.lock() == expected, "layered layer preserves query hook ordering")
+      .map(drop)
+      .map_err(TestError::from)
   })
 }
 
 #[test]
-fn layered_layer_forwards_lifecycle_hooks_in_order() -> Result<(), TestFailure> {
+fn layered_layer_forwards_lifecycle_hooks_in_order() -> Result<(), TestError> {
   with_layer_fixtures(|event, attrs, record, first_id, second_id| {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let inner = recording_layer("inner", &calls);
@@ -969,11 +1076,13 @@ fn layered_layer_forwards_lifecycle_hooks_in_order() -> Result<(), TestFailure> 
       ("outer", "on_id_change"),
     ];
     ensure(*calls.lock() == expected, "layered layer preserves lifecycle hook ordering")
+      .map(drop)
+      .map_err(TestError::from)
   })
 }
 
 #[test]
-fn layered_layer_short_circuits_outer_filters() -> Result<(), TestFailure> {
+fn layered_layer_short_circuits_outer_filters() -> Result<(), TestError> {
   with_layer_fixtures(|event, _attrs, _record, _first_id, _second_id| {
     let calls = Arc::new(Mutex::new(Vec::new()));
     let inner = recording_layer("inner", &calls);
@@ -989,20 +1098,24 @@ fn layered_layer_short_circuits_outer_filters() -> Result<(), TestFailure> {
         "blocked layered layer enabled",
       )?,
       "outer layer can short-circuit metadata enabled checks",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       !ensure_ok(
         Layer::<NoSubscriber>::event_enabled(&blocked, event, context),
         "blocked layered layer event enabled",
       )?,
       "outer layer can short-circuit event enabled checks",
-    )?;
+    )
+    .map(drop)?;
 
     let expected = vec![("outer", "enabled"), ("outer", "event_enabled")];
     ensure(
       *calls.lock() == expected,
       "short-circuiting outer layer does not call inner filters",
     )
+    .map(drop)
+    .map_err(TestError::from)
   })
 }
 
@@ -1013,7 +1126,7 @@ mod registry_tests {
   use crate::registry::Registry;
 
   #[test]
-  fn context_event_span() -> Result<(), TestFailure> {
+  fn context_event_span() -> Result<(), TestError> {
     use std::sync::Arc;
 
     use parking_lot::Mutex;
@@ -1041,43 +1154,48 @@ mod registry_tests {
       }),
       || {
         tracing::info!("no span");
-        ensure(last_event_span.lock().is_none(), "event outside a span has no event span")?;
+        ensure(last_event_span.lock().is_none(), "event outside a span has no event span").map(drop)?;
 
         let parent = tracing::info_span!("explicit");
         tracing::info!(parent: &parent, "explicit span");
-        ensure(*last_event_span.lock() == Some("explicit"), "explicit parent is event span")?;
+        ensure(*last_event_span.lock() == Some("explicit"), "explicit parent is event span").map(drop)?;
 
         let _guard = tracing::info_span!("contextual").entered();
         tracing::info!("contextual span");
         ensure(*last_event_span.lock() == Some("contextual"), "entered span is event span")
+          .map(drop)
+          .map_err(TestError::from)
       },
     )
   }
 
   #[test]
-  fn empty_context_reports_absent_span_state_without_blocking_metadata() -> Result<(), TestFailure> {
+  fn empty_context_reports_absent_span_state_without_blocking_metadata() -> Result<(), TestError> {
     let context = Context::<Registry>::none();
     let values = LAYER_TEST_META.fields().value_set_all(&[]);
     let event = Event::new(&LAYER_TEST_META, &values);
     let missing_id = span::Id::from_non_zero_u64(NonZeroU64::MIN);
 
-    ensure(context.current_span().id().is_none(), "empty context has no current span")?;
+    ensure(context.current_span().id().is_none(), "empty context has no current span").map(drop)?;
     ensure(
       context.enabled(&LAYER_TEST_META),
       "empty context does not disable metadata during callsite registration",
-    )?;
+    )
+    .map(drop)?;
     context.event(&event);
-    ensure(context.event_span(&event).is_none(), "empty context has no contextual event span")?;
-    ensure(context.span(missing_id).is_none(), "empty context cannot look up span IDs")?;
-    ensure(context.metadata(missing_id).is_none(), "empty context has no span metadata")?;
-    ensure(!context.exists(missing_id), "empty context reports missing spans as absent")?;
-    ensure(context.lookup_current().is_none(), "empty context has no lookup-current span")?;
-    ensure(context.span_scope(missing_id).is_none(), "empty context has no span scope")?;
+    ensure(context.event_span(&event).is_none(), "empty context has no contextual event span").map(drop)?;
+    ensure(context.span(missing_id).is_none(), "empty context cannot look up span IDs").map(drop)?;
+    ensure(context.metadata(missing_id).is_none(), "empty context has no span metadata").map(drop)?;
+    ensure(!context.exists(missing_id), "empty context reports missing spans as absent").map(drop)?;
+    ensure(context.lookup_current().is_none(), "empty context has no lookup-current span").map(drop)?;
+    ensure(context.span_scope(missing_id).is_none(), "empty context has no span scope").map(drop)?;
     ensure(context.event_scope(&event).is_none(), "empty context has no event scope")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn registry_context_reports_current_metadata_existence_and_event_scopes() -> Result<(), TestFailure> {
+  fn registry_context_reports_current_metadata_existence_and_event_scopes() -> Result<(), TestError> {
     let registry = Registry::default();
     let context = Context::new(&registry);
     let values = LAYER_TEST_META.fields().value_set_all(&[]);
@@ -1086,36 +1204,41 @@ mod registry_tests {
     let child_attrs = span::Attributes::child_of(root_id, &LAYER_TEST_META, &values);
     let child_id = ensure_ok(registry.new_span(&child_attrs), "registry creates child span")?;
 
-    ensure(context.exists(root_id), "context finds root span")?;
-    ensure(context.exists(child_id), "context finds child span")?;
+    ensure(context.exists(root_id), "context finds root span").map(drop)?;
+    ensure(context.exists(child_id), "context finds child span").map(drop)?;
     ensure(
       context
         .metadata(root_id)
         .is_some_and(|metadata| metadata.name() == "layer_test"),
       "context metadata returns span metadata",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       context.span(root_id).is_some_and(|span_ref| span_ref.name() == "layer_test"),
       "context span lookup returns span refs",
-    )?;
+    )
+    .map(drop)?;
 
     let missing_id = span::Id::from_non_zero_u64(NonZeroU64::MAX);
-    ensure(!context.exists(missing_id), "context rejects unknown span IDs")?;
+    ensure(!context.exists(missing_id), "context rejects unknown span IDs").map(drop)?;
     ensure(
       context.metadata(missing_id).is_none(),
       "context returns no metadata for unknown spans",
-    )?;
+    )
+    .map(drop)?;
 
     ensure_ok(registry.enter(child_id), "registry enters child span")?;
     let current = context.current_span();
     ensure(
       current.id().copied() == Some(child_id),
       "context current span mirrors registry current span",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       context.lookup_current().is_some_and(|span_ref| span_ref.id() == child_id),
       "context lookup_current returns the current span ref",
-    )?;
+    )
+    .map(drop)?;
 
     let contextual_event = Event::new(&LAYER_TEST_META, &values);
     ensure(
@@ -1123,7 +1246,8 @@ mod registry_tests {
         .event_span(&contextual_event)
         .is_some_and(|span_ref| span_ref.id() == child_id),
       "contextual event uses current span",
-    )?;
+    )
+    .map(drop)?;
 
     let explicit_event = Event::new_child_of(root_id, &LAYER_TEST_META, &values);
     ensure(
@@ -1131,25 +1255,37 @@ mod registry_tests {
         .event_span(&explicit_event)
         .is_some_and(|span_ref| span_ref.id() == root_id),
       "explicit event uses its explicit parent",
-    )?;
+    )
+    .map(drop)?;
 
     let root_event = Event::new_child_of(Option::<span::Id>::None, &LAYER_TEST_META, &values);
-    ensure(context.event_span(&root_event).is_none(), "root event has no event span")?;
-    ensure(context.event_scope(&root_event).is_none(), "root event has no event scope")?;
+    ensure(context.event_span(&root_event).is_none(), "root event has no event span").map(drop)?;
+    ensure(context.event_scope(&root_event).is_none(), "root event has no event scope").map(drop)?;
 
-    let scope = ensure_some(context.span_scope(child_id), "child span scope exists")?;
-    let leaf_to_root = scope.map(|span_ref| span_ref.id()).collect::<Vec<_>>();
-    ensure(leaf_to_root == vec![child_id, root_id], "span scope iterates from child to root")?;
+    let leaf_to_root = ensure_some(
+      context
+        .span_scope(child_id)
+        .map(|scope| scope.map(|span_ref| span_ref.id()).collect::<Vec<_>>()),
+      "child span scope exists",
+    )?;
+    ensure(leaf_to_root == vec![child_id, root_id], "span scope iterates from child to root").map(drop)?;
 
-    let event_scope = ensure_some(context.event_scope(&explicit_event), "explicit event scope exists")?;
-    let root_to_leaf = event_scope.root_to_leaf().map(|span_ref| span_ref.id()).collect::<Vec<_>>();
+    let root_to_leaf = ensure_some(
+      context
+        .event_scope(&explicit_event)
+        .map(|scope| scope.root_to_leaf().map(|span_ref| span_ref.id()).collect::<Vec<_>>()),
+      "explicit event scope exists",
+    )?;
     ensure(
       root_to_leaf == vec![root_id],
       "explicit parent event scope iterates from root to leaf",
-    )?;
+    )
+    .map(drop)?;
 
     ensure_ok(registry.exit(child_id), "registry exits child span")?;
     ensure(context.current_span().id().is_none(), "context has no current span after exit")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   /// Tests for how max-level hints are calculated when combining layers
@@ -1159,18 +1295,20 @@ mod registry_tests {
     use super::*;
     use crate::filter::*;
 
-    fn ensure_max_level_hint(actual: Option<LevelFilter>, expected: Option<LevelFilter>) -> Result<(), TestFailure> {
+    fn ensure_max_level_hint(actual: Option<LevelFilter>, expected: Option<LevelFilter>) -> Result<(), TestError> {
       ensure(actual == expected, "max level hint matches expected value")
+        .map(drop)
+        .map_err(TestError::from)
     }
 
     #[test]
-    fn mixed_with_unfiltered() -> Result<(), TestFailure> {
+    fn mixed_with_unfiltered() -> Result<(), TestError> {
       let subscriber = crate::registry().with(NopLayer).with(NopLayer.with_filter(LevelFilter::INFO));
       ensure_max_level_hint(subscriber.max_level_hint(), None)
     }
 
     #[test]
-    fn mixed_with_unfiltered_layered() -> Result<(), TestFailure> {
+    fn mixed_with_unfiltered_layered() -> Result<(), TestError> {
       let subscriber = crate::registry().with(NopLayer).with(
         NopLayer
           .with_filter(LevelFilter::INFO)
@@ -1180,7 +1318,7 @@ mod registry_tests {
     }
 
     #[test]
-    fn mixed_interleaved() -> Result<(), TestFailure> {
+    fn mixed_interleaved() -> Result<(), TestError> {
       let subscriber = crate::registry()
         .with(NopLayer)
         .with(NopLayer.with_filter(LevelFilter::INFO))
@@ -1190,7 +1328,7 @@ mod registry_tests {
     }
 
     #[test]
-    fn mixed_layered() -> Result<(), TestFailure> {
+    fn mixed_layered() -> Result<(), TestError> {
       let subscriber = crate::registry()
         .with(NopLayer.with_filter(LevelFilter::INFO).and_then(NopLayer))
         .with(NopLayer.and_then(NopLayer.with_filter(LevelFilter::INFO)));
@@ -1198,7 +1336,7 @@ mod registry_tests {
     }
 
     #[test]
-    fn plf_only_unhinted() -> Result<(), TestFailure> {
+    fn plf_only_unhinted() -> Result<(), TestError> {
       let subscriber = crate::registry()
         .with(NopLayer.with_filter(LevelFilter::INFO))
         .with(NopLayer.with_filter(filter_fn(|_| true)));
@@ -1206,7 +1344,7 @@ mod registry_tests {
     }
 
     #[test]
-    fn plf_only_unhinted_nested_outer() -> Result<(), TestFailure> {
+    fn plf_only_unhinted_nested_outer() -> Result<(), TestError> {
       // if a nested tree of per-layer filters has an _outer_ filter with
       // no max level hint, it should return `None`.
       let subscriber = crate::registry()
@@ -1224,7 +1362,7 @@ mod registry_tests {
     }
 
     #[test]
-    fn plf_only_unhinted_nested_inner() -> Result<(), TestFailure> {
+    fn plf_only_unhinted_nested_inner() -> Result<(), TestError> {
       // If a nested tree of per-layer filters has an _inner_ filter with
       // no max-level hint, but the _outer_ filter has a max level hint,
       // it should pick the outer hint. This is because the outer filter
@@ -1240,7 +1378,7 @@ mod registry_tests {
     }
 
     #[test]
-    fn unhinted_nested_inner() -> Result<(), TestFailure> {
+    fn unhinted_nested_inner() -> Result<(), TestError> {
       let subscriber = crate::registry()
         .with(NopLayer.and_then(NopLayer).with_filter(LevelFilter::INFO))
         .with(
@@ -1253,7 +1391,7 @@ mod registry_tests {
     }
 
     #[test]
-    fn unhinted_nested_inner_mixed() -> Result<(), TestFailure> {
+    fn unhinted_nested_inner_mixed() -> Result<(), TestError> {
       let subscriber = crate::registry()
         .with(
           NopLayer
@@ -1270,7 +1408,7 @@ mod registry_tests {
     }
 
     #[test]
-    fn plf_only_picks_max() -> Result<(), TestFailure> {
+    fn plf_only_picks_max() -> Result<(), TestError> {
       let subscriber = crate::registry()
         .with(NopLayer.with_filter(LevelFilter::WARN))
         .with(NopLayer.with_filter(LevelFilter::DEBUG));
@@ -1278,7 +1416,7 @@ mod registry_tests {
     }
 
     #[test]
-    fn many_plf_only_picks_max() -> Result<(), TestFailure> {
+    fn many_plf_only_picks_max() -> Result<(), TestError> {
       let subscriber = crate::registry()
         .with(NopLayer.with_filter(LevelFilter::WARN))
         .with(NopLayer.with_filter(LevelFilter::DEBUG))
@@ -1288,7 +1426,7 @@ mod registry_tests {
     }
 
     #[test]
-    fn nested_plf_only_picks_max() -> Result<(), TestFailure> {
+    fn nested_plf_only_picks_max() -> Result<(), TestError> {
       let subscriber = crate::registry()
         .with(
           NopLayer.with_filter(LevelFilter::INFO).and_then(

@@ -8,7 +8,25 @@ use std::sync::Arc;
 mod per_layer;
 
 use parking_lot::Mutex;
-use strict_test_support::TestFailure;
+use tracing_core::subscriber::SubscriberError;
+use tracing_subscriber::filter;
+/// Native failures from these behavioral checks.
+#[derive(Debug, thiserror::Error)]
+enum TestError {
+  /// A boolean expectation failed.
+  #[error(transparent)]
+  Condition(#[from] strict_test_support::ConditionFailure),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  ComparisonString(#[from] strict_test_support::ComparisonFailure<String, String>),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  ResultParseError(#[from] strict_test_support::ResultFailure<filter::ParseError>),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+}
+
 use strict_test_support::ensure;
 use strict_test_support::ensure_eq;
 use strict_test_support::ensure_ok;
@@ -74,7 +92,7 @@ mod tests {
   use super::*;
 
   #[test]
-  fn level_filter_event() -> Result<(), TestFailure> {
+  fn level_filter_event() -> Result<(), TestError> {
     let filter: EnvFilter = ensure_ok("info".parse(), "level event filter parses")?;
     let (mock_subscriber, mock_handle) = subscriber::mock()
       .event(expect::event().at_level(Level::INFO))
@@ -97,7 +115,7 @@ mod tests {
   }
 
   #[test]
-  fn same_name_spans() -> Result<(), TestFailure> {
+  fn same_name_spans() -> Result<(), TestError> {
     let filter: EnvFilter = ensure_ok("[foo{bar}]=trace,[foo{baz}]=trace".parse(), "same-name span filter parses")?;
     let (mock_subscriber, mock_handle) = subscriber::mock()
       .new_span(
@@ -125,7 +143,7 @@ mod tests {
   }
 
   #[test]
-  fn level_filter_event_with_target() -> Result<(), TestFailure> {
+  fn level_filter_event_with_target() -> Result<(), TestError> {
     let filter: EnvFilter = ensure_ok("info,stuff=debug".parse(), "targeted level event filter parses")?;
     let (mock_subscriber, mock_handle) = subscriber::mock()
       .event(expect::event().at_level(Level::INFO))
@@ -153,7 +171,7 @@ mod tests {
   }
 
   #[test]
-  fn level_filter_event_with_target_and_span_global() -> Result<(), TestFailure> {
+  fn level_filter_event_with_target_and_span_global() -> Result<(), TestError> {
     let filter: EnvFilter = ensure_ok("info,stuff[cool_span]=debug".parse(), "target-and-span global filter parses")?;
 
     let cool_span = expect::span().named("cool_span");
@@ -187,7 +205,7 @@ mod tests {
   }
 
   #[test]
-  fn not_order_dependent() -> Result<(), TestFailure> {
+  fn not_order_dependent() -> Result<(), TestError> {
     // this test reproduces tokio-rs/tracing#623
 
     let filter: EnvFilter = ensure_ok("stuff=debug,info".parse(), "order-independent filter parses")?;
@@ -217,7 +235,7 @@ mod tests {
   }
 
   #[test]
-  fn add_directive_enables_event() -> Result<(), TestFailure> {
+  fn add_directive_enables_event() -> Result<(), TestError> {
     // this test reproduces tokio-rs/tracing#591
 
     // by default, use info level
@@ -243,7 +261,7 @@ mod tests {
   }
 
   #[test]
-  fn span_name_filter_is_dynamic() -> Result<(), TestFailure> {
+  fn span_name_filter_is_dynamic() -> Result<(), TestError> {
     let filter: EnvFilter = ensure_ok("info,[cool_span]=debug".parse(), "span-name dynamic filter parses")?;
     let (mock_subscriber, mock_handle) = subscriber::mock()
       .event(expect::event().at_level(Level::INFO))
@@ -294,12 +312,14 @@ mod tests {
   }
 
   #[test]
-  fn parse_invalid_string() -> Result<(), TestFailure> {
+  fn parse_invalid_string() -> Result<(), TestError> {
     ensure(EnvFilter::builder().parse(",!").is_err(), "invalid filter string fails to parse")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn parse_empty_string_no_default_directive() -> Result<(), TestFailure> {
+  fn parse_empty_string_no_default_directive() -> Result<(), TestError> {
     let filter = ensure_ok(EnvFilter::builder().parse(""), "empty filter without default directive parses")?;
     let (mock_subscriber, mock_handle) = subscriber::mock().only().run_with_handle();
     let layer = mock_subscriber.with(filter);
@@ -317,7 +337,7 @@ mod tests {
   }
 
   #[test]
-  fn parse_empty_string_with_default_directive() -> Result<(), TestFailure> {
+  fn parse_empty_string_with_default_directive() -> Result<(), TestError> {
     let filter = EnvFilter::builder().with_default_directive(LevelFilter::INFO.into()).parse("");
     let parsed_filter = ensure_ok(filter, "empty filter with default directive parses")?;
     let (mock_subscriber, mock_handle) = subscriber::mock()
@@ -341,7 +361,7 @@ mod tests {
   }
 
   #[test]
-  fn new_invalid_string() -> Result<(), TestFailure> {
+  fn new_invalid_string() -> Result<(), TestError> {
     let filter = EnvFilter::new(",!");
     let (subscriber, mock_handle) = subscriber::mock()
       .event(expect::event().at_level(Level::ERROR))
@@ -362,7 +382,7 @@ mod tests {
   }
 
   #[test]
-  fn new_empty_string() -> Result<(), TestFailure> {
+  fn new_empty_string() -> Result<(), TestError> {
     let filter = EnvFilter::new("");
     let (subscriber, mock_handle) = subscriber::mock()
       .event(expect::event().at_level(Level::ERROR))
@@ -383,7 +403,7 @@ mod tests {
   }
 
   #[test]
-  fn more_specific_static_filter_more_verbose() -> Result<(), TestFailure> {
+  fn more_specific_static_filter_more_verbose() -> Result<(), TestError> {
     let filter = EnvFilter::new("info,hello=debug");
     let (subscriber, mock_handle) = subscriber::mock()
       .event(expect::event().at_level(Level::INFO))
@@ -403,7 +423,7 @@ mod tests {
   }
 
   #[test]
-  fn more_specific_static_filter_less_verbose() -> Result<(), TestFailure> {
+  fn more_specific_static_filter_less_verbose() -> Result<(), TestError> {
     let filter = EnvFilter::new("info,hello=warn");
     let (subscriber, mock_handle) = subscriber::mock()
       .event(expect::event().at_level(Level::INFO))
@@ -423,7 +443,7 @@ mod tests {
   }
 
   #[test]
-  fn more_specific_dynamic_filter_more_verbose() -> Result<(), TestFailure> {
+  fn more_specific_dynamic_filter_more_verbose() -> Result<(), TestError> {
     let filter = EnvFilter::new("info,[{hello=4}]=debug");
     let (subscriber, mock_handle) = subscriber::mock()
       .new_span(expect::span().at_level(Level::INFO))
@@ -459,7 +479,7 @@ mod tests {
   /// fail with a structured [`TestFailure`] and the expected span sequence can
   /// be updated to the fixed behavior.
   #[test]
-  fn more_specific_dynamic_filter_less_verbose() -> Result<(), TestFailure> {
+  fn more_specific_dynamic_filter_less_verbose() -> Result<(), TestError> {
     let filter = EnvFilter::new("info,[{hello=4}]=warn");
     let spans = Arc::new(Mutex::new(Vec::new()));
     let recorder = SpanRecorder {
@@ -487,11 +507,9 @@ mod tests {
       .join(",");
     let expected = "INFO:-,WARN:100,INFO:4,WARN:4".to_owned();
 
-    ensure_eq(
-      &observed,
-      &expected,
-      "issue-1388 less-verbose dynamic filter span sequence is pinned",
-    )
+    ensure_eq(observed, expected, "issue-1388 less-verbose dynamic filter span sequence is pinned")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   // contains the same tests as the first half of this file
@@ -502,7 +520,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn level_filter_event() -> Result<(), TestFailure> {
+    fn level_filter_event() -> Result<(), TestError> {
       let filter: EnvFilter = ensure_ok("info".parse(), "per-layer level filter parses")?;
       let (layer, handle) = layer::mock()
         .event(expect::event().at_level(Level::INFO))
@@ -525,7 +543,7 @@ mod tests {
     }
 
     #[test]
-    fn same_name_spans() -> Result<(), TestFailure> {
+    fn same_name_spans() -> Result<(), TestError> {
       let filter: EnvFilter = ensure_ok(
         "[foo{bar}]=trace,[foo{baz}]=trace".parse(),
         "per-layer same-name span filter parses",
@@ -557,7 +575,7 @@ mod tests {
     }
 
     #[test]
-    fn level_filter_event_with_target() -> Result<(), TestFailure> {
+    fn level_filter_event_with_target() -> Result<(), TestError> {
       let filter: EnvFilter = ensure_ok("info,stuff=debug".parse(), "per-layer targeted level filter parses")?;
       let (layer, handle) = layer::mock()
         .event(expect::event().at_level(Level::INFO))
@@ -585,7 +603,7 @@ mod tests {
     }
 
     #[test]
-    fn level_filter_event_with_target_and_span() -> Result<(), TestFailure> {
+    fn level_filter_event_with_target_and_span() -> Result<(), TestError> {
       let filter: EnvFilter = ensure_ok("stuff[cool_span]=debug".parse(), "per-layer target-and-span filter parses")?;
 
       let cool_span = expect::span().named("cool_span");
@@ -616,7 +634,7 @@ mod tests {
     }
 
     #[test]
-    fn not_order_dependent() -> Result<(), TestFailure> {
+    fn not_order_dependent() -> Result<(), TestError> {
       // this test reproduces tokio-rs/tracing#623
 
       let filter: EnvFilter = ensure_ok("stuff=debug,info".parse(), "per-layer order-independent filter parses")?;
@@ -646,7 +664,7 @@ mod tests {
     }
 
     #[test]
-    fn add_directive_enables_event() -> Result<(), TestFailure> {
+    fn add_directive_enables_event() -> Result<(), TestError> {
       // this test reproduces tokio-rs/tracing#591
 
       // by default, use info level
@@ -672,7 +690,7 @@ mod tests {
     }
 
     #[test]
-    fn span_name_filter_is_dynamic() -> Result<(), TestFailure> {
+    fn span_name_filter_is_dynamic() -> Result<(), TestError> {
       let filter: EnvFilter = ensure_ok("info,[cool_span]=debug".parse(), "per-layer span-name dynamic filter parses")?;
       let expected_cool_span = expect::span().named("cool_span");
       let expected_uncool_span = expect::span().named("uncool_span");
@@ -741,7 +759,7 @@ mod tests {
     }
 
     #[test]
-    fn multiple_dynamic_filters() -> Result<(), TestFailure> {
+    fn multiple_dynamic_filters() -> Result<(), TestError> {
       // Test that multiple dynamic (span) filters only apply to the layers
       // they're attached to.
       let (layer1, handle1) = {

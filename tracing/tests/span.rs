@@ -12,7 +12,25 @@ mod tests {
   use std::convert::identity;
   use std::thread;
 
-  use strict_test_support::TestFailure;
+  use tracing::field;
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionId(#[from] strict_test_support::OptionFailure<Id>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionTracingField(#[from] strict_test_support::OptionFailure<field::Field>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use strict_test_support::ensure_some;
@@ -30,6 +48,7 @@ mod tests {
   use tracing::record_all;
   use tracing::span::Id;
   use tracing::subscriber::with_default;
+  use tracing_mock::field::ExpectedFields;
   use tracing_mock::*;
 
   static MANUAL_ROOT_CALLSITE: MacroCallsite = MacroCallsite::new(&MANUAL_ROOT_METADATA);
@@ -54,7 +73,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn handles_to_the_same_span_are_equal() -> Result<(), TestFailure> {
+  fn handles_to_the_same_span_are_equal() -> Result<(), TestError> {
     // Create a mock subscriber that will return `true` on calls to
     // `Subscriber::enabled`, so that the spans will be constructed. We
     // won't enter any spans in this test, so the subscriber won't actually
@@ -68,12 +87,14 @@ mod tests {
 
       // Two handles that point to the same span are equal.
       ensure(foo1 == foo2, "two handles to the same span are equal")
+        .map(drop)
+        .map_err(TestError::from)
     })
   }
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn handles_to_different_spans_are_not_equal() -> Result<(), TestFailure> {
+  fn handles_to_different_spans_are_not_equal() -> Result<(), TestError> {
     with_default(subscriber::mock().run(), || {
       // Even though these spans have the same name and fields, they will have
       // differing metadata, since they were created on different lines.
@@ -81,6 +102,8 @@ mod tests {
       let foo2 = tracing::span!(Level::TRACE, "foo", bar = 1_u64, baz = false);
 
       ensure(foo1 != foo2, "different spans are not equal")
+        .map(drop)
+        .map_err(TestError::from)
     })
   }
 
@@ -98,7 +121,7 @@ mod tests {
   )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn handles_to_different_spans_with_the_same_metadata_are_not_equal() -> Result<(), TestFailure> {
+  fn handles_to_different_spans_with_the_same_metadata_are_not_equal() -> Result<(), TestError> {
     // Every time this function is called, it will return a _new
     // instance_ of a span with the same metadata, name, and fields.
     fn make_span() -> Span {
@@ -110,12 +133,14 @@ mod tests {
       let foo2 = make_span();
 
       ensure(foo1 != foo2, "different span instances with identical metadata are not equal")
+        .map(drop)
+        .map_err(TestError::from)
     })
   }
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn null_spans_are_the_same_value() -> Result<(), TestFailure> {
+  fn null_spans_are_the_same_value() -> Result<(), TestError> {
     // `Span::none()` and its clones are the single identity-less "no span"
     // value, in every feature configuration.
     let first_null_span = Span::none();
@@ -124,13 +149,16 @@ mod tests {
     ensure(
       first_null_span == second_null_span,
       "independently constructed null spans are equal",
-    )?;
+    )
+    .map(drop)?;
     ensure(first_null_span == first_null_span.clone(), "a null span is equal to its own clone")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn disabled_spans_keep_callsite_identity() -> Result<(), TestFailure> {
+  fn disabled_spans_keep_callsite_identity() -> Result<(), TestError> {
     // With no subscriber installed, macro-constructed spans are disabled in
     // every feature configuration, but they still retain their callsite
     // metadata: their identity is the callsite, not the (absent) runtime id.
@@ -142,24 +170,28 @@ mod tests {
     let second_disabled = make_disabled_span();
     let other_callsite = tracing::span!(Level::TRACE, "identity");
 
-    ensure(first_disabled == second_disabled, "disabled spans from the same callsite are equal")?;
+    ensure(first_disabled == second_disabled, "disabled spans from the same callsite are equal").map(drop)?;
     ensure(
       first_disabled == first_disabled.clone(),
       "a disabled span is equal to its own clone",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       first_disabled != other_callsite,
       "disabled spans from different callsites are not equal",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       first_disabled != Span::none(),
       "a disabled macro span keeps its identity and is not the null span",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn or_current_substitutes_current_only_for_disabled_spans() -> Result<(), TestFailure> {
+  fn or_current_substitutes_current_only_for_disabled_spans() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::ERROR), |builder| {
         builder
@@ -195,21 +227,23 @@ mod tests {
       });
     });
 
-    ensure_ok(handle.finished(), "or_current expectations should finish")
+    ensure_ok(handle.finished(), "or_current expectations should finish").map_err(TestError::from)
   }
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn current_span_returns_null_without_a_tracked_current_span() -> Result<(), TestFailure> {
+  fn current_span_returns_null_without_a_tracked_current_span() -> Result<(), TestError> {
     let current = Span::current();
 
-    ensure(current.is_none(), "current span without a subscriber is null")?;
+    ensure(current.is_none(), "current span without a subscriber is null").map(drop)?;
     ensure(current.metadata().is_none(), "current null span has no metadata")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn current_span_clones_the_entered_span_from_the_subscriber() -> Result<(), TestFailure> {
+  fn current_span_clones_the_entered_span_from_the_subscriber() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
         builder
@@ -219,28 +253,32 @@ mod tests {
       })
       .run_with_handle();
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), TestError> {
       let span = tracing::info_span!("current_direct");
       let _guard = span.enter();
       let current = Span::current();
 
       if !STATIC_MAX_LEVEL.enables(Level::INFO) {
-        return ensure(current.is_none(), "statically disabled INFO span cannot become current");
+        return ensure(current.is_none(), "statically disabled INFO span cannot become current")
+          .map(drop)
+          .map_err(TestError::from);
       }
 
-      ensure(!current.is_none(), "current span is enabled while an INFO span is entered")?;
+      ensure(!current.is_none(), "current span is enabled while an INFO span is entered").map(drop)?;
       ensure(
         current.metadata().is_some_and(|metadata| metadata.name() == "current_direct"),
         "current span preserves the entered span metadata",
       )
+      .map(drop)
+      .map_err(TestError::from)
     })?;
 
-    ensure_ok(handle.finished(), "current span expectations should finish")
+    ensure_ok(handle.finished(), "current span expectations should finish").map_err(TestError::from)
   }
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn manual_span_constructors_preserve_root_and_explicit_parent_ancestry() -> Result<(), TestFailure> {
+  fn manual_span_constructors_preserve_root_and_explicit_parent_ancestry() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .new_span(
         expect::span()
@@ -262,7 +300,7 @@ mod tests {
       .only()
       .run_with_handle();
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), TestError> {
       let request = ensure_some(
         MANUAL_ROOT_METADATA.fields().field("request"),
         "manual root metadata defines the request field",
@@ -283,59 +321,64 @@ mod tests {
       Ok(())
     })?;
 
-    ensure_ok(handle.finished(), "manual constructor expectations should finish")
+    ensure_ok(handle.finished(), "manual constructor expectations should finish").map_err(TestError::from)
   }
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn metadata_field_lookup_distinguishes_disabled_spans_from_null_spans() -> Result<(), TestFailure> {
+  fn metadata_field_lookup_distinguishes_disabled_spans_from_null_spans() -> Result<(), TestError> {
     let disabled = Span::new_disabled(&MANUAL_ROOT_METADATA);
     let request = ensure_some(disabled.field("request"), "disabled span exposes metadata fields")?;
 
-    ensure(request.name() == "request", "field lookup returns the requested field")?;
-    ensure(disabled.has_field("late"), "disabled span reports declared late field")?;
-    ensure(!disabled.has_field("missing"), "disabled span rejects undeclared field")?;
+    ensure(request.name() == "request", "field lookup returns the requested field").map(drop)?;
+    ensure(disabled.has_field("late"), "disabled span reports declared late field").map(drop)?;
+    ensure(!disabled.has_field("missing"), "disabled span rejects undeclared field").map(drop)?;
     ensure(
       disabled.metadata().is_some_and(|metadata| metadata.name() == "manual_root"),
       "disabled span retains metadata",
-    )?;
+    )
+    .map(drop)?;
 
     let null = Span::none();
-    ensure(null.field("request").is_none(), "null span has no fields")?;
-    ensure(!null.has_field("request"), "null span rejects every field")?;
+    ensure(null.field("request").is_none(), "null span has no fields").map(drop)?;
+    ensure(!null.has_field("request"), "null span rejects every field").map(drop)?;
     ensure(null.metadata().is_none(), "null span has no metadata")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn span_debug_reports_enabled_disabled_and_null_state() -> Result<(), TestFailure> {
+  fn span_debug_reports_enabled_disabled_and_null_state() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .new_span(expect::span().named("manual_root"))
       .close_span(expect::span().named("manual_root"))
       .only()
       .run_with_handle();
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), TestError> {
       let value_set = MANUAL_ROOT_METADATA.fields().value_set(&[]);
       let enabled = Span::new(&MANUAL_ROOT_METADATA, &value_set);
       let enabled_debug = format!("{enabled:?}");
-      ensure(enabled_debug.contains("manual_root"), "enabled span debug includes its name")?;
-      ensure(enabled_debug.contains("id"), "enabled span debug includes its subscriber id")?;
+      ensure(enabled_debug.contains("manual_root"), "enabled span debug includes its name").map(drop)?;
+      ensure(enabled_debug.contains("id"), "enabled span debug includes its subscriber id").map(drop)?;
 
       let disabled_debug = format!("{:?}", Span::new_disabled(&MANUAL_ROOT_METADATA));
-      ensure(disabled_debug.contains("manual_root"), "disabled span debug includes its name")?;
-      ensure(disabled_debug.contains("disabled"), "disabled span debug reports disabled state")?;
+      ensure(disabled_debug.contains("manual_root"), "disabled span debug includes its name").map(drop)?;
+      ensure(disabled_debug.contains("disabled"), "disabled span debug reports disabled state").map(drop)?;
 
       let null_debug = format!("{:?}", Span::none());
       ensure(null_debug.contains("none"), "null span debug reports the null state")
+        .map(drop)
+        .map_err(TestError::from)
     })?;
 
-    ensure_ok(handle.finished(), "span debug expectations should finish")
+    ensure_ok(handle.finished(), "span debug expectations should finish").map_err(TestError::from)
   }
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn option_id_conversions_follow_enabled_and_entered_span_state() -> Result<(), TestFailure> {
+  fn option_id_conversions_follow_enabled_and_entered_span_state() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .new_span(expect::span().named("manual_root"))
       .enter(expect::span().named("manual_root"))
@@ -344,40 +387,42 @@ mod tests {
       .only()
       .run_with_handle();
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), TestError> {
       let value_set = MANUAL_ROOT_METADATA.fields().value_set(&[]);
       let span = Span::new(&MANUAL_ROOT_METADATA, &value_set);
       let span_id = ensure_some(span.id(), "enabled span has an id")?;
       let span_ref_id: Option<&Id> = Option::from(&span);
       let span_owned_id: Option<Id> = Option::from(&span);
-      ensure(span_ref_id.is_some(), "enabled span converts by reference to an id")?;
-      ensure(span_owned_id == Some(span_id), "enabled span converts to its copied id")?;
+      ensure(span_ref_id.is_some(), "enabled span converts by reference to an id").map(drop)?;
+      ensure(span_owned_id == Some(span_id), "enabled span converts to its copied id").map(drop)?;
 
       let entered = span.entered();
       let entered_id = ensure_some(entered.id(), "entered span exposes its id")?;
       let entered_ref_id: Option<&Id> = Option::from(&entered);
       let entered_owned_id: Option<Id> = Option::from(&entered);
-      ensure(entered_ref_id.is_some(), "entered span converts by reference to an id")?;
-      ensure(entered_owned_id == Some(entered_id), "entered span converts to its copied id")?;
-      ensure(entered.has_field("request"), "entered span derefs to the underlying span")?;
+      ensure(entered_ref_id.is_some(), "entered span converts by reference to an id").map(drop)?;
+      ensure(entered_owned_id == Some(entered_id), "entered span converts to its copied id").map(drop)?;
+      ensure(entered.has_field("request"), "entered span derefs to the underlying span").map(drop)?;
 
       let exited = entered.exit();
       let exited_id: Option<Id> = Option::from(exited);
-      ensure(exited_id == Some(span_id), "exited entered span returns the original span id")?;
+      ensure(exited_id == Some(span_id), "exited entered span returns the original span id").map(drop)?;
 
       let null_span = Span::none();
       let null_ref_id: Option<&Id> = Option::from(&null_span);
       let null_owned_id: Option<Id> = Option::from(Span::none());
-      ensure(null_ref_id.is_none(), "null span has no id by reference")?;
+      ensure(null_ref_id.is_none(), "null span has no id by reference").map(drop)?;
       ensure(null_owned_id.is_none(), "null span has no owned id")
+        .map(drop)
+        .map_err(TestError::from)
     })?;
 
-    ensure_ok(handle.finished(), "option id expectations should finish")
+    ensure_ok(handle.finished(), "option id expectations should finish").map_err(TestError::from)
   }
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn spans_are_findable_hash_map_keys() -> Result<(), TestFailure> {
+  fn spans_are_findable_hash_map_keys() -> Result<(), TestError> {
     // Whether the span is enabled by the mock subscriber or statically
     // disabled by a max-level feature, a span and the null span are distinct
     // map keys, and both are found again through freshly created handles.
@@ -389,15 +434,18 @@ mod tests {
       let _replaced_span = span_names.insert(keyed_span, "keyed");
       let _replaced_null = span_names.insert(Span::none(), "null");
 
-      ensure(span_names.len() == 2, "a macro span and the null span are distinct keys")?;
+      ensure(span_names.len() == 2, "a macro span and the null span are distinct keys").map(drop)?;
       ensure(
         span_names.get(&lookup_handle) == Some(&"keyed"),
         "a span is found under a clone of its handle",
-      )?;
+      )
+      .map(drop)?;
       ensure(
         span_names.get(&Span::none()) == Some(&"null"),
         "the null span is found under a fresh null handle",
       )
+      .map(drop)
+      .map_err(TestError::from)
     })
   }
 
@@ -431,7 +479,7 @@ mod tests {
   //
   // But for now since it's not possible we don't need to test for it :)
   #[test]
-  fn spans_always_go_to_the_subscriber_that_tagged_them_even_across_threads() -> Result<(), TestFailure> {
+  fn spans_always_go_to_the_subscriber_that_tagged_them_even_across_threads() -> Result<(), TestError> {
     let subscriber1 = subscriber::mock()
       .enter(expect::span().named("foo"))
       .exit(expect::span().named("foo"))
@@ -455,12 +503,19 @@ mod tests {
       });
     })
     .join()
-    .map_or_else(|_panic| ensure(false, "subscriber thread should join"), |()| Ok(()))
+    .map_or_else(
+      |_panic| {
+        ensure(false, "subscriber thread should join")
+          .map(drop)
+          .map_err(TestError::from)
+      },
+      |()| Ok(()),
+    )
   }
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn dropping_a_span_closes_span() -> Result<(), TestFailure> {
+  fn dropping_a_span_closes_span() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder
@@ -493,7 +548,7 @@ mod tests {
   )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn span_closes_after_event() -> Result<(), TestFailure> {
+  fn span_closes_after_event() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .enter(expect::span().named("foo"))
       .event(expect::event())
@@ -524,7 +579,7 @@ mod tests {
   )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn new_span_after_event() -> Result<(), TestFailure> {
+  fn new_span_after_event() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .enter(expect::span().named("foo"))
       .event(expect::event())
@@ -559,7 +614,7 @@ mod tests {
   )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn event_outside_of_span() -> Result<(), TestFailure> {
+  fn event_outside_of_span() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .event(expect::event())
       .enter(expect::span().named("foo"))
@@ -578,7 +633,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn cloning_a_span_calls_clone_span() -> Result<(), TestFailure> {
+  fn cloning_a_span_calls_clone_span() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder.clone_span(expect::span().named("foo"))
@@ -608,7 +663,7 @@ mod tests {
   )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn close_span_when_exiting_dispatchers_context() -> Result<(), TestFailure> {
+  fn close_span_when_exiting_dispatchers_context() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .clone_span(expect::span().named("foo"))
       .close_span(expect::span().named("foo"))
@@ -628,7 +683,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn clone_and_close_span_always_go_to_the_subscriber_that_tagged_the_span() -> Result<(), TestFailure> {
+  fn clone_and_close_span_always_go_to_the_subscriber_that_tagged_the_span() -> Result<(), TestError> {
     let (subscriber1, handle1) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder
@@ -662,7 +717,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn span_closes_when_exited() -> Result<(), TestFailure> {
+  fn span_closes_when_exited() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder
@@ -697,7 +752,7 @@ mod tests {
   )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn enter() -> Result<(), TestFailure> {
+  fn enter() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .enter(expect::span().named("foo"))
       .event(expect::event())
@@ -728,7 +783,7 @@ mod tests {
   )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn entered() -> Result<(), TestFailure> {
+  fn entered() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .enter(expect::span().named("foo"))
       .event(expect::event())
@@ -758,7 +813,7 @@ mod tests {
   )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn entered_api() -> Result<(), TestFailure> {
+  fn entered_api() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .enter(expect::span().named("foo"))
       .event(expect::event())
@@ -779,7 +834,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn moved_field() -> Result<(), TestFailure> {
+  fn moved_field() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder
@@ -806,7 +861,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn dotted_field_name() -> Result<(), TestFailure> {
+  fn dotted_field_name() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder.new_span(
@@ -827,7 +882,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn borrowed_field() -> Result<(), TestFailure> {
+  fn borrowed_field() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder
@@ -860,7 +915,7 @@ mod tests {
   #[test]
   // If emitting log instrumentation, this gets moved anyway, breaking the test.
   #[cfg(not(feature = "log"))]
-  fn move_field_out_of_struct() -> Result<(), TestFailure> {
+  fn move_field_out_of_struct() -> Result<(), TestError> {
     use tracing::field::debug;
 
     #[derive(Debug)]
@@ -907,7 +962,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn float_values() -> Result<(), TestFailure> {
+  fn float_values() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder.new_span(
@@ -992,7 +1047,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn record_new_value_for_field() -> Result<(), TestFailure> {
+  fn record_new_value_for_field() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder
@@ -1024,7 +1079,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn record_new_values_for_fields() -> Result<(), TestFailure> {
+  fn record_new_values_for_fields() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder
@@ -1062,7 +1117,7 @@ mod tests {
   // library to verify the macros do not depend on it.
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn record_all_macro_records_new_values_for_fields() -> Result<(), TestFailure> {
+  fn record_all_macro_records_new_values_for_fields() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder
@@ -1094,7 +1149,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn record_all_macro_records_all_fields() -> Result<(), TestFailure> {
+  fn record_all_macro_records_all_fields() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder
@@ -1127,7 +1182,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn record_all_macro_records_all_fields_different_order() -> Result<(), TestFailure> {
+  fn record_all_macro_records_all_fields_different_order() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder
@@ -1160,12 +1215,12 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn record_all_macro_unknown_field() -> Result<(), TestFailure> {
+  fn record_all_macro_unknown_field() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder
           .new_span(expect::span().named("foo").with_fields(expect::field("bar")))
-          .record(expect::span().named("foo"), field::ExpectedFields::default().only())
+          .record(expect::span().named("foo"), ExpectedFields::default().only())
           .enter(expect::span().named("foo"))
           .exit(expect::span().named("foo"))
           .close_span(expect::span().named("foo"))
@@ -1185,7 +1240,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn new_span_with_target_and_log_level() -> Result<(), TestFailure> {
+  fn new_span_with_target_and_log_level() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::DEBUG), |builder| {
         builder.new_span(expect::span().named("foo").with_target("app_span").at_level(Level::DEBUG))
@@ -1203,7 +1258,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn explicit_root_span_is_root() -> Result<(), TestFailure> {
+  fn explicit_root_span_is_root() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder.new_span(expect::span().named("foo").with_ancestry(expect::is_explicit_root()))
@@ -1221,7 +1276,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn explicit_root_span_is_root_regardless_of_ctx() -> Result<(), TestFailure> {
+  fn explicit_root_span_is_root_regardless_of_ctx() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder
@@ -1256,7 +1311,7 @@ mod tests {
   )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn explicit_child() -> Result<(), TestFailure> {
+  fn explicit_child() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .new_span(expect::span().named("foo"))
       .new_span(expect::span().named("bar").with_ancestry(expect::has_explicit_parent("foo")))
@@ -1286,7 +1341,7 @@ mod tests {
   )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn explicit_child_at_levels() -> Result<(), TestFailure> {
+  fn explicit_child_at_levels() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .new_span(expect::span().named("foo"))
       .new_span(expect::span().named("a").with_ancestry(expect::has_explicit_parent("foo")))
@@ -1312,7 +1367,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn explicit_child_regardless_of_ctx() -> Result<(), TestFailure> {
+  fn explicit_child_regardless_of_ctx() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder
@@ -1336,7 +1391,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn contextual_root() -> Result<(), TestFailure> {
+  fn contextual_root() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder.new_span(expect::span().named("foo").with_ancestry(expect::is_contextual_root()))
@@ -1354,7 +1409,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn contextual_child() -> Result<(), TestFailure> {
+  fn contextual_child() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder
@@ -1378,7 +1433,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn display_shorthand() -> Result<(), TestFailure> {
+  fn display_shorthand() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder.new_span(
@@ -1399,7 +1454,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn debug_shorthand() -> Result<(), TestFailure> {
+  fn debug_shorthand() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder.new_span(
@@ -1420,7 +1475,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn both_shorthands() -> Result<(), TestFailure> {
+  fn both_shorthands() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder.new_span(
@@ -1444,7 +1499,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn constant_field_name() -> Result<(), TestFailure> {
+  fn constant_field_name() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder.new_span(
@@ -1477,7 +1532,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn keyword_ident_in_field_name_span_macro() -> Result<(), TestFailure> {
+  fn keyword_ident_in_field_name_span_macro() -> Result<(), TestError> {
     #[derive(Debug)]
     struct Foo;
 

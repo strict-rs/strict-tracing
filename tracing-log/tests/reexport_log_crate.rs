@@ -2,7 +2,8 @@
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use strict_test_support::ResultFailure;
   use strict_test_support::ensure_ok;
   use tracing_log::LogTracer;
   use tracing_log::log::LevelFilter;
@@ -12,7 +13,7 @@ mod tests {
   ///
   /// See <https://github.com/tokio-rs/tracing/issues/552>.
   #[test]
-  fn can_initialize_log_tracer_with_level() -> Result<(), TestFailure> {
+  fn can_initialize_log_tracer_with_level() -> Result<(), ResultFailure<log::SetLoggerError>> {
     ensure_ok(
       LogTracer::init_with_filter(LevelFilter::Error),
       "`LogTracer` should initialize with a re-exported `LevelFilter`",

@@ -15,7 +15,28 @@ mod tests {
   use futures::executor::block_on;
   use futures::future;
   use futures::task::noop_waker_ref;
-  use strict_test_support::TestFailure;
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    #[cfg(feature = "http")]
+    ResultHttpError(#[from] strict_test_support::ResultFailure<http::Error>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonString(#[from] strict_test_support::ComparisonFailure<String, String>),
+    /// Retains the native service failure.
+    #[error(transparent)]
+    Service(#[from] strict_test_support::ResultFailure<ServiceError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
@@ -44,24 +65,24 @@ mod tests {
   use tracing_tower::service_span;
 
   #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-  struct TestError {
+  struct ServiceError {
     label: &'static str,
   }
 
-  impl fmt::Display for TestError {
+  impl fmt::Display for ServiceError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
       formatter.write_str(self.label)
     }
   }
 
-  impl Error for TestError {}
+  impl Error for ServiceError {}
 
   #[derive(Clone, Debug, Default)]
   struct ReadyService;
 
   impl Service<&'static str> for ReadyService {
     type Response = &'static str;
-    type Error = TestError;
+    type Error = ServiceError;
     type Future = future::Ready<Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -80,7 +101,7 @@ mod tests {
 
   impl Service<&'static str> for PolledEventService {
     type Response = &'static str;
-    type Error = TestError;
+    type Error = ServiceError;
     type Future = PolledEventFuture;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -100,7 +121,7 @@ mod tests {
   }
 
   impl Future for PolledEventFuture {
-    type Output = Result<&'static str, TestError>;
+    type Output = Result<&'static str, ServiceError>;
 
     fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
       let this = self.get_mut();
@@ -117,7 +138,7 @@ mod tests {
 
   impl Service<&'static str> for FailingService {
     type Response = &'static str;
-    type Error = TestError;
+    type Error = ServiceError;
     type Future = future::Ready<Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -125,7 +146,7 @@ mod tests {
     }
 
     fn call(&mut self, _request: &'static str) -> Self::Future {
-      future::ready(Err(TestError {
+      future::ready(Err(ServiceError {
         label: "request failed"
       }))
     }
@@ -138,7 +159,7 @@ mod tests {
 
   impl Service<&'static str> for PendingReadyService {
     type Response = &'static str;
-    type Error = TestError;
+    type Error = ServiceError;
     type Future = future::Ready<Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -161,7 +182,7 @@ mod tests {
   #[cfg(feature = "tower-make")]
   impl Service<&'static str> for ReadyMakeService {
     type Response = ReadyService;
-    type Error = TestError;
+    type Error = ServiceError;
     type Future = future::Ready<Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -180,7 +201,7 @@ mod tests {
   #[cfg(feature = "tower-make")]
   impl Service<&'static str> for FailingMakeService {
     type Response = ReadyService;
-    type Error = TestError;
+    type Error = ServiceError;
     type Future = future::Ready<Result<Self::Response, Self::Error>>;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -188,7 +209,7 @@ mod tests {
     }
 
     fn call(&mut self, _target: &'static str) -> Self::Future {
-      future::ready(Err(TestError {
+      future::ready(Err(ServiceError {
         label: "make failed"
       }))
     }
@@ -197,13 +218,13 @@ mod tests {
   #[cfg(feature = "tower-make")]
   #[derive(Clone, Debug)]
   struct PollingMakeService {
-    response: Result<ReadyService, TestError>,
+    response: Result<ReadyService, ServiceError>,
   }
 
   #[cfg(feature = "tower-make")]
   impl Service<&'static str> for PollingMakeService {
     type Response = ReadyService;
-    type Error = TestError;
+    type Error = ServiceError;
     type Future = PollingMakeFuture;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -222,12 +243,12 @@ mod tests {
   #[derive(Debug)]
   struct PollingMakeFuture {
     target:   &'static str,
-    response: Option<Result<ReadyService, TestError>>,
+    response: Option<Result<ReadyService, ServiceError>>,
   }
 
   #[cfg(feature = "tower-make")]
   impl Future for PollingMakeFuture {
-    type Output = Result<ReadyService, TestError>;
+    type Output = Result<ReadyService, ServiceError>;
 
     fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
       let this = self.get_mut();
@@ -246,7 +267,7 @@ mod tests {
   #[cfg(feature = "tower-make")]
   impl Service<&'static str> for RepeatReadyMakeService {
     type Response = ReadyService;
-    type Error = TestError;
+    type Error = ServiceError;
     type Future = RepeatReadyMakeFuture;
 
     fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
@@ -264,7 +285,7 @@ mod tests {
 
   #[cfg(feature = "tower-make")]
   impl Future for RepeatReadyMakeFuture {
-    type Output = Result<ReadyService, TestError>;
+    type Output = Result<ReadyService, ServiceError>;
 
     fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
       Poll::Ready(Ok(ReadyService))
@@ -281,11 +302,11 @@ mod tests {
     level: Level,
     fields: ExpectedFields,
     context: &'static str,
-  ) -> Result<(), TestFailure> {
+  ) -> Result<(), TestError> {
     let request_span = expect::span().named("request").at_level(level).with_fields(fields);
     let (subscriber, handle) = subscriber::mock().new_span(request_span).run_with_handle();
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), TestError> {
       let request = ensure_ok(
         http::Request::builder()
           .method("POST")
@@ -299,7 +320,7 @@ mod tests {
       Ok(())
     })?;
 
-    ensure_ok(handle.finished(), context)
+    ensure_ok(handle.finished(), context).map_err(TestError::from)
   }
 
   fn poll_ready_once<S, R>(service: &mut S) -> Poll<Result<(), S::Error>>
@@ -311,13 +332,15 @@ mod tests {
     service.poll_ready(&mut cx)
   }
 
-  fn ensure_ready<S, R>(service: &mut S) -> Result<(), TestFailure>
+  fn ensure_ready<S, R>(service: &mut S) -> Result<(), TestError>
   where
     S: Service<R>,
     S::Error: fmt::Debug,
   {
     let ready = poll_ready_once::<S, R>(service);
     ensure(matches!(ready, Poll::Ready(Ok(()))), "service reports ready")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   fn call_service<S>(service: &mut S, request: &'static str) -> Result<S::Response, S::Error>
@@ -328,7 +351,7 @@ mod tests {
   }
 
   #[cfg(feature = "tower-make")]
-  fn ensure_second_poll_is_pending<F, T, E>(inner_future: F, context: &'static str) -> Result<(), TestFailure>
+  fn ensure_second_poll_is_pending<F, T, E>(inner_future: F, context: &'static str) -> Result<(), TestError>
   where
     F: Future<Output = Result<T, E>>,
     E: fmt::Debug,
@@ -338,14 +361,16 @@ mod tests {
     let mut cx = Context::from_waker(waker);
 
     let first = Future::poll(Pin::as_mut(&mut pinned_future), &mut cx);
-    ensure(matches!(first, Poll::Ready(Ok(_service))), "first future poll returns a service")?;
+    ensure(matches!(first, Poll::Ready(Ok(_service))), "first future poll returns a service").map(drop)?;
 
     let second = Future::poll(Pin::as_mut(&mut pinned_future), &mut cx);
     ensure(matches!(second, Poll::Pending), context)
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn trace_requests_enters_request_span_for_call_events() -> Result<(), TestFailure> {
+  fn trace_requests_enters_request_span_for_call_events() -> Result<(), TestError> {
     let request_span = expect::span()
       .named("request")
       .with_fields(expect::field("request").with_value(&"alpha"));
@@ -358,18 +383,20 @@ mod tests {
       .event(event)
       .run_with_handle();
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), TestError> {
       let get_span = |request: &&'static str| tracing::span!(Level::INFO, "request", request = *request);
       let mut service = ReadyService.trace_requests(get_span);
       let response = ensure_ok(call_service(&mut service, "alpha"), "request service returns response")?;
-      ensure_eq(&response, &"alpha", "request service returns the request")
+      ensure_eq(String::from(response), String::from("alpha"), "request service returns the request")
+        .map(drop)
+        .map_err(TestError::from)
     })?;
 
-    ensure_ok(handle.finished(), "mock expectations should finish")
+    ensure_ok(handle.finished(), "mock expectations should finish").map_err(TestError::from)
   }
 
   #[test]
-  fn trace_requests_does_not_create_request_span_before_call() -> Result<(), TestFailure> {
+  fn trace_requests_does_not_create_request_span_before_call() -> Result<(), TestError> {
     let ready_polled = Arc::new(AtomicBool::new(false));
     let span_requested = Arc::new(AtomicBool::new(false));
     let observed = Arc::clone(&span_requested);
@@ -384,33 +411,43 @@ mod tests {
     ensure(
       matches!(poll_ready_once::<_, &'static str>(&mut service), Poll::Pending),
       "pending service stays pending",
-    )?;
-    ensure(ready_polled.load(Ordering::Acquire), "inner readiness was polled")?;
+    )
+    .map(drop)?;
+    ensure(ready_polled.load(Ordering::Acquire), "inner readiness was polled").map(drop)?;
     ensure(
       !span_requested.load(Ordering::Acquire),
       "request span is not requested during readiness",
-    )?;
+    )
+    .map(drop)?;
 
     let response = ensure_ok(call_service(&mut service, "beta"), "pending service still handles call")?;
-    ensure_eq(&response, &"beta", "pending service returns the request")?;
+    ensure_eq(String::from(response), String::from("beta"), "pending service returns the request").map(drop)?;
     ensure(span_requested.load(Ordering::Acquire), "request span is requested during call")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn trace_requests_preserves_inner_service_errors() -> Result<(), TestFailure> {
+  fn trace_requests_preserves_inner_service_errors() -> Result<(), TestError> {
     let get_span = |request: &&'static str| tracing::span!(Level::INFO, "request", request = *request);
     let mut service = FailingService.trace_requests(get_span);
     let error = block_on(service.call("failed")).map_or_else(
       |error| error,
-      |_response| TestError {
+      |_response| ServiceError {
         label: "unexpected success",
       },
     );
-    ensure_eq(&error.label, &"request failed", "request instrumentation preserves inner errors")
+    ensure_eq(
+      String::from(error.label),
+      String::from("request failed"),
+      "request instrumentation preserves inner errors",
+    )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn trace_service_enters_service_span_for_ready_and_call() -> Result<(), TestFailure> {
+  fn trace_service_enters_service_span_for_ready_and_call() -> Result<(), TestError> {
     let service_span = expect::span().named("service");
     let ready_event = expect::event().with_ancestry(expect::has_contextual_parent("service"));
     let call_event = expect::event()
@@ -425,18 +462,24 @@ mod tests {
       .event(call_event)
       .run_with_handle();
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), TestError> {
       let mut service = ReadyService.trace_service(make_service_span);
       ensure_ready::<_, &'static str>(&mut service)?;
       let response = ensure_ok(call_service(&mut service, "gamma"), "service-span service returns response")?;
-      ensure_eq(&response, &"gamma", "service-span service returns the request")
+      ensure_eq(
+        String::from(response),
+        String::from("gamma"),
+        "service-span service returns the request",
+      )
+      .map(drop)
+      .map_err(TestError::from)
     })?;
 
-    ensure_ok(handle.finished(), "mock expectations should finish")
+    ensure_ok(handle.finished(), "mock expectations should finish").map_err(TestError::from)
   }
 
   #[test]
-  fn instrument_nests_request_span_inside_service_span() -> Result<(), TestFailure> {
+  fn instrument_nests_request_span_inside_service_span() -> Result<(), TestError> {
     let service_span = expect::span().named("service");
     let request_span = expect::span()
       .named("request")
@@ -452,17 +495,23 @@ mod tests {
       .event(event)
       .run_with_handle();
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), TestError> {
       let mut service = ReadyService.instrument(make_service_span);
       let response = ensure_ok(call_service(&mut service, "delta"), "instrumented service returns response")?;
-      ensure_eq(&response, &"delta", "instrumented service returns the request")
+      ensure_eq(
+        String::from(response),
+        String::from("delta"),
+        "instrumented service returns the request",
+      )
+      .map(drop)
+      .map_err(TestError::from)
     })?;
 
-    ensure_ok(handle.finished(), "mock expectations should finish")
+    ensure_ok(handle.finished(), "mock expectations should finish").map_err(TestError::from)
   }
 
   #[test]
-  fn get_span_closure_receives_request_value() -> Result<(), TestFailure> {
+  fn get_span_closure_receives_request_value() -> Result<(), TestError> {
     let observed = Arc::new(AtomicBool::new(false));
     let observed_request = Arc::clone(&observed);
     let mut service = ReadyService.trace_requests(move |request: &&'static str| {
@@ -471,12 +520,19 @@ mod tests {
     });
 
     let response = ensure_ok(call_service(&mut service, "epsilon"), "closure-span service returns response")?;
-    ensure_eq(&response, &"epsilon", "closure-span service returns the request")?;
+    ensure_eq(
+      String::from(response),
+      String::from("epsilon"),
+      "closure-span service returns the request",
+    )
+    .map(drop)?;
     ensure(observed.load(Ordering::Acquire), "get-span closure observes request")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn get_span_accepts_fixed_span_for_all_requests() -> Result<(), TestFailure> {
+  fn get_span_accepts_fixed_span_for_all_requests() -> Result<(), TestError> {
     let expected_fixed_span = expect::span().named("fixed");
     let event = expect::event()
       .with_ancestry(expect::has_contextual_parent("fixed"))
@@ -490,19 +546,25 @@ mod tests {
       .exit(expect::span().named("fixed"))
       .run_with_handle();
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), TestError> {
       let actual_fixed_span = tracing::info_span!("fixed");
       let mut service = PolledEventService.trace_requests(actual_fixed_span);
       let response = ensure_ok(call_service(&mut service, "zeta"), "fixed-span service returns response")?;
-      ensure_eq(&response, &"zeta", "fixed-span service returns the request")
+      ensure_eq(
+        String::from(response),
+        String::from("zeta"),
+        "fixed-span service returns the request",
+      )
+      .map(drop)
+      .map_err(TestError::from)
     })?;
 
-    ensure_ok(handle.finished(), "mock expectations should finish")
+    ensure_ok(handle.finished(), "mock expectations should finish").map_err(TestError::from)
   }
 
   #[test]
   #[cfg(feature = "tower-layer")]
-  fn request_and_service_layers_apply_the_same_wrappers() -> Result<(), TestFailure> {
+  fn request_and_service_layers_apply_the_same_wrappers() -> Result<(), TestError> {
     let service_span = expect::span().named("service");
     let request_span = expect::span()
       .named("request")
@@ -518,22 +580,24 @@ mod tests {
       .event(event)
       .run_with_handle();
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), TestError> {
       let get_span = |request: &&'static str| tracing::span!(Level::INFO, "request", request = *request);
       let request_layer = request_span::layer(get_span);
       let service = request_layer.layer(ReadyService);
       let service_layer = service_span::layer(|_service: &_| tracing::info_span!("service"));
       let mut layered_service = service_layer.layer(service);
       let response = ensure_ok(call_service(&mut layered_service, "eta"), "layered service returns response")?;
-      ensure_eq(&response, &"eta", "layered service returns the request")
+      ensure_eq(String::from(response), String::from("eta"), "layered service returns the request")
+        .map(drop)
+        .map_err(TestError::from)
     })?;
 
-    ensure_ok(handle.finished(), "mock expectations should finish")
+    ensure_ok(handle.finished(), "mock expectations should finish").map_err(TestError::from)
   }
 
   #[test]
   #[cfg(feature = "tower-make")]
-  fn request_make_service_wraps_successful_services_and_preserves_errors() -> Result<(), TestFailure> {
+  fn request_make_service_wraps_successful_services_and_preserves_errors() -> Result<(), TestError> {
     let request_span = expect::span()
       .named("request")
       .with_fields(expect::field("request").with_value(&"theta"));
@@ -546,7 +610,7 @@ mod tests {
       .event(event)
       .run_with_handle();
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), TestError> {
       let get_span = |request: &&'static str| tracing::span!(Level::INFO, "request", request = *request);
       let mut make_service = request_span::MakeService::new(
         ReadyMakeService {
@@ -557,7 +621,13 @@ mod tests {
       ensure_ready::<_, &'static str>(&mut make_service)?;
       let mut service = ensure_ok(block_on(make_service.call("target")), "request make-service returns service")?;
       let response = ensure_ok(call_service(&mut service, "theta"), "made request service returns response")?;
-      ensure_eq(&response, &"theta", "made request service returns the request")
+      ensure_eq(
+        String::from(response),
+        String::from("theta"),
+        "made request service returns the request",
+      )
+      .map(drop)
+      .map_err(TestError::from)
     })?;
     ensure_ok(handle.finished(), "mock expectations should finish")?;
 
@@ -565,16 +635,22 @@ mod tests {
     let mut failing = request_span::MakeService::new(FailingMakeService, get_span);
     let error = block_on(failing.call("target")).map_or_else(
       |error| error,
-      |_made_service| TestError {
+      |_made_service| ServiceError {
         label: "unexpected success",
       },
     );
-    ensure_eq(&error.label, &"make failed", "request make-service preserves make errors")
+    ensure_eq(
+      String::from(error.label),
+      String::from("make failed"),
+      "request make-service preserves make errors",
+    )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
   #[cfg(feature = "tower-make")]
-  fn service_make_service_enters_target_span_while_polling_future() -> Result<(), TestFailure> {
+  fn service_make_service_enters_target_span_while_polling_future() -> Result<(), TestError> {
     let successful_span = expect::span()
       .named("make service")
       .with_fields(expect::field("target").with_value(&"make-ok"));
@@ -597,7 +673,7 @@ mod tests {
       .event(failing_event)
       .run_with_handle();
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), TestError> {
       let successful_get_span = |target: &&'static str| tracing::info_span!("make service", target = *target);
       let mut successful = service_span::make::MakeService::new(
         PollingMakeService {
@@ -611,7 +687,7 @@ mod tests {
       let failing_get_span = |target: &&'static str| tracing::info_span!("make service", target = *target);
       let mut failing = service_span::make::MakeService::new(
         PollingMakeService {
-          response: Err(TestError {
+          response: Err(ServiceError {
             label: "make failed"
           }),
         },
@@ -620,18 +696,24 @@ mod tests {
       ensure_ready::<_, &'static str>(&mut failing)?;
       let error = block_on(failing.call("make-err")).map_or_else(
         |error| error,
-        |_unexpected_service| TestError {
+        |_unexpected_service| ServiceError {
           label: "unexpected success",
         },
       );
-      ensure_eq(&error.label, &"make failed", "service make-service preserves make errors")
+      ensure_eq(
+        String::from(error.label),
+        String::from("make failed"),
+        "service make-service preserves make errors",
+      )
+      .map(drop)
+      .map_err(TestError::from)
     })?;
 
-    ensure_ok(handle.finished(), "mock expectations should finish")
+    ensure_ok(handle.finished(), "mock expectations should finish").map_err(TestError::from)
   }
 
   #[test]
-  fn cloned_wrappers_preserve_inner_service_behavior() -> Result<(), TestFailure> {
+  fn cloned_wrappers_preserve_inner_service_behavior() -> Result<(), TestError> {
     let request_get_span = |_request: &&'static str| tracing::Span::none();
     let mut request_original = ReadyService.trace_requests(request_get_span);
     let mut request_clone = request_original.clone();
@@ -645,11 +727,17 @@ mod tests {
       "cloned request wrapper returns response",
     )?;
     ensure_eq(
-      &original_response,
-      &"request-original",
+      String::from(original_response),
+      String::from("request-original"),
       "original request wrapper preserves request",
-    )?;
-    ensure_eq(&cloned_response, &"request-clone", "cloned request wrapper preserves request")?;
+    )
+    .map(drop)?;
+    ensure_eq(
+      String::from(cloned_response),
+      String::from("request-clone"),
+      "cloned request wrapper preserves request",
+    )
+    .map(drop)?;
 
     let mut service_original = service_span::Service::new(ReadyService, tracing::Span::none());
     let mut service_clone = service_original.clone();
@@ -658,14 +746,19 @@ mod tests {
       call_service(&mut service_clone, "service-clone"),
       "cloned service wrapper returns response",
     )?;
-    ensure_eq(&service_response, &"service-clone", "cloned service wrapper preserves request")?;
+    ensure_eq(
+      String::from(service_response),
+      String::from("service-clone"),
+      "cloned service wrapper preserves request",
+    )
+    .map(drop)?;
 
     Ok(())
   }
 
   #[test]
   #[cfg(feature = "tower-make")]
-  fn cloned_make_wrappers_preserve_inner_service_behavior() -> Result<(), TestFailure> {
+  fn cloned_make_wrappers_preserve_inner_service_behavior() -> Result<(), TestError> {
     let make_get_span = |_request: &&'static str| tracing::Span::none();
     let mut request_make_original = request_span::MakeService::new(
       ReadyMakeService {
@@ -705,7 +798,7 @@ mod tests {
 
   #[test]
   #[cfg(feature = "tower-make")]
-  fn make_futures_return_pending_after_wrapped_service_is_taken() -> Result<(), TestFailure> {
+  fn make_futures_return_pending_after_wrapped_service_is_taken() -> Result<(), TestError> {
     let request_get_span = |_request: &&'static str| tracing::info_span!("request");
     let mut request_make_service = request_span::MakeService::new(RepeatReadyMakeService, request_get_span);
     let request_future = request_make_service.call("request-target");
@@ -725,7 +818,7 @@ mod tests {
 
   #[test]
   #[cfg(all(feature = "tower-layer", feature = "tower-make"))]
-  fn request_make_layer_wraps_services_with_request_spans() -> Result<(), TestFailure> {
+  fn request_make_layer_wraps_services_with_request_spans() -> Result<(), TestError> {
     let request_span = expect::span()
       .named("request")
       .with_fields(expect::field("request").with_value(&"layer-request"));
@@ -738,7 +831,7 @@ mod tests {
       .event(event)
       .run_with_handle();
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), TestError> {
       let get_span = |request: &&'static str| tracing::span!(Level::INFO, "request", request = *request);
       let make_layer = request_span::make::layer::<&'static str, &'static str, _>(get_span);
       let mut make_service = make_layer.clone().layer(ReadyMakeService {
@@ -750,15 +843,21 @@ mod tests {
         call_service(&mut service, "layer-request"),
         "request make-layer service returns response",
       )?;
-      ensure_eq(&response, &"layer-request", "request make-layer service returns request")
+      ensure_eq(
+        String::from(response),
+        String::from("layer-request"),
+        "request make-layer service returns request",
+      )
+      .map(drop)
+      .map_err(TestError::from)
     })?;
 
-    ensure_ok(handle.finished(), "mock expectations should finish")
+    ensure_ok(handle.finished(), "mock expectations should finish").map_err(TestError::from)
   }
 
   #[test]
   #[cfg(all(feature = "tower-layer", feature = "tower-make"))]
-  fn service_make_layer_enters_target_span_while_polling_future() -> Result<(), TestFailure> {
+  fn service_make_layer_enters_target_span_while_polling_future() -> Result<(), TestError> {
     let make_span = expect::span()
       .named("make service")
       .with_fields(expect::field("target").with_value(&"layer-target"));
@@ -771,7 +870,7 @@ mod tests {
       .event(event)
       .run_with_handle();
 
-    with_default(subscriber, || -> Result<(), TestFailure> {
+    with_default(subscriber, || -> Result<(), TestError> {
       let get_span = |target: &&'static str| tracing::info_span!("make service", target = *target);
       let make_layer = service_span::make::layer::<&'static str, &'static str, _>(get_span);
       let mut make_service = make_layer.clone().layer(PollingMakeService {
@@ -782,12 +881,12 @@ mod tests {
       Ok(())
     })?;
 
-    ensure_ok(handle.finished(), "mock expectations should finish")
+    ensure_ok(handle.finished(), "mock expectations should finish").map_err(TestError::from)
   }
 
   #[cfg(feature = "http")]
   #[test]
-  fn http_request_span_constructors_record_expected_fields() -> Result<(), TestFailure> {
+  fn http_request_span_constructors_record_expected_fields() -> Result<(), TestError> {
     ensure_http_constructor_records_span(
       info_request,
       Level::INFO,

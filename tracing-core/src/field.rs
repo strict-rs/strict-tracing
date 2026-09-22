@@ -1237,7 +1237,38 @@ mod test {
   use core::num::NonZeroI16;
   use core::num::NonZeroU16;
 
-  use strict_test_support::TestFailure;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Retains the native field failure.
+    #[error(transparent)]
+    Field(#[from] strict_test_support::OptionFailure<Field>),
+    /// Retains the native countcomparison failure.
+    #[error(transparent)]
+    CountComparison(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+    /// Retains the native signedcomparison failure.
+    #[error(transparent)]
+    SignedComparison(#[from] strict_test_support::ComparisonFailure<i64, i64>),
+    /// Retains the native unsignedcomparison failure.
+    #[error(transparent)]
+    UnsignedComparison(#[from] strict_test_support::ComparisonFailure<u64, u64>),
+    /// Retains the native unsigned128comparison failure.
+    #[error(transparent)]
+    Unsigned128Comparison(#[from] strict_test_support::ComparisonFailure<u128, u128>),
+    /// Retains the native signed128comparison failure.
+    #[error(transparent)]
+    Signed128Comparison(#[from] strict_test_support::ComparisonFailure<i128, i128>),
+    /// Retains the native floatcomparison failure.
+    #[error(transparent)]
+    FloatComparison(#[from] strict_test_support::ComparisonFailure<f64, f64>),
+    /// Retains the native stringcomparison failure.
+    #[error(transparent)]
+    StringComparison(#[from] strict_test_support::ComparisonFailure<String, String>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_some;
@@ -1295,7 +1326,7 @@ mod test {
     }
   }
 
-  fn test_fields(fields: &FieldSet) -> Result<(Field, Field, Field), TestFailure> {
+  fn test_fields(fields: &FieldSet) -> Result<(Field, Field, Field), TestError> {
     let foo = ensure_some(fields.field("foo"), "foo field exists")?;
     let bar = ensure_some(fields.field("bar"), "bar field exists")?;
     let baz = ensure_some(fields.field("baz"), "baz field exists")?;
@@ -1304,32 +1335,38 @@ mod test {
   }
 
   #[test]
-  fn value_set_with_no_values_is_empty() -> Result<(), TestFailure> {
+  fn value_set_with_no_values_is_empty() -> Result<(), TestError> {
     let fields = TEST_META_1.fields();
     let (foo, bar, baz) = test_fields(fields)?;
     let values = &[(&foo, None), (&bar, None), (&baz, None)];
     let valueset = fields.value_set(values);
     ensure(valueset.is_empty(), "value set with no values is empty")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn index_of_field_in_fieldset_is_correct() -> Result<(), TestFailure> {
+  fn index_of_field_in_fieldset_is_correct() -> Result<(), TestError> {
     let fields = TEST_META_1.fields();
     let (foo, bar, baz) = test_fields(fields)?;
-    ensure_eq(&foo.index(), &0_usize, "foo field index")?;
-    ensure_eq(&bar.index(), &1_usize, "bar field index")?;
-    ensure_eq(&baz.index(), &2_usize, "baz field index")
+    ensure_eq(foo.index(), 0_usize, "foo field index").map(drop)?;
+    ensure_eq(bar.index(), 1_usize, "bar field index").map(drop)?;
+    ensure_eq(baz.index(), 2_usize, "baz field index")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn empty_value_set_is_empty() -> Result<(), TestFailure> {
+  fn empty_value_set_is_empty() -> Result<(), TestError> {
     let fields = TEST_META_1.fields();
     let valueset = fields.value_set(&[]);
     ensure(valueset.is_empty(), "empty value set is empty")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn value_sets_with_fields_from_other_callsites_are_empty() -> Result<(), TestFailure> {
+  fn value_sets_with_fields_from_other_callsites_are_empty() -> Result<(), TestError> {
     let fields = TEST_META_1.fields();
     let (foo, bar, baz) = test_fields(fields)?;
     let one: &dyn Value = &1;
@@ -1338,20 +1375,24 @@ mod test {
     let values = &[(&foo, Some(one)), (&bar, Some(two)), (&baz, Some(three))];
     let valueset = TEST_META_2.fields().value_set(values);
     ensure(valueset.is_empty(), "values from another callsite are ignored")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn sparse_value_sets_are_not_empty() -> Result<(), TestFailure> {
+  fn sparse_value_sets_are_not_empty() -> Result<(), TestError> {
     let fields = TEST_META_1.fields();
     let (foo, bar, baz) = test_fields(fields)?;
     let value: &dyn Value = &57;
     let values = &[(&foo, None), (&bar, Some(value)), (&baz, None)];
     let valueset = fields.value_set(values);
     ensure(!valueset.is_empty(), "sparse value set is not empty")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn fields_from_other_callsets_are_skipped() -> Result<(), TestFailure> {
+  fn fields_from_other_callsets_are_skipped() -> Result<(), TestError> {
     struct MyVisitor {
       saw_foreign_callsite: bool,
     }
@@ -1372,10 +1413,12 @@ mod test {
     let valueset = fields.value_set(values);
     valueset.record(&mut visitor);
     ensure(!visitor.saw_foreign_callsite, "fields from other callsites are skipped")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn empty_fields_are_skipped() -> Result<(), TestFailure> {
+  fn empty_fields_are_skipped() -> Result<(), TestError> {
     struct MyVisitor {
       saw_bar:   bool,
       saw_other: bool,
@@ -1399,12 +1442,14 @@ mod test {
     };
     let valueset = fields.value_set(values);
     valueset.record(&mut visitor);
-    ensure(visitor.saw_bar, "non-empty bar field is recorded")?;
+    ensure(visitor.saw_bar, "non-empty bar field is recorded").map(drop)?;
     ensure(!visitor.saw_other, "empty fields are skipped")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn record_debug_fn() -> Result<(), TestFailure> {
+  fn record_debug_fn() -> Result<(), TestError> {
     struct NumericVisitor {
       total:   i64,
       records: usize,
@@ -1430,26 +1475,28 @@ mod test {
       total: 0, records: 0
     };
     valueset.record(&mut visitor);
-    ensure_eq(&visitor.total, &6_i64, "numeric values are recorded")?;
-    ensure_eq(&visitor.records, &3_usize, "all numeric values are visited")
+    ensure_eq(visitor.total, 6_i64, "numeric values are recorded").map(drop)?;
+    ensure_eq(visitor.records, 3_usize, "all numeric values are visited")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
   #[cfg(feature = "std")]
-  fn record_error() -> Result<(), TestFailure> {
+  fn record_error() -> Result<(), TestError> {
     use alloc::boxed::Box;
     use alloc::format;
     use alloc::string::String;
     use alloc::string::ToString as _;
 
     #[derive(Debug)]
-    struct TestError;
-    impl fmt::Display for TestError {
+    struct FieldError;
+    impl fmt::Display for FieldError {
       fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("test error")
       }
     }
-    impl Error for TestError {}
+    impl Error for FieldError {}
 
     struct ErrorVisitor {
       rendered:  String,
@@ -1470,7 +1517,7 @@ mod test {
 
     let fields = TEST_META_1.fields();
     let (foo, bar, baz) = test_fields(fields)?;
-    let err: Box<dyn Error + Send + Sync + 'static> = Box::new(TestError);
+    let err: Box<dyn Error + Send + Sync + 'static> = Box::new(FieldError);
     let err_value: &dyn Value = &err;
     let empty: &dyn Value = &Empty;
     let values = &[(&foo, Some(err_value)), (&bar, Some(empty)), (&baz, Some(empty))];
@@ -1481,13 +1528,15 @@ mod test {
       saw_other: false,
     };
     valueset.record(&mut visitor);
-    ensure(visitor.saw_foo, "error field is visited")?;
-    ensure(!visitor.saw_other, "empty fields are skipped")?;
-    ensure_eq(&visitor.rendered, &format!("{err}"), "error records through Display")
+    ensure(visitor.saw_foo, "error field is visited").map(drop)?;
+    ensure(!visitor.saw_other, "empty fields are skipped").map(drop)?;
+    ensure_eq(visitor.rendered, format!("{err}"), "error records through Display")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn record_bytes() -> Result<(), TestFailure> {
+  fn record_bytes() -> Result<(), TestError> {
     struct BytesVisitor {
       first_matches:  Option<bool>,
       second_matches: Option<bool>,
@@ -1522,13 +1571,15 @@ mod test {
       saw_other:      false,
     };
     valueset.record(&mut visitor);
-    ensure(visitor.first_matches == Some(true), "first byte field records bytes")?;
-    ensure(visitor.second_matches == Some(true), "second byte field records bytes")?;
+    ensure(visitor.first_matches == Some(true), "first byte field records bytes").map(drop)?;
+    ensure(visitor.second_matches == Some(true), "second byte field records bytes").map(drop)?;
     ensure(!visitor.saw_other, "only byte fields are recorded")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn field_set_lookup_iteration_display_and_debug_are_stable() -> Result<(), TestFailure> {
+  fn field_set_lookup_iteration_display_and_debug_are_stable() -> Result<(), TestError> {
     let fields = TEST_META_1.fields();
     let (first_field, second_field, third_field) = test_fields(fields)?;
     let mut iter = fields.iter();
@@ -1537,50 +1588,56 @@ mod test {
     let second_iterated = ensure_some(iter.next(), "second iterated field exists")?;
     let third_iterated = ensure_some(iter.next(), "third iterated field exists")?;
 
-    ensure_eq(&fields.len(), &3_usize, "field set reports the number of fields")?;
-    ensure(!fields.is_empty(), "field set with fields is not empty")?;
-    ensure(fields.field("missing").is_none(), "missing field lookup returns none")?;
-    ensure(fields.contains(&first_field), "field set contains its first field")?;
-    ensure(fields.contains(&second_field), "field set contains its second field")?;
-    ensure(fields.contains(&third_field), "field set contains its third field")?;
-    ensure(first_iterated == first_field, "iterator yields first field in declaration order")?;
-    ensure(second_iterated == second_field, "iterator yields second field in declaration order")?;
-    ensure(third_iterated == third_field, "iterator yields third field in declaration order")?;
-    ensure(iter.next().is_none(), "iterator terminates after declared fields")?;
+    ensure_eq(fields.len(), 3_usize, "field set reports the number of fields").map(drop)?;
+    ensure(!fields.is_empty(), "field set with fields is not empty").map(drop)?;
+    ensure(fields.field("missing").is_none(), "missing field lookup returns none").map(drop)?;
+    ensure(fields.contains(&first_field), "field set contains its first field").map(drop)?;
+    ensure(fields.contains(&second_field), "field set contains its second field").map(drop)?;
+    ensure(fields.contains(&third_field), "field set contains its third field").map(drop)?;
+    ensure(first_iterated == first_field, "iterator yields first field in declaration order").map(drop)?;
+    ensure(second_iterated == second_field, "iterator yields second field in declaration order").map(drop)?;
+    ensure(third_iterated == third_field, "iterator yields third field in declaration order").map(drop)?;
+    ensure(iter.next().is_none(), "iterator terminates after declared fields").map(drop)?;
 
     let display = format!("{fields}");
     let debug = format!("{fields:?}");
-    ensure(display.contains("foo"), "field set display includes the first field")?;
-    ensure(display.contains("bar"), "field set display includes the second field")?;
-    ensure(debug.contains("FieldSet"), "field set debug names the type")?;
+    ensure(display.contains("foo"), "field set display includes the first field").map(drop)?;
+    ensure(display.contains("bar"), "field set display includes the second field").map(drop)?;
+    ensure(debug.contains("FieldSet"), "field set debug names the type").map(drop)?;
     ensure(debug.contains("baz"), "field set debug includes field names")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn field_set_identity_distinguishes_callsite_and_names() -> Result<(), TestFailure> {
+  fn field_set_identity_distinguishes_callsite_and_names() -> Result<(), TestError> {
     let fields = TEST_META_1.fields();
     let same_fields = FieldSet::new(&["foo", "bar", "baz"], fields.callsite());
     let different_callsite = TEST_META_2.fields();
 
-    ensure(fields == &same_fields, "field sets with the same callsite and names compare equal")?;
+    ensure(fields == &same_fields, "field sets with the same callsite and names compare equal").map(drop)?;
     ensure(fields != different_callsite, "field sets from different callsites compare unequal")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn fake_field_is_never_contained_by_its_field_set() -> Result<(), TestFailure> {
+  fn fake_field_is_never_contained_by_its_field_set() -> Result<(), TestError> {
     let fields = TEST_META_1.fields();
     let fake_field = fields.fake_field();
 
-    ensure_eq(&fake_field.index(), &usize::MAX, "fake field uses sentinel index")?;
-    ensure(!fields.contains(&fake_field), "fake field is not a declared field")?;
+    ensure_eq(fake_field.index(), usize::MAX, "fake field uses sentinel index").map(drop)?;
+    ensure(!fields.contains(&fake_field), "fake field is not a declared field").map(drop)?;
 
     let values: &[Option<&dyn Value>] = &[];
     let valueset = fields.value_set_all(values);
     ensure(!valueset.contains(&fake_field), "value sets reject fake fields")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn value_set_all_records_only_present_positional_values() -> Result<(), TestFailure> {
+  fn value_set_all_records_only_present_positional_values() -> Result<(), TestError> {
     struct PositionalVisitor {
       visited: u8,
     }
@@ -1610,18 +1667,20 @@ mod test {
 
     valueset.record(&mut visitor);
 
-    ensure_eq(&valueset.len(), &2_usize, "only present positional values count toward length")?;
-    ensure(!valueset.is_empty(), "present positional values make the value set non-empty")?;
-    ensure(valueset.contains(&first_field), "first positional field is present")?;
-    ensure(!valueset.contains(&second_field), "missing positional field is absent")?;
-    ensure(valueset.contains(&third_field), "third positional field is present")?;
-    ensure(visitor.visited & 0b001 != 0, "first positional value is recorded")?;
-    ensure(visitor.visited & 0b010 == 0, "missing positional value is skipped")?;
+    ensure_eq(valueset.len(), 2_usize, "only present positional values count toward length").map(drop)?;
+    ensure(!valueset.is_empty(), "present positional values make the value set non-empty").map(drop)?;
+    ensure(valueset.contains(&first_field), "first positional field is present").map(drop)?;
+    ensure(!valueset.contains(&second_field), "missing positional field is absent").map(drop)?;
+    ensure(valueset.contains(&third_field), "third positional field is present").map(drop)?;
+    ensure(visitor.visited & 0b001 != 0, "first positional value is recorded").map(drop)?;
+    ensure(visitor.visited & 0b010 == 0, "missing positional value is skipped").map(drop)?;
     ensure(visitor.visited & 0b100 != 0, "third positional value is recorded")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn value_set_display_and_debug_render_recorded_fields() -> Result<(), TestFailure> {
+  fn value_set_display_and_debug_render_recorded_fields() -> Result<(), TestError> {
     let fields = TEST_META_1.fields();
     let (first_field, second_field, third_field) = test_fields(fields)?;
     let first_value: &dyn Value = &1_i64;
@@ -1637,15 +1696,17 @@ mod test {
     let display = format!("{valueset}");
     let debug = format!("{valueset:?}");
 
-    ensure(display.contains("foo"), "value set display includes field names")?;
-    ensure(display.contains('1'), "value set display includes numeric values")?;
-    ensure(display.contains("two"), "value set display includes string values")?;
-    ensure(debug.contains("ValueSet"), "value set debug names the type")?;
+    ensure(display.contains("foo"), "value set display includes field names").map(drop)?;
+    ensure(display.contains('1'), "value set display includes numeric values").map(drop)?;
+    ensure(display.contains("two"), "value set display includes string values").map(drop)?;
+    ensure(debug.contains("ValueSet"), "value set debug names the type").map(drop)?;
     ensure(debug.contains("baz"), "value set debug includes recorded fields")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn display_debug_arguments_and_dyn_value_formatting_are_stable() -> Result<(), TestFailure> {
+  fn display_debug_arguments_and_dyn_value_formatting_are_stable() -> Result<(), TestError> {
     struct RenderVisitor {
       first:  String,
       second: String,
@@ -1687,17 +1748,20 @@ mod test {
     let byte_slice: &[u8] = &[0, 15, 255];
     let dyn_bytes: &dyn Value = &byte_slice;
 
-    ensure(visitor.first == "42", "display value records display output")?;
-    ensure(visitor.second == "\"tag\"", "debug value records debug output")?;
-    ensure(visitor.third == "arg 7", "format arguments record formatted output")?;
-    ensure(visitor.other.is_empty(), "only declared fields were recorded")?;
+    ensure(visitor.first == "42", "display value records display output").map(drop)?;
+    ensure(visitor.second == "\"tag\"", "debug value records debug output").map(drop)?;
+    ensure(visitor.third == "arg 7", "format arguments record formatted output").map(drop)?;
+    ensure(visitor.other.is_empty(), "only declared fields were recorded").map(drop)?;
     ensure(
       debug_rendered == "\"tag\"",
       "debug wrapper debug output forwards to the inner value",
-    )?;
-    ensure(format!("{dyn_numeric:?}") == "42", "dyn value debug formats primitive values")?;
-    ensure(format!("{dyn_numeric}") == "42", "dyn value display delegates to debug formatting")?;
+    )
+    .map(drop)?;
+    ensure(format!("{dyn_numeric:?}") == "42", "dyn value debug formats primitive values").map(drop)?;
+    ensure(format!("{dyn_numeric}") == "42", "dyn value display delegates to debug formatting").map(drop)?;
     ensure(format!("{dyn_bytes:?}") == "[00 0f ff]", "dyn value debug renders bytes as hex")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[derive(Debug, Default)]
@@ -1752,7 +1816,7 @@ mod test {
   }
 
   #[test]
-  fn option_wrapping_and_primitive_values_forward_to_typed_visitors() -> Result<(), TestFailure> {
+  fn option_wrapping_and_primitive_values_forward_to_typed_visitors() -> Result<(), TestError> {
     let fields = TEST_META_1.fields();
     let (first_field, second_field, third_field) = test_fields(fields)?;
     let mut visitor = TypedVisitor::default();
@@ -1775,24 +1839,28 @@ mod test {
     2.5_f64.record(&third_field, &mut visitor);
 
     ensure_eq(
-      &visitor.i64_records,
-      &4_usize,
+      visitor.i64_records,
+      4_usize,
       "some, wrapping, signed, and nonzero signed values record as i64",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &visitor.last_i64,
-      &i64::from(NonZeroI16::MIN.get()),
+      visitor.last_i64,
+      i64::from(NonZeroI16::MIN.get()),
       "nonzero signed integers use their stored value",
-    )?;
-    ensure_eq(&visitor.u64_records, &3_usize, "unsigned primitive values record as u64")?;
-    ensure_eq(&visitor.last_u64, &17_u64, "usize converts into a u64 record")?;
-    ensure_eq(&visitor.u128_records, &1_usize, "u128 records through the u128 visitor")?;
-    ensure_eq(&visitor.last_u128, &19_u128, "u128 value is preserved")?;
-    ensure_eq(&visitor.i128_records, &1_usize, "i128 records through the i128 visitor")?;
-    ensure_eq(&visitor.last_i128, &-23_i128, "i128 value is preserved")?;
-    ensure(visitor.bool_value == Some(true), "bool records through the bool visitor")?;
-    ensure_eq(&visitor.f64_records, &2_usize, "f32 and f64 both record through the f64 visitor")?;
-    ensure_eq(&visitor.last_f64, &2.5_f64, "f64 value is preserved")?;
-    ensure_eq(&visitor.debug_records, &0_usize, "typed primitive paths avoid the debug fallback")
+    )
+    .map(drop)?;
+    ensure_eq(visitor.u64_records, 3_usize, "unsigned primitive values record as u64").map(drop)?;
+    ensure_eq(visitor.last_u64, 17_u64, "usize converts into a u64 record").map(drop)?;
+    ensure_eq(visitor.u128_records, 1_usize, "u128 records through the u128 visitor").map(drop)?;
+    ensure_eq(visitor.last_u128, 19_u128, "u128 value is preserved").map(drop)?;
+    ensure_eq(visitor.i128_records, 1_usize, "i128 records through the i128 visitor").map(drop)?;
+    ensure_eq(visitor.last_i128, -23_i128, "i128 value is preserved").map(drop)?;
+    ensure(visitor.bool_value == Some(true), "bool records through the bool visitor").map(drop)?;
+    ensure_eq(visitor.f64_records, 2_usize, "f32 and f64 both record through the f64 visitor").map(drop)?;
+    ensure_eq(visitor.last_f64, 2.5_f64, "f64 value is preserved").map(drop)?;
+    ensure_eq(visitor.debug_records, 0_usize, "typed primitive paths avoid the debug fallback")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

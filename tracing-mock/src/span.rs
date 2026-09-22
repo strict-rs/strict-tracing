@@ -11,7 +11,7 @@
 //! # Examples
 //!
 //! ```
-//! # fn main() -> Result<(), strict_test_support::TestFailure> {
+//! # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 //! use tracing_mock::expect;
 //! use tracing_mock::subscriber;
 //!
@@ -34,7 +34,7 @@
 //! `expect::span().named(name)`.
 //!
 //! ```
-//! # fn main() -> Result<(), strict_test_support::TestFailure> {
+//! # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 //! use tracing_mock::subscriber;
 //!
 //! let (subscriber, handle) = subscriber::mock().enter("interesting_span").run_with_handle();
@@ -52,7 +52,7 @@
 //! The following example asserts the name, level, parent, and fields of the span:
 //!
 //! ```
-//! # fn main() -> Result<(), strict_test_support::TestFailure> {
+//! # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 //! use tracing_mock::{expect, subscriber};
 //!
 //! let span = expect::span()
@@ -90,7 +90,7 @@
 //! the following test will fail due to a mismatch in the spans' names:
 //!
 //! ```
-//! # fn main() -> Result<(), strict_test_support::TestFailure> {
+//! # fn main() -> Result<(), strict_test_support::ConditionFailure> {
 //! use tracing_mock::expect;
 //! use tracing_mock::subscriber;
 //!
@@ -255,7 +255,7 @@ impl ExpectedSpan {
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -278,7 +278,7 @@ impl ExpectedSpan {
   /// to the [`MockSubscriber`] functions directly.
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::subscriber;
   ///
   /// let (subscriber, handle) = subscriber::mock().enter("span name").run_with_handle();
@@ -296,7 +296,7 @@ impl ExpectedSpan {
   /// When the span name is different, the expectation will fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -354,7 +354,7 @@ impl ExpectedSpan {
   /// second:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   /// let id1 = expect::id();
@@ -391,7 +391,7 @@ impl ExpectedSpan {
   /// example can be used.
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   /// let id1 = expect::id();
@@ -425,7 +425,7 @@ impl ExpectedSpan {
   /// fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   /// let id1 = expect::id();
@@ -480,7 +480,7 @@ impl ExpectedSpan {
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -502,7 +502,7 @@ impl ExpectedSpan {
   /// recorded at any other level:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -541,7 +541,7 @@ impl ExpectedSpan {
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::{expect, subscriber};
   ///
   /// let span = expect::span()
@@ -564,7 +564,7 @@ impl ExpectedSpan {
   /// The test will fail if the target is different:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::{expect, subscriber};
   ///
   /// let span = expect::span()
@@ -621,7 +621,7 @@ impl ExpectedSpan {
   /// An explicit or contextual parent can be matched on an `ExpectedSpan`.
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::{expect, subscriber};
   ///
   /// let parent = expect::span()
@@ -652,7 +652,7 @@ impl ExpectedSpan {
   /// [`ExpectedId`] can be passed to match a span with that Id.
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::{expect, subscriber};
   ///
   /// let span = expect::span()
@@ -676,7 +676,7 @@ impl ExpectedSpan {
   /// In the following example, the expected span is an explicit root:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::{expect, subscriber};
   ///
   /// let span = expect::span()
@@ -700,7 +700,7 @@ impl ExpectedSpan {
   /// `parent_span`:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -731,7 +731,7 @@ impl ExpectedSpan {
   /// a contextually-determined root:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -753,7 +753,7 @@ impl ExpectedSpan {
   /// `parent_span`:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -814,7 +814,7 @@ impl ExpectedSpan {
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -834,7 +834,7 @@ impl ExpectedSpan {
   /// A different field value will cause the expectation to fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -1139,7 +1139,43 @@ impl error::Error for SetActualSpanIdError {}
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonLevel(#[from] strict_test_support::ComparisonFailure<tracing_core::Level, tracing_core::Level>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionId(#[from] strict_test_support::OptionFailure<Id>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionLevel(#[from] strict_test_support::OptionFailure<tracing_core::Level>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionSetActualSpanIdError(#[from] strict_test_support::OptionFailure<super::SetActualSpanIdError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSetActualSpanIdError(#[from] strict_test_support::ResultFailure<super::SetActualSpanIdError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+    /// Retains the searched text and expected substring.
+    #[error(transparent)]
+    Substring(#[from] strict_test_support::SubstringFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonString(#[from] strict_test_support::ComparisonFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionString(#[from] strict_test_support::OptionFailure<String>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_contains;
   use strict_test_support::ensure_eq;
@@ -1155,7 +1191,7 @@ mod tests {
   use crate::subscriber;
 
   #[test]
-  fn span_metadata_and_id_accept_matching_lifecycle() -> Result<(), TestFailure> {
+  fn span_metadata_and_id_accept_matching_lifecycle() -> Result<(), TestError> {
     let span_id = expect::id();
     let expected_span = expect::span()
       .named("matched_span")
@@ -1175,11 +1211,11 @@ mod tests {
       let _guard = span.enter();
     });
 
-    ensure_ok(handle.finished(), "span metadata and ID expectations match the lifecycle")
+    ensure_ok(handle.finished(), "span metadata and ID expectations match the lifecycle").map_err(TestError::from)
   }
 
   #[test]
-  fn span_metadata_mismatch_is_reported_by_finished() -> Result<(), TestFailure> {
+  fn span_metadata_mismatch_is_reported_by_finished() -> Result<(), TestError> {
     let expected_span = expect::span().named("matched_span").with_target("expected_target");
     let (subscriber, handle) = subscriber::mock().new_span(expected_span).run_with_handle();
 
@@ -1188,10 +1224,12 @@ mod tests {
     });
 
     ensure(handle.finished().is_err(), "span target mismatch is reported")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn new_span_fields_and_explicit_parent_match() -> Result<(), TestFailure> {
+  fn new_span_fields_and_explicit_parent_match() -> Result<(), TestError> {
     let parent = expect::span().named("parent_span");
     let child = expect::span()
       .named("child_span")
@@ -1203,23 +1241,25 @@ mod tests {
       let parent_span = tracing::info_span!("parent_span");
       let parent_id = ensure_some(parent_span.id(), "parent span has an ID")?;
       let _child_span = tracing::info_span!(parent: parent_id, "child_span", child_field = "set");
-      Ok::<(), TestFailure>(())
+      Ok::<(), TestError>(())
     })?;
 
-    ensure_ok(handle.finished(), "new span fields and explicit parent match")
+    ensure_ok(handle.finished(), "new span fields and explicit parent match").map_err(TestError::from)
   }
 
   #[test]
-  fn expected_id_rejects_reassignment() -> Result<(), TestFailure> {
+  fn expected_id_rejects_reassignment() -> Result<(), TestError> {
     let span_id = expect::id();
 
     ensure_ok(span_id.set(1), "first span ID assignment succeeds")?;
 
     ensure(span_id.set(2).is_err(), "second span ID assignment is rejected")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn expected_span_accessors_and_formatting_reflect_configured_metadata() -> Result<(), TestFailure> {
+  fn expected_span_accessors_and_formatting_reflect_configured_metadata() -> Result<(), TestError> {
     let span_id = expect::id();
     let expected_span = expect::span()
       .named("formatted_span")
@@ -1227,29 +1267,64 @@ mod tests {
       .with_target("formatted_target")
       .with_id(span_id);
 
-    ensure(expected_span.id().is_some(), "configured span ID is exposed")?;
-    let name = ensure_some(expected_span.name(), "configured span name is present")?;
-    ensure_eq(&name, &"formatted_span", "configured span name is exposed")?;
+    ensure(expected_span.id().is_some(), "configured span ID is exposed").map(drop)?;
+    let name =
+      ensure_some(expected_span.name(), "configured span name is present").map_err(|failure| strict_test_support::OptionFailure {
+        context: failure.context,
+        option:  failure.option.map(String::from),
+      })?;
+    ensure_eq(
+      String::from(name),
+      String::from("formatted_span"),
+      "configured span name is exposed",
+    )
+    .map(drop)?;
     let level = ensure_some(expected_span.level(), "configured span level is present")?;
-    ensure_eq(&level, &tracing::Level::WARN, "configured span level is exposed")?;
-    let target = ensure_some(expected_span.target(), "configured span target is present")?;
-    ensure_eq(&target, &"formatted_target", "configured span target is exposed")?;
+    ensure_eq(level, tracing::Level::WARN, "configured span level is exposed").map(drop)?;
+    let target =
+      ensure_some(expected_span.target(), "configured span target is present").map_err(|failure| strict_test_support::OptionFailure {
+        context: failure.context,
+        option:  failure.option.map(String::from),
+      })?;
+    ensure_eq(
+      String::from(target),
+      String::from("formatted_target"),
+      "configured span target is exposed",
+    )
+    .map(drop)?;
 
     let debug = format!("{expected_span:?}");
-    ensure_contains(&debug, "MockSpan", "debug output names the expected span type")?;
-    ensure_contains(&debug, "formatted_span", "debug output includes the span name")?;
-    ensure_contains(&debug, "Level(Warn)", "debug output includes the level")?;
-    ensure_contains(&debug, "formatted_target", "debug output includes the target")?;
+    ensure_contains(
+      (debug).clone(),
+      String::from("MockSpan"),
+      "debug output names the expected span type",
+    )
+    .map(drop)?;
+    ensure_contains(
+      (debug).clone(),
+      String::from("formatted_span"),
+      "debug output includes the span name",
+    )
+    .map(drop)?;
+    ensure_contains((debug).clone(), String::from("Level(Warn)"), "debug output includes the level").map(drop)?;
+    ensure_contains(debug, String::from("formatted_target"), "debug output includes the target").map(drop)?;
 
     let display = format!("{expected_span}");
-    ensure_contains(&display, "a span", "display output describes a named span")?;
-    ensure_contains(&display, "formatted_span", "display output includes the span name")?;
-    ensure_contains(&display, "Level(Warn)", "display output includes the level")?;
-    ensure_contains(&display, "formatted_target", "display output includes the target")
+    ensure_contains((display).clone(), String::from("a span"), "display output describes a named span").map(drop)?;
+    ensure_contains(
+      (display).clone(),
+      String::from("formatted_span"),
+      "display output includes the span name",
+    )
+    .map(drop)?;
+    ensure_contains((display).clone(), String::from("Level(Warn)"), "display output includes the level").map(drop)?;
+    ensure_contains(display, String::from("formatted_target"), "display output includes the target")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn expected_span_rejects_unknown_metadata_only_when_metadata_is_expected() -> Result<(), TestFailure> {
+  fn expected_span_rejects_unknown_metadata_only_when_metadata_is_expected() -> Result<(), TestError> {
     let actual_id = ensure_some(Id::try_from_u64(7), "nonzero span ID is valid")?;
     let actual = ActualSpan::new(actual_id, None);
 
@@ -1261,10 +1336,12 @@ mod tests {
     let error = expect::span().named("needs_metadata").check(&actual, "entering", "span-tests");
 
     ensure(error.is_err(), "metadata expectations reject unknown span metadata")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn new_span_formatting_reflects_fields_and_ancestry() -> Result<(), TestFailure> {
+  fn new_span_formatting_reflects_fields_and_ancestry() -> Result<(), TestError> {
     let new_span = expect::span()
       .named("formatted_new_span")
       .at_level(tracing::Level::INFO)
@@ -1273,26 +1350,58 @@ mod tests {
       .with_ancestry(ExpectedAncestry::IsContextualRoot);
 
     let display = format!("{new_span}");
-    ensure_contains(&display, "a new span", "new-span display names the expectation type")?;
-    ensure_contains(&display, "formatted_new_span", "new-span display includes the span name")?;
-    ensure_contains(&display, "answer", "new-span display includes expected fields")?;
+    ensure_contains(
+      (display).clone(),
+      String::from("a new span"),
+      "new-span display names the expectation type",
+    )
+    .map(drop)?;
+    ensure_contains(
+      (display).clone(),
+      String::from("formatted_new_span"),
+      "new-span display includes the span name",
+    )
+    .map(drop)?;
+    ensure_contains(display, String::from("answer"), "new-span display includes expected fields").map(drop)?;
 
     let debug = format!("{new_span:?}");
-    ensure_contains(&debug, "NewSpan", "new-span debug names the expectation type")?;
-    ensure_contains(&debug, "formatted_new_span", "new-span debug includes the span name")?;
-    ensure_contains(&debug, "new_span_target", "new-span debug includes the target")?;
-    ensure_contains(&debug, "parent", "new-span debug includes ancestry expectations")?;
-    ensure_contains(&debug, "fields", "new-span debug includes field expectations")
+    ensure_contains(
+      (debug).clone(),
+      String::from("NewSpan"),
+      "new-span debug names the expectation type",
+    )
+    .map(drop)?;
+    ensure_contains(
+      (debug).clone(),
+      String::from("formatted_new_span"),
+      "new-span debug includes the span name",
+    )
+    .map(drop)?;
+    ensure_contains(
+      (debug).clone(),
+      String::from("new_span_target"),
+      "new-span debug includes the target",
+    )
+    .map(drop)?;
+    ensure_contains(
+      (debug).clone(),
+      String::from("parent"),
+      "new-span debug includes ancestry expectations",
+    )
+    .map(drop)?;
+    ensure_contains(debug, String::from("fields"), "new-span debug includes field expectations")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn expected_id_reports_unset_mismatched_and_duplicate_assignments() -> Result<(), TestFailure> {
+  fn expected_id_reports_unset_mismatched_and_duplicate_assignments() -> Result<(), TestError> {
     let expected_id = expect::id();
     let first_actual = ensure_some(Id::try_from_u64(1), "first nonzero span ID is valid")?;
     let second_actual = ensure_some(Id::try_from_u64(2), "second nonzero span ID is valid")?;
 
     let unset = expected_id.check(first_actual, format_args!("checking"), "span-tests");
-    ensure(unset.is_err(), "unset expected IDs reject direct checking")?;
+    ensure(unset.is_err(), "unset expected IDs reject direct checking").map(drop)?;
 
     ensure_ok(expected_id.set(1), "initial expected ID assignment succeeds")?;
     ensure_ok(
@@ -1301,15 +1410,27 @@ mod tests {
     )?;
 
     let mismatch = expected_id.check(second_actual, format_args!("checking"), "span-tests");
-    ensure(mismatch.is_err(), "mismatched expected ID is rejected")?;
+    ensure(mismatch.is_err(), "mismatched expected ID is rejected").map(drop)?;
 
     let reassignment = ensure_some(expected_id.set(2).err(), "duplicate assignment returns the span ID error")?;
     let display = reassignment.to_string();
-    ensure_contains(&display, "Could not set", "duplicate assignment display describes the failure")?;
-    ensure_contains(&display, "1", "duplicate assignment display includes the previous ID")?;
-    ensure_contains(&display, "2", "duplicate assignment display includes the rejected ID")?;
+    ensure_contains(
+      (display).clone(),
+      String::from("Could not set"),
+      "duplicate assignment display describes the failure",
+    )
+    .map(drop)?;
+    ensure_contains(
+      (display).clone(),
+      String::from("1"),
+      "duplicate assignment display includes the previous ID",
+    )
+    .map(drop)?;
+    ensure_contains(display, String::from("2"), "duplicate assignment display includes the rejected ID").map(drop)?;
 
     let debug = format!("{expected_id:?}");
-    ensure_contains(&debug, "ExpectedId", "debug output names the expected ID type")
+    ensure_contains(debug, String::from("ExpectedId"), "debug output names the expected ID type")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

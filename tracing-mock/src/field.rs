@@ -14,7 +14,7 @@
 //! specific name, without any expectation about the value:
 //!
 //! ```
-//! # fn main() -> Result<(), strict_test_support::TestFailure> {
+//! # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 //! use tracing_mock::expect;
 //! use tracing_mock::subscriber;
 //!
@@ -35,7 +35,7 @@
 //! each of them:
 //!
 //! ```
-//! # fn main() -> Result<(), strict_test_support::TestFailure> {
+//! # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 //! use tracing_mock::expect;
 //! use tracing_mock::subscriber;
 //!
@@ -66,7 +66,7 @@
 //! different:
 //!
 //! ```
-//! # fn main() -> Result<(), strict_test_support::TestFailure> {
+//! # fn main() -> Result<(), strict_test_support::ConditionFailure> {
 //! use tracing_mock::expect;
 //! use tracing_mock::subscriber;
 //!
@@ -182,7 +182,7 @@ impl ExpectedField {
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -202,7 +202,7 @@ impl ExpectedField {
   /// A different value will cause the test to fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -238,7 +238,7 @@ impl ExpectedField {
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -262,7 +262,7 @@ impl ExpectedField {
   /// If the second field is not present, the test will fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -308,7 +308,7 @@ impl ExpectedField {
   /// used:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -329,7 +329,7 @@ impl ExpectedField {
   /// will fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -382,7 +382,7 @@ impl ExpectedFields {
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -408,7 +408,7 @@ impl ExpectedFields {
   /// event, the test will fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -453,7 +453,7 @@ impl ExpectedFields {
   /// recorded on the event.
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -478,7 +478,7 @@ impl ExpectedFields {
   /// will fail:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
   ///
@@ -709,7 +709,19 @@ impl fmt::Display for ExpectedFields {
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use tracing::subscriber::with_default;
@@ -718,7 +730,7 @@ mod tests {
   use crate::subscriber;
 
   #[test]
-  fn expected_fields_accept_matching_values_and_extra_fields_by_default() -> Result<(), TestFailure> {
+  fn expected_fields_accept_matching_values_and_extra_fields_by_default() -> Result<(), TestError> {
     let event = expect::event().with_fields(expect::field("answer").with_value(&42_i64));
     let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
 
@@ -726,11 +738,11 @@ mod tests {
       tracing::info!(answer = 42_i64, extra = true);
     });
 
-    ensure_ok(handle.finished(), "matching expected field accepts extra fields by default")
+    ensure_ok(handle.finished(), "matching expected field accepts extra fields by default").map_err(TestError::from)
   }
 
   #[test]
-  fn expected_fields_reject_missing_fields() -> Result<(), TestFailure> {
+  fn expected_fields_reject_missing_fields() -> Result<(), TestError> {
     let event = expect::event().with_fields(expect::field("answer").with_value(&42_i64));
     let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
 
@@ -739,10 +751,12 @@ mod tests {
     });
 
     ensure(handle.finished().is_err(), "missing expected field is rejected")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn expected_fields_reject_wrong_values() -> Result<(), TestFailure> {
+  fn expected_fields_reject_wrong_values() -> Result<(), TestError> {
     let event = expect::event().with_fields(expect::field("answer").with_value(&42_i64));
     let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
 
@@ -751,10 +765,12 @@ mod tests {
     });
 
     ensure(handle.finished().is_err(), "wrong expected field value is rejected")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn expected_fields_only_rejects_extra_fields() -> Result<(), TestFailure> {
+  fn expected_fields_only_rejects_extra_fields() -> Result<(), TestError> {
     let event = expect::event().with_fields(expect::field("answer").with_value(&42_i64).only());
     let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
 
@@ -763,5 +779,7 @@ mod tests {
     });
 
     ensure(handle.finished().is_err(), "only rejects extra observed fields")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

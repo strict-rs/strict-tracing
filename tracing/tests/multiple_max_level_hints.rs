@@ -7,7 +7,18 @@ mod tests {
   use std::sync::atomic::AtomicBool;
   use std::sync::atomic::Ordering;
 
-  use strict_test_support::TestFailure;
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use tracing::Level;
@@ -17,7 +28,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn multiple_max_level_hints() -> Result<(), TestFailure> {
+  fn multiple_max_level_hints() -> Result<(), TestError> {
     // This test ensures that when multiple subscribers are active, their max
     // level hints are handled correctly. The global max level should be the
     // maximum of the level filters returned by the two `Subscriber`'s
@@ -89,7 +100,8 @@ mod tests {
     ensure(
       !subscriber1_saw_trace.load(Ordering::Relaxed),
       "TRACE metadata should not be dynamically filtered by subscriber1",
-    )?;
+    )
+    .map(drop)?;
 
     let dispatch2 = tracing::Dispatch::new(subscriber2);
     with_default(&dispatch2, do_events);
@@ -98,5 +110,7 @@ mod tests {
       !subscriber2_saw_trace.load(Ordering::Relaxed),
       "TRACE metadata should not be dynamically filtered by subscriber2",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

@@ -2,7 +2,22 @@
 
 #[cfg(test)]
 mod subscriber_registration {
-  use strict_test_support::TestFailure;
+
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// Retains the searched text and expected substring.
+    #[error(transparent)]
+    Substring(#[from] strict_test_support::SubstringFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionSubscriberError(#[from] strict_test_support::OptionFailure<SubscriberError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure_contains;
   use strict_test_support::ensure_ok;
   use strict_test_support::ensure_some;
@@ -11,7 +26,7 @@ mod subscriber_registration {
   use tracing_mock::subscriber;
 
   #[test]
-  fn subscriber_on_register_dispatch() -> Result<(), TestFailure> {
+  fn subscriber_on_register_dispatch() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock().on_register_dispatch().run_with_handle();
 
     with_default(subscriber, || {
@@ -23,7 +38,7 @@ mod subscriber_registration {
   }
 
   #[test]
-  fn subscriber_multiple_expectations() -> Result<(), TestFailure> {
+  fn subscriber_multiple_expectations() -> Result<(), TestError> {
     let (subscriber, handle) = subscriber::mock()
       .on_register_dispatch()
       .event(expect::event())
@@ -38,7 +53,7 @@ mod subscriber_registration {
   }
 
   #[test]
-  fn subscriber_on_register_dispatch_missing_registration() -> Result<(), TestFailure> {
+  fn subscriber_on_register_dispatch_missing_registration() -> Result<(), TestError> {
     let (_subscriber, handle) = subscriber::mock().on_register_dispatch().run_with_handle();
 
     let error = ensure_some(
@@ -47,22 +62,40 @@ mod subscriber_registration {
     )?;
     let rendered = error.to_string();
     ensure_contains(
-      &rendered,
-      "more notifications expected",
+      (rendered).clone(),
+      String::from("more notifications expected"),
       "mock expectation error reports an unmet pending notification",
-    )?;
+    )
+    .map(drop)?;
     ensure_contains(
-      &rendered,
-      "on_register_dispatch",
+      rendered,
+      String::from("on_register_dispatch"),
       "mock expectation error names the missed registration callback",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }
 
 #[cfg(test)]
 #[cfg(feature = "tracing-subscriber")]
 mod layer_registration {
-  use strict_test_support::TestFailure;
+
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// Retains the searched text and expected substring.
+    #[error(transparent)]
+    Substring(#[from] strict_test_support::SubstringFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionSubscriberError(#[from] strict_test_support::OptionFailure<SubscriberError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure_contains;
   use strict_test_support::ensure_ok;
   use strict_test_support::ensure_some;
@@ -76,7 +109,7 @@ mod layer_registration {
   use tracing_subscriber::layer::SubscriberExt as _;
 
   #[test]
-  fn layer_on_register_dispatch() -> Result<(), TestFailure> {
+  fn layer_on_register_dispatch() -> Result<(), TestError> {
     let (layer, handle) = layer::mock().on_register_dispatch().run_with_handle();
 
     let subscriber = tracing_subscriber::registry().with(layer);
@@ -90,7 +123,7 @@ mod layer_registration {
   }
 
   #[test]
-  fn layer_multiple_expectations() -> Result<(), TestFailure> {
+  fn layer_multiple_expectations() -> Result<(), TestError> {
     let (layer, handle) = layer::mock().on_register_dispatch().event(expect::event()).run_with_handle();
 
     let subscriber = tracing_subscriber::registry().with(layer);
@@ -104,7 +137,7 @@ mod layer_registration {
   }
 
   #[test]
-  fn layer_on_register_dispatch_not_propagated() -> Result<(), TestFailure> {
+  fn layer_on_register_dispatch_not_propagated() -> Result<(), TestError> {
     use tracing::error;
 
     /// A consumer layer wrapper that forwards events but drops registration callbacks.
@@ -138,9 +171,11 @@ mod layer_registration {
 
     let error = ensure_some(handle.finished().err(), "mock expectations should return a registration mismatch")?;
     ensure_contains(
-      &error.to_string(),
-      "expected on_register_dispatch to be called",
+      error.to_string(),
+      String::from("expected on_register_dispatch to be called"),
       "mock expectation error includes registration mismatch",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

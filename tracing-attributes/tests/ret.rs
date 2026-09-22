@@ -4,7 +4,25 @@
 use std::convert::TryFrom as _;
 use std::num::TryFromIntError;
 
-use strict_test_support::TestFailure;
+use tracing_core::subscriber::SubscriberError;
+use tracing_subscriber::filter;
+/// Native failures from these behavioral checks.
+#[derive(Debug, thiserror::Error)]
+enum TestError {
+  /// A boolean expectation failed.
+  #[error(transparent)]
+  Condition(#[from] strict_test_support::ConditionFailure),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  /// Retains the native parse failure.
+  #[error(transparent)]
+  Parse(#[from] strict_test_support::ResultFailure<filter::ParseError>),
+  /// Retains the native integer failure.
+  #[error(transparent)]
+  Integer(#[from] strict_test_support::ResultFailure<TryFromIntError>),
+}
+
 use strict_test_support::ensure;
 use strict_test_support::ensure_ok;
 use tracing::Level;
@@ -37,7 +55,7 @@ fn ret_with_target() -> i32 {
 }
 
 #[test]
-fn test() -> Result<(), TestFailure> {
+fn test() -> Result<(), TestError> {
   let span = expect::span().named("ret");
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
@@ -58,7 +76,7 @@ fn test() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn test_custom_target() -> Result<(), TestFailure> {
+fn test_custom_target() -> Result<(), TestError> {
   let filter: EnvFilter = ensure_ok("my_target=info".parse(), "filter should parse")?;
   let span = expect::span().named("ret_with_target").with_target("my_target");
 
@@ -93,7 +111,7 @@ fn ret_warn() -> i32 {
 }
 
 #[test]
-fn test_warn() -> Result<(), TestFailure> {
+fn test_warn() -> Result<(), TestError> {
   let span = expect::span().named("ret_warn");
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
@@ -125,7 +143,7 @@ fn ret_mut(arg: &mut i32) -> i32 {
 }
 
 #[test]
-fn test_mut() -> Result<(), TestFailure> {
+fn test_mut() -> Result<(), TestError> {
   let span = expect::span().named("ret_mut");
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
@@ -160,7 +178,7 @@ async fn ret_async() -> i32 {
 }
 
 #[test]
-fn test_async() -> Result<(), TestFailure> {
+fn test_async() -> Result<(), TestError> {
   let span = expect::span().named("ret_async");
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
@@ -192,7 +210,7 @@ fn ret_impl_type() -> impl Copy {
 }
 
 #[test]
-fn test_impl_type() -> Result<(), TestFailure> {
+fn test_impl_type() -> Result<(), TestError> {
   let span = expect::span().named("ret_impl_type");
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
@@ -222,7 +240,7 @@ fn ret_display() -> i32 {
 }
 
 #[test]
-fn test_dbg() -> Result<(), TestFailure> {
+fn test_dbg() -> Result<(), TestError> {
   let span = expect::span().named("ret_display");
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
@@ -252,9 +270,9 @@ fn ret_and_err() -> Result<u8, TryFromIntError> {
 }
 
 #[test]
-fn test_ret_and_err() -> Result<(), TestFailure> {
+fn test_ret_and_err() -> Result<(), TestError> {
   let Err(expected_error) = u8::try_from(1234) else {
-    return ensure(false, "1234 should not fit in u8");
+    return ensure(false, "1234 should not fit in u8").map(drop).map_err(TestError::from);
   };
   let span = expect::span().named("ret_and_err");
   let (subscriber, handle) = subscriber::mock()
@@ -285,7 +303,7 @@ fn ret_and_ok() -> Result<u8, TryFromIntError> {
 }
 
 #[test]
-fn test_ret_and_ok() -> Result<(), TestFailure> {
+fn test_ret_and_ok() -> Result<(), TestError> {
   let expected_return = ensure_ok(u8::try_from(123), "123 should fit in u8")?;
   let span = expect::span().named("ret_and_ok");
   let (subscriber, handle) = subscriber::mock()
@@ -316,7 +334,7 @@ fn ret_warn_info() -> i32 {
 }
 
 #[test]
-fn test_warn_info() -> Result<(), TestFailure> {
+fn test_warn_info() -> Result<(), TestError> {
   let span = expect::span().named("ret_warn_info").at_level(Level::WARN);
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
@@ -346,7 +364,7 @@ fn ret_dbg_warn() -> i32 {
 }
 
 #[test]
-fn test_dbg_warn() -> Result<(), TestFailure> {
+fn test_dbg_warn() -> Result<(), TestError> {
   let span = expect::span().named("ret_dbg_warn").at_level(Level::INFO);
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())

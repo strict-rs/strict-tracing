@@ -6,7 +6,22 @@ mod tests {
   use std::sync::atomic::AtomicBool;
   use std::sync::atomic::Ordering;
 
-  use strict_test_support::TestFailure;
+  use tracing_core::dispatcher;
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultDispatcherSetGlobalDefaultError(#[from] strict_test_support::ResultFailure<dispatcher::SetGlobalDefaultError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use tracing::Level;
@@ -16,7 +31,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn max_level_hints() -> Result<(), TestFailure> {
+  fn max_level_hints() -> Result<(), TestError> {
     // This test asserts that when a subscriber provides us with the global
     // maximum level that it will enable (by implementing the
     // `Subscriber::max_level_hint` method), we will never call
@@ -56,5 +71,7 @@ mod tests {
       !saw_over_hint.load(Ordering::Relaxed),
       "TRACE and DEBUG metadata should not be dynamically filtered",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

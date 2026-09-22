@@ -4,7 +4,22 @@
 use std::convert::TryFrom as _;
 use std::num::TryFromIntError;
 
-use strict_test_support::TestFailure;
+use tracing_core::subscriber::SubscriberError;
+use tracing_subscriber::filter;
+/// Native failures from these behavioral checks.
+#[derive(Debug, thiserror::Error)]
+enum TestError {
+  /// A boolean expectation failed.
+  #[error(transparent)]
+  Condition(#[from] strict_test_support::ConditionFailure),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  /// Retains the native parse failure.
+  #[error(transparent)]
+  Parse(#[from] strict_test_support::ResultFailure<filter::ParseError>),
+}
+
 use strict_test_support::ensure;
 use strict_test_support::ensure_ok;
 use tracing::Level;
@@ -34,7 +49,7 @@ fn err_suspicious_else() -> Result<u8, TryFromIntError> {
 }
 
 #[test]
-fn test_suspicious_else() -> Result<(), TestFailure> {
+fn test_suspicious_else() -> Result<(), TestError> {
   let span = expect::span().named("err_suspicious_else");
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
@@ -50,7 +65,7 @@ fn test_suspicious_else() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn test() -> Result<(), TestFailure> {
+fn test() -> Result<(), TestError> {
   let span = expect::span().named("err");
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
@@ -76,7 +91,7 @@ fn err_early_return() -> Result<u8, TryFromIntError> {
 }
 
 #[test]
-fn test_early_return() -> Result<(), TestFailure> {
+fn test_early_return() -> Result<(), TestError> {
   let span = expect::span().named("err_early_return");
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
@@ -104,7 +119,7 @@ async fn err_async(polls: usize) -> Result<u8, TryFromIntError> {
 }
 
 #[test]
-fn test_async() -> Result<(), TestFailure> {
+fn test_async() -> Result<(), TestError> {
   let span = expect::span().named("err_async");
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
@@ -141,7 +156,7 @@ fn err_mut(out: &mut u8) -> Result<(), TryFromIntError> {
 }
 
 #[test]
-fn test_mut() -> Result<(), TestFailure> {
+fn test_mut() -> Result<(), TestError> {
   let span = expect::span().named("err_mut");
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
@@ -170,7 +185,7 @@ async fn err_mut_async(polls: usize, out: &mut u8) -> Result<(), TryFromIntError
 }
 
 #[test]
-fn test_mut_async() -> Result<(), TestFailure> {
+fn test_mut_async() -> Result<(), TestError> {
   let span = expect::span().named("err_mut_async");
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
@@ -197,7 +212,7 @@ fn test_mut_async() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn impl_trait_return_type() -> Result<(), TestFailure> {
+fn impl_trait_return_type() -> Result<(), TestError> {
   // Reproduces https://github.com/tokio-rs/tracing/issues/1227
 
   #[instrument(err)]
@@ -217,7 +232,9 @@ fn impl_trait_return_type() -> Result<(), TestFailure> {
 
   with_default(subscriber, || {
     let Ok(values) = returns_impl_trait(10) else {
-      return ensure(false, "instrumented impl Trait result should be Ok");
+      return ensure(false, "instrumented impl Trait result should be Ok")
+        .map(drop)
+        .map_err(TestError::from);
     };
     for _ in values {
       // nop
@@ -239,9 +256,9 @@ fn err_dbg() -> Result<u8, TryFromIntError> {
 }
 
 #[test]
-fn test_err_dbg() -> Result<(), TestFailure> {
+fn test_err_dbg() -> Result<(), TestError> {
   let Err(expected_error) = u8::try_from(1234) else {
-    return ensure(false, "1234 should not fit in u8");
+    return ensure(false, "1234 should not fit in u8").map(drop).map_err(TestError::from);
   };
   let span = expect::span().named("err_dbg");
   let (subscriber, handle) = subscriber::mock()
@@ -263,9 +280,9 @@ fn test_err_dbg() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn test_err_display_default() -> Result<(), TestFailure> {
+fn test_err_display_default() -> Result<(), TestError> {
   let Err(expected_error) = u8::try_from(1234) else {
-    return ensure(false, "1234 should not fit in u8");
+    return ensure(false, "1234 should not fit in u8").map(drop).map_err(TestError::from);
   };
   let span = expect::span().named("err");
   let (subscriber, handle) = subscriber::mock()
@@ -284,7 +301,7 @@ fn test_err_display_default() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn test_err_custom_target() -> Result<(), TestFailure> {
+fn test_err_custom_target() -> Result<(), TestError> {
   let filter: EnvFilter = ensure_ok("my_target=error".parse(), "filter should parse")?;
   let span = expect::span().named("error_span").with_target("my_target");
 
@@ -321,7 +338,7 @@ fn err_info() -> Result<u8, TryFromIntError> {
 }
 
 #[test]
-fn test_err_info() -> Result<(), TestFailure> {
+fn test_err_info() -> Result<(), TestError> {
   let span = expect::span().named("err_info");
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
@@ -346,9 +363,9 @@ fn err_dbg_info() -> Result<u8, TryFromIntError> {
 }
 
 #[test]
-fn test_err_dbg_info() -> Result<(), TestFailure> {
+fn test_err_dbg_info() -> Result<(), TestError> {
   let Err(expected_error) = u8::try_from(1234) else {
-    return ensure(false, "1234 should not fit in u8");
+    return ensure(false, "1234 should not fit in u8").map(drop).map_err(TestError::from);
   };
   let span = expect::span().named("err_dbg_info");
   let (subscriber, handle) = subscriber::mock()
@@ -379,7 +396,7 @@ fn err_warn_info() -> Result<u8, TryFromIntError> {
 }
 
 #[test]
-fn test_err_warn_info() -> Result<(), TestFailure> {
+fn test_err_warn_info() -> Result<(), TestError> {
   let span = expect::span().named("err_warn_info").at_level(Level::WARN);
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())

@@ -74,36 +74,40 @@ where
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+  use strict_test_support::ConditionFailure;
   use strict_test_support::ensure;
 
   use super::*;
 
   #[test]
-  fn poll_n_eventually_returns_ok() -> Result<(), TestFailure> {
+  fn poll_n_eventually_returns_ok() -> Result<(), ConditionFailure> {
     ensure(
       block_on_future(PollN::new_ok(3)) == Ok(()),
       "PollN resolves to Ok after the configured number of polls",
     )
+    .map(drop)
   }
 
   #[test]
-  fn poll_n_eventually_returns_err() -> Result<(), TestFailure> {
+  fn poll_n_eventually_returns_err() -> Result<(), ConditionFailure> {
     ensure(
       block_on_future(PollN::new_err(3)) == Err(()),
       "PollN resolves to Err after the configured number of polls",
     )
+    .map(drop)
   }
 
   #[test]
-  fn poll_n_finishes_on_first_poll() -> Result<(), TestFailure> {
+  fn poll_n_finishes_on_first_poll() -> Result<(), ConditionFailure> {
     ensure(
       block_on_future(PollN::new_ok(1)) == Ok(()),
       "PollN can resolve to Ok on the first poll",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       block_on_future(PollN::new_err(1)) == Err(()),
       "PollN can resolve to Err on the first poll",
     )
+    .map(drop)
   }
 }

@@ -1,13 +1,14 @@
-use strict_test_support::TestFailure;
+use strict_test_support::ResultFailure;
 use strict_test_support::ensure_ok;
 use tracing::subscriber::set_default;
+use tracing_core::subscriber::SubscriberError;
 use tracing_mock::expect;
 use tracing_mock::layer::MockLayer;
 
 use super::*;
 
 #[test]
-fn basic_trees() -> Result<(), TestFailure> {
+fn basic_trees() -> Result<(), ResultFailure<SubscriberError>> {
   let (with_target, with_target_handle) = layer::named("info_with_target")
     .event(expect::event().at_level(Level::INFO).with_target("my_target"))
     .only()
@@ -46,7 +47,7 @@ fn basic_trees() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn filter_span_scopes() -> Result<(), TestFailure> {
+fn filter_span_scopes() -> Result<(), ResultFailure<SubscriberError>> {
   fn target_layer(target: &'static str) -> (MockLayer, subscriber::MockHandle) {
     layer::named(format!("target_{target}"))
       .enter(expect::span().with_target(target).at_level(Level::INFO))

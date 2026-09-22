@@ -65,7 +65,20 @@ mod tests {
   use std::ffi::OsString;
   use std::os::unix::ffi::OsStringExt as _;
 
-  use strict_test_support::TestFailure;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionError(#[from] strict_test_support::OptionFailure<io::Error>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultError(#[from] strict_test_support::ResultFailure<io::Error>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use strict_test_support::ensure_some;
@@ -73,7 +86,7 @@ mod tests {
   use super::*;
 
   #[test]
-  fn socket_path_at_linux_sun_path_capacity_is_rejected() -> Result<(), TestFailure> {
+  fn socket_path_at_linux_sun_path_capacity_is_rejected() -> Result<(), TestError> {
     let path = OsString::from_vec(vec![b'a'; LINUX_SUN_PATH_BYTES]);
     let err = ensure_some(
       socket_addr(Path::new(&path)).err(),
@@ -83,10 +96,12 @@ mod tests {
       err.raw_os_error() == Some(Errno::NAMETOOLONG.raw_os_error()),
       "oversized socket path error",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn socket_path_below_linux_sun_path_capacity_is_accepted_by_address_builder() -> Result<(), TestFailure> {
+  fn socket_path_below_linux_sun_path_capacity_is_accepted_by_address_builder() -> Result<(), TestError> {
     let path_len = LINUX_SUN_PATH_BYTES.saturating_sub(1);
     let path = OsString::from_vec(vec![b'a'; path_len]);
     let _addr = ensure_ok(socket_addr(Path::new(&path)), "path below Linux sun_path capacity should fit")?;

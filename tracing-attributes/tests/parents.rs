@@ -1,12 +1,13 @@
 //! Example binary for tracing workspace checks.
 #![cfg(test)]
 
-use strict_test_support::TestFailure;
+use strict_test_support::ResultFailure;
 use strict_test_support::ensure_ok;
 use tracing::Id;
 use tracing::Level;
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
+use tracing_core::subscriber::SubscriberError;
 use tracing_mock::*;
 
 #[instrument]
@@ -24,7 +25,7 @@ where
 }
 
 #[test]
-fn default_parent_test() -> Result<(), TestFailure> {
+fn default_parent_test() -> Result<(), ResultFailure<SubscriberError>> {
   let contextual_parent = expect::span().named("contextual_parent");
   let child = expect::span().named("with_default_parent");
 
@@ -56,7 +57,7 @@ fn default_parent_test() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn explicit_parent_test() -> Result<(), TestFailure> {
+fn explicit_parent_test() -> Result<(), ResultFailure<SubscriberError>> {
   let contextual_parent = expect::span().named("contextual_parent");
   let explicit_parent = expect::span().named("explicit_parent");
   let child = expect::span().named("with_explicit_parent");

@@ -8,7 +8,21 @@ use std::hint::black_box;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use strict_test_support::TestFailure;
+use tracing_core::subscriber::SubscriberError;
+/// Native failures from these behavioral checks.
+#[derive(Debug, thiserror::Error)]
+enum TestError {
+  /// A boolean expectation failed.
+  #[error(transparent)]
+  Condition(#[from] strict_test_support::ConditionFailure),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  ComparisonUsize(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+}
+
 use strict_test_support::ensure;
 use strict_test_support::ensure_eq;
 use strict_test_support::ensure_ok;
@@ -116,25 +130,31 @@ fn repro_1831_2() -> impl Future<Output = Result<(), Infallible>> {
 }
 
 #[test]
-fn async_compile_repros_run() -> Result<(), TestFailure> {
+fn async_compile_repros_run() -> Result<(), TestError> {
   block_on_future(async {
     let Ok(values) = test_ret_impl_trait(3).await else {
-      return ensure(false, "instrumented async impl Trait result should be Ok");
+      return ensure(false, "instrumented async impl Trait result should be Ok")
+        .map(drop)
+        .map_err(TestError::from);
     };
     ensure_eq(
-      &values.count(),
-      &3_usize,
+      values.count(),
+      3_usize,
       "instrumented async impl Trait iterator should retain values",
-    )?;
+    )
+    .map(drop)?;
 
     let Ok(err_values) = test_ret_impl_trait_err(4).await else {
-      return ensure(false, "instrumented async err impl Trait result should be Ok");
+      return ensure(false, "instrumented async err impl Trait result should be Ok")
+        .map(drop)
+        .map_err(TestError::from);
     };
     ensure_eq(
-      &err_values.count(),
-      &4_usize,
+      err_values.count(),
+      4_usize,
       "instrumented async err impl Trait iterator should retain values",
-    )?;
+    )
+    .map(drop)?;
 
     test_async_fn_empty().await;
     repro_async_2294().await;
@@ -151,7 +171,7 @@ fn async_compile_repros_run() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn async_fn_only_enters_for_polls() -> Result<(), TestFailure> {
+fn async_fn_only_enters_for_polls() -> Result<(), TestError> {
   let (subscriber, handle) = subscriber::mock()
     .new_span(expect::span().named("test_async_fn"))
     .enter(expect::span().named("test_async_fn"))
@@ -166,7 +186,9 @@ fn async_fn_only_enters_for_polls() -> Result<(), TestFailure> {
     .run_with_handle();
   with_default(subscriber, || {
     let Ok(()) = block_on_future(async { test_async_fn(2).await }) else {
-      return ensure(false, "instrumented async function should complete");
+      return ensure(false, "instrumented async function should complete")
+        .map(drop)
+        .map_err(TestError::from);
     };
     Ok(())
   })?;
@@ -175,7 +197,7 @@ fn async_fn_only_enters_for_polls() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn async_fn_nested() -> Result<(), TestFailure> {
+fn async_fn_nested() -> Result<(), TestError> {
   #[instrument]
   async fn test_async_fns_nested() {
     test_async_fns_nested_other().await
@@ -214,7 +236,7 @@ fn async_fn_nested() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn async_fn_with_async_trait() -> Result<(), TestFailure> {
+fn async_fn_with_async_trait() -> Result<(), TestError> {
   use async_trait::async_trait;
 
   // test the correctness of the metadata obtained by #[instrument]
@@ -302,7 +324,7 @@ fn async_fn_with_async_trait() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn async_fn_with_async_trait_and_fields_expressions() -> Result<(), TestFailure> {
+fn async_fn_with_async_trait_and_fields_expressions() -> Result<(), TestError> {
   use async_trait::async_trait;
 
   #[async_trait]
@@ -356,7 +378,7 @@ fn async_fn_with_async_trait_and_fields_expressions() -> Result<(), TestFailure>
 }
 
 #[test]
-fn async_fn_with_async_trait_and_fields_expressions_with_generic_parameter() -> Result<(), TestFailure> {
+fn async_fn_with_async_trait_and_fields_expressions_with_generic_parameter() -> Result<(), TestError> {
   use async_trait::async_trait;
 
   #[async_trait]
@@ -455,7 +477,7 @@ fn async_fn_with_async_trait_and_fields_expressions_with_generic_parameter() -> 
 }
 
 #[test]
-fn out_of_scope_fields() -> Result<(), TestFailure> {
+fn out_of_scope_fields() -> Result<(), TestError> {
   // Reproduces tokio-rs/tracing#1296
 
   struct Thing {
@@ -500,7 +522,7 @@ fn out_of_scope_fields() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn manual_impl_future() -> Result<(), TestFailure> {
+fn manual_impl_future() -> Result<(), TestError> {
   #[instrument]
   fn manual_impl_future() -> impl Future<Output = ()> {
     async {
@@ -534,7 +556,7 @@ fn manual_impl_future() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn manual_box_pin() -> Result<(), TestFailure> {
+fn manual_box_pin() -> Result<(), TestError> {
   #[instrument]
   fn manual_box_pin() -> Pin<Box<dyn Future<Output = ()>>> {
     Box::pin(async {

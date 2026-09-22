@@ -126,7 +126,26 @@ mod tests {
   use std::string::String;
   use std::vec::Vec;
 
-  use strict_test_support::TestFailure;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Retains the searched text and expected substring.
+    #[error(transparent)]
+    Substring(#[from] strict_test_support::SubstringFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonString(#[from] strict_test_support::ComparisonFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionField(#[from] strict_test_support::OptionFailure<Field>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultError(#[from] strict_test_support::ResultFailure<io::Error>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_contains;
   use strict_test_support::ensure_eq;
@@ -251,25 +270,41 @@ mod tests {
     }
   }
 
-  fn field_by_name(name: &'static str) -> Result<Field, TestFailure> {
-    ensure_some(TEST_META.fields().field(name), "test field exists")
+  fn field_by_name(name: &'static str) -> Result<Field, TestError> {
+    ensure_some(TEST_META.fields().field(name), "test field exists").map_err(TestError::from)
   }
 
   #[test]
-  fn alt_records_debug_with_alternate_format() -> Result<(), TestFailure> {
+  fn alt_records_debug_with_alternate_format() -> Result<(), TestError> {
     let field = field_by_name("answer")?;
     let mut output = String::new();
     let mut visitor = Alt::new(DebugVisitor::new(&mut output));
     visitor.record_debug(&field, &["alpha", "beta"]);
 
-    ensure(VisitOutput::<fmt::Result>::finish(visitor).is_ok(), "debug visitor should finish")?;
-    ensure_contains(&output, "answer=[\n", "alternate debug opens a multi-line list")?;
-    ensure_contains(&output, "    \"alpha\"", "alternate debug formats the first element")?;
-    ensure_contains(&output, "    \"beta\"", "alternate debug formats the second element")
+    ensure(VisitOutput::<fmt::Result>::finish(visitor).is_ok(), "debug visitor should finish").map(drop)?;
+    ensure_contains(
+      output.clone(),
+      String::from("answer=[\n"),
+      "alternate debug opens a multi-line list",
+    )
+    .map(drop)?;
+    ensure_contains(
+      output.clone(),
+      String::from("    \"alpha\""),
+      "alternate debug formats the first element",
+    )
+    .map(drop)?;
+    ensure_contains(
+      output.clone(),
+      String::from("    \"beta\""),
+      "alternate debug formats the second element",
+    )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn alt_forwards_numeric_bool_and_str_values() -> Result<(), TestFailure> {
+  fn alt_forwards_numeric_bool_and_str_values() -> Result<(), TestError> {
     let answer = field_by_name("answer")?;
     let message = field_by_name("message")?;
     let other = field_by_name("other")?;
@@ -282,11 +317,13 @@ mod tests {
     visitor.record_str(&message, "hello");
 
     let expected = String::from("answer=i64:-42|answer=u64:42|other=f64:3.5|other=bool:true|message=str:hello");
-    ensure_eq(&visitor.finish(), &expected, "Alt forwards non-debug values unchanged")
+    ensure_eq(visitor.finish(), expected, "Alt forwards non-debug values unchanged")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn alt_make_visitor_wraps_inner_visitor() -> Result<(), TestFailure> {
+  fn alt_make_visitor_wraps_inner_visitor() -> Result<(), TestError> {
     let answer = field_by_name("answer")?;
     let maker = Alt::new(MakeRecording);
     let mut visitor = maker.make_visitor(());
@@ -294,30 +331,34 @@ mod tests {
     visitor.record_bool(&answer, true);
 
     let expected = String::from("answer=bool:true");
-    ensure_eq(&visitor.finish(), &expected, "Alt wraps visitors produced by MakeVisitor")
+    ensure_eq(visitor.finish(), expected, "Alt wraps visitors produced by MakeVisitor")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn alt_finish_returns_inner_output() -> Result<(), TestFailure> {
+  fn alt_finish_returns_inner_output() -> Result<(), TestError> {
     let answer = field_by_name("answer")?;
     let mut visitor = Alt::new(RecordingVisitor::default());
 
     visitor.record_debug(&answer, &"ignored");
 
     let expected = String::from("answer=debug");
-    ensure_eq(&visitor.finish(), &expected, "Alt finish returns the inner visitor output")
+    ensure_eq(visitor.finish(), expected, "Alt finish returns the inner visitor output")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn alt_visit_fmt_and_visit_write_forward_writers() -> Result<(), TestFailure> {
+  fn alt_visit_fmt_and_visit_write_forward_writers() -> Result<(), TestError> {
     let mut fmt_visitor = Alt::new(FmtVisitor::default());
-    ensure(fmt_visitor.writer().write_str("fmt").is_ok(), "fmt writer should accept output")?;
-    ensure_eq(&fmt_visitor.0.writer, &String::from("fmt"), "Alt forwards fmt writers")?;
-    ensure(VisitOutput::<fmt::Result>::finish(fmt_visitor).is_ok(), "fmt visitor should finish")?;
+    ensure(fmt_visitor.writer().write_str("fmt").is_ok(), "fmt writer should accept output").map(drop)?;
+    ensure_eq((fmt_visitor.0.writer).clone(), String::from("fmt"), "Alt forwards fmt writers").map(drop)?;
+    ensure(VisitOutput::<fmt::Result>::finish(fmt_visitor).is_ok(), "fmt visitor should finish").map(drop)?;
 
     let mut io_visitor = Alt::new(IoVisitor::default());
     ensure_ok(io_visitor.writer().write_all(b"io"), "io writer should accept output")?;
-    ensure(io_visitor.0.writer == b"io", "Alt forwards io writers")?;
+    ensure(io_visitor.0.writer == b"io", "Alt forwards io writers").map(drop)?;
     ensure_ok(VisitOutput::<Result<(), io::Error>>::finish(io_visitor), "io visitor should finish")?;
     Ok(())
   }

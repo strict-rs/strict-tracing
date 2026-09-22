@@ -14,8 +14,8 @@ license.workspace = true
 readme = "README.md"
 repository.workspace = true
 homepage = "https://tokio.rs"
-edition.workspace = true
-rust-version.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
 publish = false
 
 [dependencies]

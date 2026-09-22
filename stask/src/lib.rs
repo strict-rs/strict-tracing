@@ -15,7 +15,18 @@ pub fn run() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Retains the native registry failure.
+    #[error(transparent)]
+    Registry(#[from] strict_test_support::ResultFailure<template_stask::StaskError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use template_core::cli::command::CommandSurface;
@@ -23,7 +34,7 @@ mod tests {
   use super::extensions;
 
   #[test]
-  fn extension_registry_exposes_only_the_local_x_router() -> Result<(), TestFailure> {
+  fn extension_registry_exposes_only_the_local_x_router() -> Result<(), TestError> {
     let command_set = ensure_ok(extensions::commands(), "the local extension registry must build")?;
     let descriptors = command_set.descriptors();
     ensure(
@@ -33,5 +44,7 @@ mod tests {
           .is_some_and(|descriptor| descriptor.name() == "x" && descriptor.surface() == CommandSurface::StaskExtension),
       "the consumer runner must expose only the local x extension surface",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

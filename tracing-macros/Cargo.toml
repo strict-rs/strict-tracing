@@ -2,7 +2,7 @@
 name = "tracing-macros"
 version.workspace = true
 authors = ["Eliza Weisman <eliza@buoyant.io>"]
-edition.workspace = true
+edition = { workspace = true }
 repository.workspace = true
 homepage = "https://tokio.rs"
 description = """
@@ -15,7 +15,7 @@ categories = [
 ]
 keywords = ["logging", "tracing"]
 license.workspace = true
-rust-version.workspace = true
+rust-version = { workspace = true }
 readme = "README.md"
 
 [dependencies]

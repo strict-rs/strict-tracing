@@ -1,10 +1,11 @@
 //! Example binary for tracing workspace checks.
 #![cfg(test)]
 
-use strict_test_support::TestFailure;
+use strict_test_support::ResultFailure;
 use strict_test_support::ensure_ok;
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
+use tracing_core::subscriber::SubscriberError;
 use tracing_mock::*;
 
 #[instrument]
@@ -32,7 +33,7 @@ fn custom_name() {}
 fn custom_name_no_equals() {}
 
 #[test]
-fn default_name_test() -> Result<(), TestFailure> {
+fn default_name_test() -> Result<(), ResultFailure<SubscriberError>> {
   let (subscriber, handle) = subscriber::mock()
     .new_span(expect::span().named("default_name"))
     .enter(expect::span().named("default_name"))
@@ -49,7 +50,7 @@ fn default_name_test() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn custom_name_test() -> Result<(), TestFailure> {
+fn custom_name_test() -> Result<(), ResultFailure<SubscriberError>> {
   let (subscriber, handle) = subscriber::mock()
     .new_span(expect::span().named("my_name"))
     .enter(expect::span().named("my_name"))
@@ -66,7 +67,7 @@ fn custom_name_test() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn custom_name_no_equals_test() -> Result<(), TestFailure> {
+fn custom_name_no_equals_test() -> Result<(), ResultFailure<SubscriberError>> {
   let (subscriber, handle) = subscriber::mock()
     .new_span(expect::span().named("my_other_name"))
     .enter(expect::span().named("my_other_name"))

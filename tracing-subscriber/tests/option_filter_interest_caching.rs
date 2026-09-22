@@ -9,7 +9,18 @@ mod tests {
   use std::sync::atomic::AtomicUsize;
   use std::sync::atomic::Ordering;
 
-  use strict_test_support::TestFailure;
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonUsize(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
   use tracing::subscriber::set_default;
@@ -22,7 +33,7 @@ mod tests {
   /// A `None` filter should always be interested in events, and it should not
   /// needlessly degrade the caching of other filters.
   #[test]
-  fn none_interest_cache() -> Result<(), TestFailure> {
+  fn none_interest_cache() -> Result<(), TestError> {
     let (raw_none_layer, handle_none) = layer::mock()
       .event(expect::event())
       .event(expect::event())
@@ -49,7 +60,7 @@ mod tests {
       tracing::debug!(target: "always_interesting", x="bar");
     }
 
-    ensure_eq(&times_filtered.load(Ordering::Relaxed), &1, "cached filter function is called once")?;
+    ensure_eq(times_filtered.load(Ordering::Relaxed), 1, "cached filter function is called once").map(drop)?;
     ensure_ok(handle_none.finished(), "mock expectations should finish")?;
     ensure_ok(handle_filter_fn.finished(), "mock expectations should finish")?;
     Ok(())

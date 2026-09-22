@@ -1,6 +1,7 @@
-use strict_test_support::TestFailure;
+use strict_test_support::ResultFailure;
 use strict_test_support::ensure_ok;
 use tracing::subscriber::set_default;
+use tracing_core::subscriber::SubscriberError;
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::filter::filter_fn;
 use tracing_subscriber::layer::Identity;
@@ -9,7 +10,7 @@ use tracing_subscriber::prelude::*;
 use super::*;
 
 #[test]
-#[cfg_attr(not(feature = "tracing-log"), ignore)]
+#[cfg_attr(not(feature = "tracing-log"), ignore = "requires the tracing-log feature")]
 fn log_events() {
   // Reproduces https://github.com/tokio-rs/tracing/issues/1563
   mod inner {
@@ -38,7 +39,7 @@ fn log_events() {
 }
 
 #[test]
-fn inner_layer_short_circuits() -> Result<(), TestFailure> {
+fn inner_layer_short_circuits() -> Result<(), ResultFailure<SubscriberError>> {
   // This test ensures that when a global filter short-circuits `Interest`
   // evaluation, we aren't left with a "dirty" per-layer filter state.
 

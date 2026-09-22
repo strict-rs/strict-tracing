@@ -6,14 +6,31 @@ mod tests {
   use std::thread;
   use std::time::Duration;
 
-  use strict_test_support::TestFailure;
+  use tracing_core::dispatcher;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultDispatcherSetGlobalDefaultError(#[from] strict_test_support::ResultFailure<dispatcher::SetGlobalDefaultError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultRecvTimeoutError(#[from] strict_test_support::ResultFailure<mpsc::RecvTimeoutError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSendError(#[from] strict_test_support::ResultFailure<mpsc::SendError<()>>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use tracing::subscriber;
   use tracing_core::test_util::CallsiteTrackingSubscriber;
 
   #[test]
-  fn register_callsite_doesnt_deadlock() -> Result<(), TestFailure> {
+  fn register_callsite_doesnt_deadlock() -> Result<(), TestError> {
     // Installing this subscriber re-enters the active dispatcher with an event
     // during `register_callsite`; the callsite registry must service that
     // re-entrant registration without deadlocking.
@@ -38,8 +55,12 @@ mod tests {
     )?;
     let send_result = match th.join() {
       Ok(send_result) => send_result,
-      Err(_panic) => return ensure(false, "thread should join successfully"),
+      Err(_panic) => {
+        return ensure(false, "thread should join successfully")
+          .map(drop)
+          .map_err(TestError::from);
+      }
     };
-    ensure_ok(send_result, "thread should send completion signal")
+    ensure_ok(send_result, "thread should send completion signal").map_err(TestError::from)
   }
 }

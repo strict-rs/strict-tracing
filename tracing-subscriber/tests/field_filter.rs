@@ -3,7 +3,20 @@
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use tracing_core::subscriber::SubscriberError;
+  use tracing_subscriber::filter;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+    /// Retains the native parse failure.
+    #[error(transparent)]
+    Parse(#[from] strict_test_support::ResultFailure<filter::ParseError>),
+  }
+
   use strict_test_support::ensure_ok;
   use tracing::Level;
   use tracing::subscriber::with_default;
@@ -16,7 +29,7 @@ mod tests {
     not(flaky_tests),
     ignore = "field-filter expectations are flaky without the explicit flaky_tests cfg"
   )]
-  fn field_filter_events() -> Result<(), TestFailure> {
+  fn field_filter_events() -> Result<(), TestError> {
     let filter: EnvFilter = ensure_ok("[{thing}]=debug".parse(), "field event filter parses")?;
     let (mock_subscriber, mock_handle) = subscriber::mock()
       .event(expect::event().at_level(Level::INFO).with_fields(expect::field("thing")))
@@ -42,7 +55,7 @@ mod tests {
     not(flaky_tests),
     ignore = "field-filter expectations are flaky without the explicit flaky_tests cfg"
   )]
-  fn field_filter_spans() -> Result<(), TestFailure> {
+  fn field_filter_spans() -> Result<(), TestError> {
     let filter: EnvFilter = ensure_ok("[{enabled=true}]=debug".parse(), "field span filter parses")?;
     let (mock_subscriber, mock_handle) = subscriber::mock()
       .enter(expect::span().named("span1"))
@@ -76,7 +89,7 @@ mod tests {
   }
 
   #[test]
-  fn record_after_created() -> Result<(), TestFailure> {
+  fn record_after_created() -> Result<(), TestError> {
     let filter: EnvFilter = ensure_ok("[{enabled=true}]=debug".parse(), "record-after-create filter parses")?;
     let (mock_subscriber, mock_handle) = subscriber::mock()
       .enter(expect::span().named("span"))

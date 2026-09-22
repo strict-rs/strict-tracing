@@ -21,7 +21,18 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
 
-use strict_test_support::TestFailure;
+use tracing_core::subscriber::SubscriberError;
+/// Native failures from these behavioral checks.
+#[derive(Debug, thiserror::Error)]
+enum TestError {
+  /// A boolean expectation failed.
+  #[error(transparent)]
+  Condition(#[from] strict_test_support::ConditionFailure),
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+}
+
 use strict_test_support::ensure;
 use strict_test_support::ensure_ok;
 use tracing::Level;
@@ -39,7 +50,7 @@ mod tests {
   use super::*;
 
   #[test]
-  fn basic_layer_filters() -> Result<(), TestFailure> {
+  fn basic_layer_filters() -> Result<(), TestError> {
     let (trace_layer, trace_handle) = layer::named("trace")
       .event(expect::event().at_level(Level::TRACE))
       .event(expect::event().at_level(Level::DEBUG))
@@ -75,7 +86,7 @@ mod tests {
   }
 
   #[test]
-  fn basic_layer_filter_spans() -> Result<(), TestFailure> {
+  fn basic_layer_filter_spans() -> Result<(), TestError> {
     let (trace_layer, trace_handle) = layer::named("trace")
       .new_span(expect::span().at_level(Level::TRACE))
       .new_span(expect::span().at_level(Level::DEBUG))
@@ -111,7 +122,7 @@ mod tests {
   }
 
   #[test]
-  fn global_filters_subscribers_still_work() -> Result<(), TestFailure> {
+  fn global_filters_subscribers_still_work() -> Result<(), TestError> {
     let (expect, handle) = layer::mock()
       .event(expect::event().at_level(Level::INFO))
       .event(expect::event().at_level(Level::WARN))
@@ -133,7 +144,7 @@ mod tests {
   }
 
   #[test]
-  fn global_filter_interests_are_cached() -> Result<(), TestFailure> {
+  fn global_filter_interests_are_cached() -> Result<(), TestError> {
     let saw_global_filter_violation = Arc::new(AtomicBool::new(false));
     let violation = Arc::clone(&saw_global_filter_violation);
     let (expect, handle) = layer::mock()
@@ -163,10 +174,12 @@ mod tests {
       !saw_global_filter_violation.load(Ordering::SeqCst),
       "enabled is not called for callsites disabled by the global filter",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn global_filters_affect_subscriber_filters() -> Result<(), TestFailure> {
+  fn global_filters_affect_subscriber_filters() -> Result<(), TestError> {
     let (expect, handle) = layer::named("debug")
       .event(expect::event().at_level(Level::INFO))
       .event(expect::event().at_level(Level::WARN))
@@ -190,7 +203,7 @@ mod tests {
   }
 
   #[test]
-  fn filter_fn() -> Result<(), TestFailure> {
+  fn filter_fn() -> Result<(), TestError> {
     let (all, all_handle) = layer::named("all_targets")
       .event(expect::event().with_fields(expect::msg("hello foo")))
       .event(expect::event().with_fields(expect::msg("hello bar")))

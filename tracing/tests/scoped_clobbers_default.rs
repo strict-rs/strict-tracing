@@ -3,7 +3,20 @@
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use tracing_core::dispatcher;
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultDispatcherSetGlobalDefaultError(#[from] strict_test_support::ResultFailure<dispatcher::SetGlobalDefaultError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure_ok;
   use tracing::Level;
   use tracing::level_filters::STATIC_MAX_LEVEL;
@@ -13,7 +26,7 @@ mod tests {
   use tracing_mock::subscriber;
 
   #[test]
-  fn scoped_clobbers_global() -> Result<(), TestFailure> {
+  fn scoped_clobbers_global() -> Result<(), TestError> {
     // Reproduces https://github.com/tokio-rs/tracing/issues/2050
 
     let (scoped, scoped_handle) = subscriber::mock()

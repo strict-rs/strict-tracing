@@ -15,7 +15,21 @@ mod tests {
   use std::sync::atomic::AtomicUsize;
   use std::sync::atomic::Ordering;
 
-  use strict_test_support::TestFailure;
+  use tracing_core::dispatcher;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonUsize(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultDispatcherSetGlobalDefaultError(#[from] strict_test_support::ResultFailure<dispatcher::SetGlobalDefaultError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
@@ -27,7 +41,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn filter_caching_is_lexically_scoped() -> Result<(), TestFailure> {
+  fn filter_caching_is_lexically_scoped() -> Result<(), TestError> {
     fn my_great_function() -> bool {
       span!(Level::TRACE, "emily").in_scope(|| true)
     }
@@ -60,47 +74,54 @@ mod tests {
     let expected_twice = expected_once.saturating_mul(2);
 
     // Call the function once. The filter should be re-evaluated.
-    ensure(my_great_function(), "first emily call enters span")?;
+    ensure(my_great_function(), "first emily call enters span").map(drop)?;
     ensure_eq(
-      &count.load(Ordering::Relaxed),
-      &expected_once,
+      count.load(Ordering::Relaxed),
+      expected_once,
       "first emily call evaluates filter once",
-    )?;
+    )
+    .map(drop)?;
 
     // Call the function again. The cached result should be used.
-    ensure(my_great_function(), "second emily call enters span")?;
+    ensure(my_great_function(), "second emily call enters span").map(drop)?;
     ensure_eq(
-      &count.load(Ordering::Relaxed),
-      &expected_once,
+      count.load(Ordering::Relaxed),
+      expected_once,
       "second emily call reuses cached filter",
-    )?;
+    )
+    .map(drop)?;
 
-    ensure(my_other_function(), "first frank call enters span")?;
+    ensure(my_other_function(), "first frank call enters span").map(drop)?;
     ensure_eq(
-      &count.load(Ordering::Relaxed),
-      &expected_twice,
+      count.load(Ordering::Relaxed),
+      expected_twice,
       "first frank call evaluates its filter",
-    )?;
+    )
+    .map(drop)?;
 
-    ensure(my_great_function(), "third emily call enters span")?;
+    ensure(my_great_function(), "third emily call enters span").map(drop)?;
     ensure_eq(
-      &count.load(Ordering::Relaxed),
-      &expected_twice,
+      count.load(Ordering::Relaxed),
+      expected_twice,
       "third emily call reuses cached filter",
-    )?;
+    )
+    .map(drop)?;
 
-    ensure(my_other_function(), "second frank call enters span")?;
+    ensure(my_other_function(), "second frank call enters span").map(drop)?;
     ensure_eq(
-      &count.load(Ordering::Relaxed),
-      &expected_twice,
+      count.load(Ordering::Relaxed),
+      expected_twice,
       "second frank call reuses cached filter",
-    )?;
+    )
+    .map(drop)?;
 
-    ensure(my_great_function(), "fourth emily call enters span")?;
+    ensure(my_great_function(), "fourth emily call enters span").map(drop)?;
     ensure_eq(
-      &count.load(Ordering::Relaxed),
-      &expected_twice,
+      count.load(Ordering::Relaxed),
+      expected_twice,
       "fourth emily call reuses cached filter",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

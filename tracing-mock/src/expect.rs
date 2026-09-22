@@ -6,7 +6,7 @@
 //! # Examples
 //!
 //! ```
-//! # fn main() -> Result<(), strict_test_support::TestFailure> {
+//! # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 //! use tracing_mock::expect;
 //! use tracing_mock::subscriber;
 //!
@@ -75,7 +75,7 @@ pub(crate) enum Expect {
 /// # Examples
 ///
 /// ```
-/// # fn main() -> Result<(), strict_test_support::TestFailure> {
+/// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 /// use tracing_mock::expect;
 /// use tracing_mock::subscriber;
 ///
@@ -94,7 +94,7 @@ pub(crate) enum Expect {
 /// will fail:
 ///
 /// ```
-/// # fn main() -> Result<(), strict_test_support::TestFailure> {
+/// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
 /// use tracing_mock::expect;
 /// use tracing_mock::subscriber;
 ///
@@ -126,7 +126,7 @@ pub fn event() -> ExpectedEvent {
 /// # Examples
 ///
 /// ```
-/// # fn main() -> Result<(), strict_test_support::TestFailure> {
+/// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 /// use tracing_mock::expect;
 /// use tracing_mock::subscriber;
 ///
@@ -149,7 +149,7 @@ pub fn event() -> ExpectedEvent {
 /// will fail:
 ///
 /// ```
-/// # fn main() -> Result<(), strict_test_support::TestFailure> {
+/// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
 /// use tracing_mock::expect;
 /// use tracing_mock::subscriber;
 ///
@@ -182,7 +182,7 @@ pub fn span() -> ExpectedSpan {
 /// # Examples
 ///
 /// ```
-/// # fn main() -> Result<(), strict_test_support::TestFailure> {
+/// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 /// use tracing_mock::expect;
 /// use tracing_mock::subscriber;
 ///
@@ -202,7 +202,7 @@ pub fn span() -> ExpectedSpan {
 /// A different field value will cause the test to fail:
 ///
 /// ```
-/// # fn main() -> Result<(), strict_test_support::TestFailure> {
+/// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
 /// use tracing_mock::expect;
 /// use tracing_mock::subscriber;
 ///
@@ -244,7 +244,7 @@ where
 /// # Examples
 ///
 /// ```
-/// # fn main() -> Result<(), strict_test_support::TestFailure> {
+/// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 /// use tracing_mock::expect;
 /// use tracing_mock::subscriber;
 ///
@@ -264,7 +264,7 @@ where
 /// A different message value will cause the test to fail:
 ///
 /// ```
-/// # fn main() -> Result<(), strict_test_support::TestFailure> {
+/// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
 /// use tracing_mock::expect;
 /// use tracing_mock::subscriber;
 ///
@@ -443,7 +443,22 @@ impl fmt::Display for Expect {
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionSubscriberError(#[from] strict_test_support::OptionFailure<SubscriberError>),
+    /// Retains the searched text and expected substring.
+    #[error(transparent)]
+    Substring(#[from] strict_test_support::SubstringFailure<String, String>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_contains;
   use strict_test_support::ensure_some;
@@ -452,7 +467,7 @@ mod tests {
   use crate::expect;
 
   #[test]
-  fn clone_and_close_span_accessors_only_accept_matching_expectations() -> Result<(), TestFailure> {
+  fn clone_and_close_span_accessors_only_accept_matching_expectations() -> Result<(), TestError> {
     let copied_reference = Expect::CloneSpan(expect::span().named("cloned_span"));
     let lifecycle_end = Expect::CloseSpan(expect::span().named("closed_span"));
     let event = Expect::Event(expect::event());
@@ -460,25 +475,31 @@ mod tests {
     ensure(
       copied_reference.clone_span().is_some(),
       "clone-span accessor exposes clone expectations",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       copied_reference.close_span().is_none(),
       "clone-span accessor rejects close expectations",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       lifecycle_end.close_span().is_some(),
       "close-span accessor exposes close expectations",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       lifecycle_end.clone_span().is_none(),
       "close-span accessor rejects clone expectations",
-    )?;
-    ensure(event.clone_span().is_none(), "clone-span accessor rejects event expectations")?;
+    )
+    .map(drop)?;
+    ensure(event.clone_span().is_none(), "clone-span accessor rejects event expectations").map(drop)?;
     ensure(event.close_span().is_none(), "close-span accessor rejects event expectations")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn display_and_mismatch_messages_describe_every_expectation_variant() -> Result<(), TestFailure> {
+  fn display_and_mismatch_messages_describe_every_expectation_variant() -> Result<(), TestError> {
     ensure_expectation_text(
       &Expect::Event(expect::event().with_fields(expect::field("message").with_value(&"event message"))),
       &["event"],
@@ -534,10 +555,15 @@ mod tests {
     ])
   }
 
-  fn ensure_expectation_text(expectation: &Expect, display_fragments: &[&str], error_fragments: &[&str]) -> Result<(), TestFailure> {
+  fn ensure_expectation_text(expectation: &Expect, display_fragments: &[&str], error_fragments: &[&str]) -> Result<(), TestError> {
     let display = format!("{expectation}");
     for fragment in display_fragments {
-      ensure_contains(&display, fragment, "expectation display includes configured fragment")?;
+      ensure_contains(
+        (display).clone(),
+        String::from(*fragment),
+        "expectation display includes configured fragment",
+      )
+      .map(drop)?;
     }
 
     let expectation_error = ensure_some(
@@ -546,7 +572,12 @@ mod tests {
     )?;
     let rendered_error = expectation_error.to_string();
     for fragment in error_fragments {
-      ensure_contains(&rendered_error, fragment, "mismatch error includes configured fragment")?;
+      ensure_contains(
+        (rendered_error).clone(),
+        String::from(*fragment),
+        "mismatch error includes configured fragment",
+      )
+      .map(drop)?;
     }
 
     Ok(())

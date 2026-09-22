@@ -104,7 +104,19 @@ impl fmt::Display for ExpectedMetadata {
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use tracing_core::Interest;
@@ -137,7 +149,7 @@ mod tests {
   }
 
   #[test]
-  fn metadata_expectations_accept_matching_metadata() -> Result<(), TestFailure> {
+  fn metadata_expectations_accept_matching_metadata() -> Result<(), TestError> {
     let expected = ExpectedMetadata {
       name:   Some("metadata_test".to_owned()),
       level:  Some(Level::INFO),
@@ -148,10 +160,11 @@ mod tests {
       expected.check(&METADATA_TEST, "an event", "metadata-test"),
       "matching metadata is accepted",
     )
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn metadata_expectations_reject_mismatching_name_level_and_target() -> Result<(), TestFailure> {
+  fn metadata_expectations_reject_mismatching_name_level_and_target() -> Result<(), TestError> {
     let wrong_name = ExpectedMetadata {
       name: Some("other_name".to_owned()),
       ..ExpectedMetadata::default()
@@ -168,14 +181,18 @@ mod tests {
     ensure(
       wrong_name.check(&METADATA_TEST, "an event", "metadata-test").is_err(),
       "wrong name is rejected",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       wrong_level.check(&METADATA_TEST, "an event", "metadata-test").is_err(),
       "wrong level is rejected",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       wrong_target.check(&METADATA_TEST, "an event", "metadata-test").is_err(),
       "wrong target is rejected",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

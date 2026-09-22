@@ -113,7 +113,6 @@
 )]
 #![cfg_attr(docsrs, deny(rustdoc::broken_intra_doc_links))]
 use std::cell::Cell;
-use std::convert::identity;
 use std::fmt;
 use std::fmt::Write as _;
 use std::fs::File;
@@ -218,7 +217,7 @@ where
     let (flush_complete, flush_result) = mpsc::channel();
 
     match self.commands.send(WriterCommand::Flush(flush_complete)) {
-      Ok(()) => flush_result.recv().map_or(Ok(()), identity),
+      Ok(()) => flush_result.recv().unwrap_or(Ok(())),
       Err(_) => Ok(()),
     }
   }

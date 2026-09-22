@@ -4,13 +4,14 @@
 
 #[cfg(test)]
 mod tests {
-  // We call all macros in this module with `no_implicit_prelude` to ensure they do not depend on the
-  // standard prelude.
+  // We call all macros in this module with `no_implicit_prelude` to ensure they do not depend on
+  // the standard prelude.
   extern crate strict_test_support;
   extern crate tracing as tracing_crate;
   #[cfg(target_arch = "wasm32")]
   extern crate wasm_bindgen_test;
 
+  use ::core::mem::drop;
   use ::core::option::Option;
   use ::core::result::Result;
   use ::std::convert::From as _;
@@ -19,7 +20,7 @@ mod tests {
   use ::std::fmt::Formatter;
   use ::std::string::String;
   use ::std::write;
-  use strict_test_support::TestFailure;
+  use strict_test_support::ConditionFailure;
   use strict_test_support::ensure;
   use tracing_crate::Level;
   use tracing_crate::callsite;
@@ -62,7 +63,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn temporary_field_expressions_live_for_macro_dispatch() -> Result<(), TestFailure> {
+  fn temporary_field_expressions_live_for_macro_dispatch() -> Result<(), ConditionFailure> {
     event!(
         Level::INFO,
         plain = temporary_string(),
@@ -100,6 +101,7 @@ mod tests {
       still_available == "retained",
       "retained field value should remain available after event",
     )
+    .map(drop)
   }
 
   // Tests that macros work across various invocation syntax.
@@ -1464,14 +1466,14 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn format_args_already_defined() -> Result<(), TestFailure> {
+  fn format_args_already_defined() -> Result<(), ConditionFailure> {
     // Reproduces: https://github.com/tokio-rs/tracing/issues/2721
     macro_rules! format_args {
       ($i:expr) => {
         $i == 3
       };
     }
-    ensure(format_args!(3), "local format_args macro should be used")?;
+    ensure(format_args!(3), "local format_args macro should be used").map(drop)?;
     event!(Level::DEBUG, "foo: {}", 3);
     trace!("foo: {}", 3);
     debug!("foo: {}", 3);

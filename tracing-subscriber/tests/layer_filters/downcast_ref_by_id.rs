@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::any::TypeId;
 
-use strict_test_support::TestFailure;
+use strict_test_support::ConditionFailure;
 use strict_test_support::ensure;
 use tracing::Dispatch;
 use tracing::Level;
@@ -12,7 +12,7 @@ use tracing_subscriber::prelude::*;
 use tracing_subscriber::registry::LookupSpan;
 
 #[test]
-fn downcast_ref_to_inner_layer_and_filter() -> Result<(), TestFailure> {
+fn downcast_ref_to_inner_layer_and_filter() -> Result<(), ConditionFailure> {
   // Test that a filtered layer gives downcast_ref access to
   // both the layer and the filter.
 
@@ -29,16 +29,18 @@ fn downcast_ref_to_inner_layer_and_filter() -> Result<(), TestFailure> {
   ensure(
     dispatch.downcast_ref::<Targets>().is_some(),
     "filtered layer exposes the filter by type",
-  )?;
+  )
+  .map(drop)?;
   // The wrapped layer is available
   ensure(
     dispatch.downcast_ref::<WrappedLayer>().is_some(),
     "filtered layer exposes the wrapped layer by type",
   )
+  .map(drop)
 }
 
 #[test]
-fn forward_downcast_ref_by_id_to_layer() -> Result<(), TestFailure> {
+fn forward_downcast_ref_by_id_to_layer() -> Result<(), ConditionFailure> {
   // Test that a filtered layer still gives its wrapped layer a chance to
   // return a custom struct from downcast_ref_by_id.
   // https://github.com/tokio-rs/tracing/issues/1618
@@ -74,4 +76,5 @@ fn forward_downcast_ref_by_id_to_layer() -> Result<(), TestFailure> {
     dispatch.downcast_ref::<WithContext>().is_some(),
     "custom downcast_ref_by_id types are forwarded",
   )
+  .map(drop)
 }

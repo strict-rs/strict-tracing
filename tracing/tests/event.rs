@@ -14,7 +14,7 @@ mod tests {
   use std::num::NonZeroI32;
   use std::num::Wrapping;
 
-  use strict_test_support::TestFailure;
+  use strict_test_support::ResultFailure;
   use strict_test_support::ensure_ok;
   use tracing::Level;
   use tracing::debug;
@@ -26,13 +26,14 @@ mod tests {
   use tracing::level_filters::STATIC_MAX_LEVEL;
   use tracing::subscriber::with_default;
   use tracing::trace;
+  use tracing_core::subscriber::SubscriberError;
   use tracing_mock::*;
 
   macro_rules! event_without_message {
     ($name:ident : $e:expr) => {
       #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
       #[test]
-      fn $name() -> Result<(), TestFailure> {
+      fn $name() -> Result<(), ResultFailure<SubscriberError>> {
         let (subscriber, handle) = subscriber::mock()
           .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
             builder.event(
@@ -69,7 +70,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn event_with_message() -> Result<(), TestFailure> {
+  fn event_with_message() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::DEBUG), |builder| {
         builder.event(expect::event().with_fields(
@@ -89,7 +90,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn message_without_delims() -> Result<(), TestFailure> {
+  fn message_without_delims() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::DEBUG), |builder| {
         builder.event(
@@ -116,7 +117,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn string_message_without_delims() -> Result<(), TestFailure> {
+  fn string_message_without_delims() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::DEBUG), |builder| {
         builder.event(
@@ -143,7 +144,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn one_with_everything() -> Result<(), TestFailure> {
+  fn one_with_everything() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::ERROR), |builder| {
         builder.event(
@@ -182,7 +183,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn moved_field() -> Result<(), TestFailure> {
+  fn moved_field() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
         builder.event(expect::event().with_fields(expect::field("foo").with_value(&display("hello from my event")).only()))
@@ -200,7 +201,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn dotted_field_name() -> Result<(), TestFailure> {
+  fn dotted_field_name() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
         builder.event(
@@ -224,7 +225,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn borrowed_field() -> Result<(), TestFailure> {
+  fn borrowed_field() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
         builder.event(expect::event().with_fields(expect::field("foo").with_value(&display("hello from my event")).only()))
@@ -246,7 +247,7 @@ mod tests {
   #[test]
   // If emitting log instrumentation, this gets moved anyway, breaking the test.
   #[cfg(not(feature = "log"))]
-  fn move_field_out_of_struct() -> Result<(), TestFailure> {
+  fn move_field_out_of_struct() -> Result<(), ResultFailure<SubscriberError>> {
     use tracing::field::debug;
 
     #[derive(Debug)]
@@ -287,7 +288,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn display_shorthand() -> Result<(), TestFailure> {
+  fn display_shorthand() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder.event(expect::event().with_fields(expect::field("my_field").with_value(&display("hello world")).only()))
@@ -304,7 +305,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn debug_shorthand() -> Result<(), TestFailure> {
+  fn debug_shorthand() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder.event(expect::event().with_fields(expect::field("my_field").with_value(&debug("hello world")).only()))
@@ -321,7 +322,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn both_shorthands() -> Result<(), TestFailure> {
+  fn both_shorthands() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder.event(
@@ -356,7 +357,7 @@ mod tests {
   )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn explicit_child() -> Result<(), TestFailure> {
+  fn explicit_child() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .new_span(expect::span().named("foo"))
       .event(expect::event().with_ancestry(expect::has_explicit_parent("foo")))
@@ -386,7 +387,7 @@ mod tests {
   )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn explicit_child_at_levels() -> Result<(), TestFailure> {
+  fn explicit_child_at_levels() -> Result<(), ResultFailure<SubscriberError>> {
     // `warn!` is used only here; keep its import inside this cfg-gated test so a
     // `max_level_*` cap that removes the test does not orphan the import.
     use tracing::warn;
@@ -416,7 +417,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn option_values() -> Result<(), TestFailure> {
+  fn option_values() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder.event(
@@ -455,7 +456,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn option_ref_values() -> Result<(), TestFailure> {
+  fn option_ref_values() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder.event(
@@ -494,7 +495,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn option_ref_mut_values() -> Result<(), TestFailure> {
+  fn option_ref_mut_values() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder.event(
@@ -533,7 +534,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn string_field() -> Result<(), TestFailure> {
+  fn string_field() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::INFO), |builder| {
         builder
@@ -629,7 +630,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn constant_field_name() -> Result<(), TestFailure> {
+  fn constant_field_name() -> Result<(), ResultFailure<SubscriberError>> {
     let expect_event = || {
       expect::event().with_fields(
         expect::field("foo")
@@ -665,7 +666,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn keyword_ident_in_field_name() -> Result<(), TestFailure> {
+  fn keyword_ident_in_field_name() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::ERROR), |builder| {
         builder.event(expect::event().with_fields(expect::field("crate").with_value(&"tracing")))
@@ -680,7 +681,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn raw_ident_in_field_name() -> Result<(), TestFailure> {
+  fn raw_ident_in_field_name() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::ERROR), |builder| {
         builder.event(expect::event().with_fields(expect::field("this.type").with_value(&"Value")))

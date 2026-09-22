@@ -158,7 +158,21 @@ where
 #[cfg(test)]
 #[cfg(all(test, feature = "alloc"))]
 mod test {
-  use strict_test_support::TestFailure;
+
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultFmtError(#[from] strict_test_support::ResultFailure<fmt::Error>),
+    /// Retains the native field failure.
+    #[error(transparent)]
+    Field(#[from] strict_test_support::OptionFailure<Field>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
 
@@ -166,7 +180,7 @@ mod test {
   use crate::field::test_util::*;
 
   #[test]
-  fn delimited_visitor() -> Result<(), TestFailure> {
+  fn delimited_visitor() -> Result<(), TestError> {
     let mut output = String::new();
     let debug_visitor = DebugVisitor::new(&mut output);
     let mut visitor = VisitDelimited::new(", ", debug_visitor);
@@ -178,13 +192,15 @@ mod test {
       output.as_str() == "question=\"life, the universe, and everything\", tricky=true, can_you_do_it=true",
       "delimited fields render with comma separators",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn delimited_new_visitor() -> Result<(), TestFailure> {
+  fn delimited_new_visitor() -> Result<(), TestError> {
     let make = Delimited::new("; ", MakeDebug);
 
-    TestAttrs1::with(|attrs| -> Result<(), TestFailure> {
+    TestAttrs1::with(|attrs| -> Result<(), TestError> {
       let mut output = String::new();
       {
         let mut visitor = make.make_visitor(&mut output);
@@ -194,9 +210,11 @@ mod test {
         output.as_str() == "question=\"life, the universe, and everything\"; tricky=true; can_you_do_it=true",
         "first attribute set renders with semicolon separators",
       )
+      .map(drop)
+      .map_err(TestError::from)
     })??;
 
-    TestAttrs2::with(|attrs| -> Result<(), TestFailure> {
+    TestAttrs2::with(|attrs| -> Result<(), TestError> {
       let mut output = String::new();
       {
         let mut visitor = make.make_visitor(&mut output);
@@ -206,6 +224,8 @@ mod test {
         output.as_str() == "question=None; question.answer=42; tricky=true; can_you_do_it=false",
         "second attribute set renders with semicolon separators",
       )
+      .map(drop)
+      .map_err(TestError::from)
     })?
   }
 }

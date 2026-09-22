@@ -22,7 +22,14 @@
 //! handle after driving the code under test:
 //!
 //! ```rust
-//! # fn main() -> Result<(), strict_test_support::TestFailure> {
+//! # #[derive(Debug, thiserror::Error)]
+//! # enum ExampleError {
+//! #     #[error(transparent)]
+//! #     Condition(#[from] strict_test_support::ConditionFailure),
+//! #     #[error(transparent)]
+//! #     Field(#[from] strict_test_support::OptionFailure<tracing_core::Field>),
+//! # }
+//! # fn main() -> Result<(), ExampleError> {
 //! use tracing_core::Dispatch;
 //! use tracing_core::Event;
 //! use tracing_core::Kind;
@@ -54,7 +61,7 @@
 //!
 //! dispatcher::with_default(
 //!   &Dispatch::new(subscriber),
-//!   || -> Result<(), strict_test_support::TestFailure> {
+//!   || -> Result<(), ExampleError> {
 //!     let _interest = CALLSITE.interest();
 //!     let meta = CALLSITE.metadata();
 //!     let field = strict_test_support::ensure_some(
@@ -161,7 +168,7 @@ impl CallsiteTrackingSubscriber {
   /// # Examples
   ///
   /// ```rust
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_core::test_util::CallsiteTrackingSubscriber;
   ///
   /// let subscriber = CallsiteTrackingSubscriber::new();
@@ -193,7 +200,7 @@ impl CallsiteTrackingSubscriber {
   /// # Examples
   ///
   /// ```rust
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use std::time::Duration;
   ///
   /// use tracing_core::Kind;
@@ -246,7 +253,7 @@ impl CallsiteTrackingSubscriber {
   /// # Examples
   ///
   /// ```rust
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_core::test_util::CallsiteTrackingSubscriber;
   ///
   /// let subscriber = CallsiteTrackingSubscriber::new().with_event_on_register();
@@ -270,7 +277,7 @@ impl CallsiteTrackingSubscriber {
   /// # Examples
   ///
   /// ```rust
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_core::test_util::CallsiteTrackingSubscriber;
   ///
   /// let subscriber = CallsiteTrackingSubscriber::new();
@@ -300,13 +307,13 @@ impl CallsiteTrackingHandle {
   /// # Examples
   ///
   /// ```rust
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ComparisonFailure<usize, usize>> {
   /// use tracing_core::test_util::CallsiteTrackingSubscriber;
   ///
   /// let subscriber = CallsiteTrackingSubscriber::new();
   /// let handle = subscriber.handle();
   ///
-  /// strict_test_support::ensure_eq(&0, &handle.register_count(), "no registrations yet")?;
+  /// strict_test_support::ensure_eq(0_usize, handle.register_count(), "no registrations yet")?;
   /// # Ok(())
   /// # }
   /// ```
@@ -320,7 +327,7 @@ impl CallsiteTrackingHandle {
   /// # Examples
   ///
   /// ```rust
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_core::test_util::CallsiteTrackingSubscriber;
   ///
   /// let subscriber = CallsiteTrackingSubscriber::new();
@@ -344,7 +351,7 @@ impl CallsiteTrackingHandle {
   /// # Examples
   ///
   /// ```rust
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing_core::test_util::CallsiteTrackingSubscriber;
   ///
   /// let subscriber = CallsiteTrackingSubscriber::new();
@@ -473,7 +480,7 @@ pub struct Secondary;
 /// # Examples
 ///
 /// ```rust
-/// # fn main() -> Result<(), strict_test_support::TestFailure> {
+/// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
 /// use tracing_core::Dispatch;
 /// use tracing_core::dispatcher;
 /// use tracing_core::test_util::NoOpSubscriber;
@@ -562,7 +569,25 @@ mod tests {
   use std::time::Duration;
   use std::time::Instant;
 
-  use strict_test_support::TestFailure;
+  use crate::field;
+  use crate::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Retains the native field failure.
+    #[error(transparent)]
+    Field(#[from] strict_test_support::OptionFailure<field::Field>),
+    /// Retains the native subscriber failure.
+    #[error(transparent)]
+    Subscriber(#[from] strict_test_support::ResultFailure<SubscriberError>),
+    /// Retains the native countcomparison failure.
+    #[error(transparent)]
+    CountComparison(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
@@ -660,7 +685,7 @@ mod tests {
   }
 
   /// Sends one event for the manual callsite directly to `tracking`.
-  fn notify_manual_event(tracking: &CallsiteTrackingSubscriber) -> Result<(), TestFailure> {
+  fn notify_manual_event(tracking: &CallsiteTrackingSubscriber) -> Result<(), TestError> {
     let message_field = ensure_some(
       MANUAL_CALLSITE.metadata().fields().field("message"),
       "the manual callsite declares a message field",
@@ -673,10 +698,11 @@ mod tests {
       tracking.event(&Event::new(MANUAL_CALLSITE.metadata(), &value_set)),
       "manual event notification succeeds",
     )
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn observes_registration_when_a_callsite_registers() -> Result<(), TestFailure> {
+  fn observes_registration_when_a_callsite_registers() -> Result<(), TestError> {
     let tracking = CallsiteTrackingSubscriber::new();
     let handle = tracking.handle();
 
@@ -685,26 +711,30 @@ mod tests {
       let _interest = MANUAL_CALLSITE.interest();
     });
 
-    ensure(handle.was_registered(), "installing and registering records the event callsite")?;
+    ensure(handle.was_registered(), "installing and registering records the event callsite").map(drop)?;
     ensure(handle.register_count() >= 1, "at least one registration is counted")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn reports_nothing_when_no_callsite_registers() -> Result<(), TestFailure> {
+  fn reports_nothing_when_no_callsite_registers() -> Result<(), TestError> {
     let tracking = CallsiteTrackingSubscriber::new();
     let handle = tracking.handle();
     drop(tracking);
 
-    ensure(!handle.was_registered(), "no registration is reported when none occurred")?;
-    ensure_eq(&0, &handle.register_count(), "the registration count stays zero")?;
+    ensure(!handle.was_registered(), "no registration is reported when none occurred").map(drop)?;
+    ensure_eq(0, handle.register_count(), "the registration count stays zero").map(drop)?;
     ensure(
       !handle.saw_callsite_mismatch(),
       "no mismatch is reported when no event was observed",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn event_after_registration_reports_no_mismatch() -> Result<(), TestFailure> {
+  fn event_after_registration_reports_no_mismatch() -> Result<(), TestError> {
     let tracking = CallsiteTrackingSubscriber::new();
     let handle = tracking.handle();
 
@@ -712,32 +742,36 @@ mod tests {
       tracking.register_callsite(MANUAL_CALLSITE.metadata()),
       "manual registration succeeds",
     )?;
-    ensure(interest.is_always(), "the tracker always expresses interest")?;
+    ensure(interest.is_always(), "the tracker always expresses interest").map(drop)?;
     notify_manual_event(&tracking)?;
 
-    ensure_eq(&1, &handle.register_count(), "exactly one registration is counted")?;
+    ensure_eq(1, handle.register_count(), "exactly one registration is counted").map(drop)?;
     ensure(
       !handle.saw_callsite_mismatch(),
       "an event on the registered callsite is not a mismatch",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn event_without_registration_reports_a_mismatch() -> Result<(), TestFailure> {
+  fn event_without_registration_reports_a_mismatch() -> Result<(), TestError> {
     let tracking = CallsiteTrackingSubscriber::new();
     let handle = tracking.handle();
 
     notify_manual_event(&tracking)?;
 
-    ensure_eq(&0, &handle.register_count(), "no registration was observed")?;
+    ensure_eq(0, handle.register_count(), "no registration was observed").map(drop)?;
     ensure(
       handle.saw_callsite_mismatch(),
       "an event without a preceding registration is a mismatch",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn register_delay_defers_recording_the_registration() -> Result<(), TestFailure> {
+  fn register_delay_defers_recording_the_registration() -> Result<(), TestError> {
     let delay = Duration::from_millis(25);
     let tracking = CallsiteTrackingSubscriber::new().with_register_delay(delay);
     let handle = tracking.handle();
@@ -748,72 +782,82 @@ mod tests {
       "delayed registration succeeds",
     )?;
 
-    ensure(started.elapsed() >= delay, "registration waits for the configured delay")?;
-    ensure(interest.is_always(), "the delayed tracker still expresses interest")?;
-    ensure_eq(&1, &handle.register_count(), "the delayed registration is recorded")
+    ensure(started.elapsed() >= delay, "registration waits for the configured delay").map(drop)?;
+    ensure(interest.is_always(), "the delayed tracker still expresses interest").map(drop)?;
+    ensure_eq(1, handle.register_count(), "the delayed registration is recorded")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn event_on_register_emits_through_the_active_dispatcher() -> Result<(), TestFailure> {
+  fn event_on_register_emits_through_the_active_dispatcher() -> Result<(), TestError> {
     let tracking = CallsiteTrackingSubscriber::new().with_event_on_register();
     let (observer, events) = EventCounter::new();
 
     let register_result = with_default(&Dispatch::new(observer), || tracking.register_callsite(MANUAL_CALLSITE.metadata()));
     let interest = ensure_ok(register_result, "re-entrant registration succeeds")?;
 
-    ensure(interest.is_always(), "the re-entrant tracker still expresses interest")?;
+    ensure(interest.is_always(), "the re-entrant tracker still expresses interest").map(drop)?;
     ensure(
       events.load(Ordering::SeqCst) >= 1,
       "registering with event_on_register emits an event to the active dispatcher",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn register_without_event_on_register_emits_nothing() -> Result<(), TestFailure> {
+  fn register_without_event_on_register_emits_nothing() -> Result<(), TestError> {
     let tracking = CallsiteTrackingSubscriber::new();
     let (observer, events) = EventCounter::new();
 
     let register_result = with_default(&Dispatch::new(observer), || tracking.register_callsite(MANUAL_CALLSITE.metadata()));
     let interest = ensure_ok(register_result, "registration succeeds without emitting")?;
 
-    ensure(interest.is_always(), "the default tracker still expresses interest")?;
+    ensure(interest.is_always(), "the default tracker still expresses interest").map(drop)?;
     ensure_eq(
-      &0,
-      &events.load(Ordering::SeqCst),
+      0,
+      events.load(Ordering::SeqCst),
       "no event is emitted during registration by default",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn no_op_markers_produce_distinct_subscriber_types() -> Result<(), TestFailure> {
+  fn no_op_markers_produce_distinct_subscriber_types() -> Result<(), TestError> {
     with_default(&Dispatch::new(NoOpSubscriber::<Primary>::new()), || {
       get_default(|current| {
         ensure(
           current.is::<NoOpSubscriber<Primary>>(),
           "the primary marker identifies the installed subscriber",
-        )?;
+        )
+        .map(drop)?;
         ensure(
           !current.is::<NoOpSubscriber<Secondary>>(),
           "the secondary marker does not match the primary subscriber",
         )
+        .map(drop)
+        .map_err(TestError::from)
       })
     })
   }
 
   /// Drives every inert notification method against `subscriber` and checks its responses.
-  fn ensure_inert_subscriber<S: Subscriber>(subscriber: &S) -> Result<(), TestFailure> {
+  fn ensure_inert_subscriber<S: Subscriber>(subscriber: &S) -> Result<(), TestError> {
     let meta = MANUAL_CALLSITE.metadata();
     let value_set = meta.fields().value_set(&[]);
 
     let enabled = ensure_ok(subscriber.enabled(meta), "the inert subscriber answers the enabled query")?;
-    ensure(enabled, "the inert subscriber enables every callsite")?;
+    ensure(enabled, "the inert subscriber enables every callsite").map(drop)?;
 
     let attributes = span::Attributes::new(meta, &value_set);
     let span_id = ensure_ok(subscriber.new_span(&attributes), "the inert subscriber assigns a span id")?;
     ensure(
       span_id == span::Id::from_non_zero_u64(NonZeroU64::MIN),
       "the inert subscriber assigns span id 1",
-    )?;
+    )
+    .map(drop)?;
 
     let record = span::Record::new(&value_set);
     ensure_ok(subscriber.record(span_id, &record), "the inert subscriber accepts a record")?;
@@ -826,24 +870,24 @@ mod tests {
       "the inert subscriber accepts an event",
     )?;
     ensure_ok(subscriber.enter(span_id), "the inert subscriber accepts an enter")?;
-    ensure_ok(subscriber.exit(span_id), "the inert subscriber accepts an exit")
+    ensure_ok(subscriber.exit(span_id), "the inert subscriber accepts an exit").map_err(TestError::from)
   }
 
   #[test]
-  fn no_op_subscriber_accepts_every_notification() -> Result<(), TestFailure> {
+  fn no_op_subscriber_accepts_every_notification() -> Result<(), TestError> {
     ensure_inert_subscriber(&NoOpSubscriber::<Secondary>::new())
   }
 
   #[test]
-  fn tracking_subscriber_accepts_inert_notifications() -> Result<(), TestFailure> {
+  fn tracking_subscriber_accepts_inert_notifications() -> Result<(), TestError> {
     ensure_inert_subscriber(&CallsiteTrackingSubscriber::new())
   }
 
   #[test]
-  fn defaults_construct_fresh_fixtures() -> Result<(), TestFailure> {
+  fn defaults_construct_fresh_fixtures() -> Result<(), TestError> {
     let tracking = CallsiteTrackingSubscriber::default();
     let handle = tracking.handle();
-    ensure(!handle.was_registered(), "a defaulted tracker has observed no registrations")?;
+    ensure(!handle.was_registered(), "a defaulted tracker has observed no registrations").map(drop)?;
 
     let inert = NoOpSubscriber::<Primary>::default();
     let enabled = ensure_ok(
@@ -851,5 +895,7 @@ mod tests {
       "the defaulted inert subscriber answers the enabled query",
     )?;
     ensure(enabled, "the defaulted inert subscriber enables every callsite")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

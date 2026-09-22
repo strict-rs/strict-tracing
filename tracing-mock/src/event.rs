@@ -8,7 +8,7 @@
 //! # Examples
 //!
 //! ```
-//! # fn main() -> Result<(), strict_test_support::TestFailure> {
+//! # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
 //! use tracing::subscriber::with_default;
 //! use tracing_mock::expect;
 //! use tracing_mock::subscriber;
@@ -103,7 +103,7 @@ impl ExpectedEvent {
   /// # Examples
   ///
   /// ```no_run
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing::subscriber::with_default;
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
@@ -124,7 +124,7 @@ impl ExpectedEvent {
   /// A different field value will cause the expectation to fail:
   ///
   /// ```no_run
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing::subscriber::with_default;
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
@@ -165,7 +165,7 @@ impl ExpectedEvent {
   /// # Examples
   ///
   /// ```no_run
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing::subscriber::with_default;
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
@@ -187,7 +187,7 @@ impl ExpectedEvent {
   /// recorded at any other level:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing::subscriber::with_default;
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
@@ -225,7 +225,7 @@ impl ExpectedEvent {
   /// # Examples
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing::subscriber::with_default;
   /// use tracing_mock::{expect, subscriber};
   ///
@@ -248,7 +248,7 @@ impl ExpectedEvent {
   /// The test will fail if the target is different:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing::subscriber::with_default;
   /// use tracing_mock::{expect, subscriber};
   ///
@@ -299,7 +299,7 @@ impl ExpectedEvent {
   /// An explicit or contextual can be matched on an `ExpectedSpan`.
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing::subscriber::with_default;
   /// use tracing_mock::{expect, subscriber};
   ///
@@ -329,7 +329,7 @@ impl ExpectedEvent {
   /// [`ExpectedId`] can be passed to match a span with that Id.
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing::subscriber::with_default;
   /// use tracing_mock::{expect, subscriber};
   ///
@@ -354,7 +354,7 @@ impl ExpectedEvent {
   /// an explicit root:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing::subscriber::with_default;
   /// use tracing_mock::{expect, subscriber};
   ///
@@ -381,7 +381,7 @@ impl ExpectedEvent {
   /// parent span to expect.
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing::subscriber::with_default;
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
@@ -406,7 +406,7 @@ impl ExpectedEvent {
   /// root:
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing::subscriber::with_default;
   /// use tracing_mock::expect;
   /// use tracing_mock::subscriber;
@@ -429,7 +429,7 @@ impl ExpectedEvent {
   /// expected.
   ///
   /// ```
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ConditionFailure> {
   /// use tracing::subscriber::with_default;
   /// use tracing_mock::{expect, subscriber};
   ///
@@ -477,7 +477,7 @@ impl ExpectedEvent {
   /// # Examples
   ///
   /// ```no_run
-  /// # fn main() -> Result<(), strict_test_support::TestFailure> {
+  /// # fn main() -> Result<(), strict_test_support::ResultFailure<tracing_core::subscriber::SubscriberError>> {
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   /// use tracing_subscriber::Layer;
@@ -511,12 +511,12 @@ impl ExpectedEvent {
   /// Unmet scope expectations can be inspected through returned errors:
   ///
   /// ```
-  /// use strict_test_support::TestFailure;
+  /// use strict_test_support::ConditionFailure;
   /// use strict_test_support::ensure;
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   ///
-  /// # fn main() -> Result<(), TestFailure> {
+  /// # fn main() -> Result<(), ConditionFailure> {
   /// let event = expect::event()
   ///   .in_scope([expect::span().named("parent_span"), expect::span().named("grandparent_span")]);
   ///
@@ -534,12 +534,12 @@ impl ExpectedEvent {
   /// span, the test will fail:
   ///
   /// ```
-  /// use strict_test_support::TestFailure;
+  /// use strict_test_support::ConditionFailure;
   /// use strict_test_support::ensure;
   /// use tracing_mock::expect;
   /// use tracing_mock::layer;
   ///
-  /// # fn main() -> Result<(), TestFailure> {
+  /// # fn main() -> Result<(), ConditionFailure> {
   /// let event = expect::event().in_scope(None);
   ///
   /// let (layer, handle) = layer::mock().enter(expect::span()).event(event).run_with_handle();
@@ -642,7 +642,19 @@ impl fmt::Debug for ExpectedEvent {
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use tracing::subscriber::with_default;
@@ -652,7 +664,7 @@ mod tests {
   use crate::subscriber;
 
   #[test]
-  fn event_metadata_and_fields_accept_matching_event() -> Result<(), TestFailure> {
+  fn event_metadata_and_fields_accept_matching_event() -> Result<(), TestError> {
     let event = expect::event()
       .with_target("mock_event_target")
       .at_level(tracing::Level::INFO)
@@ -663,11 +675,11 @@ mod tests {
       tracing::info!(target: "mock_event_target", answer = 42_i64, "event metadata and fields match");
     });
 
-    ensure_ok(handle.finished(), "matching event metadata and fields finish cleanly")
+    ensure_ok(handle.finished(), "matching event metadata and fields finish cleanly").map_err(TestError::from)
   }
 
   #[test]
-  fn event_metadata_mismatch_is_reported_by_finished() -> Result<(), TestFailure> {
+  fn event_metadata_mismatch_is_reported_by_finished() -> Result<(), TestError> {
     let event = expect::event().at_level(tracing::Level::WARN);
     let (subscriber, handle) = subscriber::mock().event(event).run_with_handle();
 
@@ -676,10 +688,12 @@ mod tests {
     });
 
     ensure(handle.finished().is_err(), "event level mismatch is reported")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn event_contextual_parent_ancestry_matches_entered_span() -> Result<(), TestFailure> {
+  fn event_contextual_parent_ancestry_matches_entered_span() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(ExpectedAncestry::HasContextualParent(expect::span().named("parent_span")));
     let (subscriber, handle) = subscriber::mock()
       .new_span("parent_span")
@@ -695,11 +709,11 @@ mod tests {
       tracing::info!("inside parent");
     });
 
-    ensure_ok(handle.finished(), "event ancestry matches the contextual parent span")
+    ensure_ok(handle.finished(), "event ancestry matches the contextual parent span").map_err(TestError::from)
   }
 
   #[test]
-  fn event_ancestry_mismatch_is_reported_by_finished() -> Result<(), TestFailure> {
+  fn event_ancestry_mismatch_is_reported_by_finished() -> Result<(), TestError> {
     let event = expect::event().with_ancestry(ExpectedAncestry::IsContextualRoot);
     let (subscriber, handle) = subscriber::mock()
       .new_span("parent_span")
@@ -714,5 +728,7 @@ mod tests {
     });
 
     ensure(handle.finished().is_err(), "event ancestry mismatch is reported")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

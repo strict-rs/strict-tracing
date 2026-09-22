@@ -234,7 +234,9 @@ pin_project! {
 #[cfg(not(feature = "std-future"))]
 #[derive(Debug, Clone)]
 pub struct Instrumented<T> {
+  /// The wrapped value, cleared when extracted or dropped.
   inner: Option<T>,
+  /// The span attached to the wrapped value.
   span:  Span,
 }
 
@@ -267,7 +269,9 @@ pin_project! {
 #[cfg_attr(docsrs, doc(cfg(feature = "std")))]
 #[derive(Clone, Debug)]
 pub struct WithDispatch<T> {
+  /// The value associated with the captured subscriber.
   inner:    T,
+  /// The subscriber dispatch propagated to wrapped operations.
   dispatch: Dispatch,
 }
 
@@ -469,13 +473,32 @@ mod tests {
 
   #[cfg(all(feature = "futures-03", feature = "std-future"))]
   mod futures_03_tests {
+    use core::convert;
+
     use futures::FutureExt as _;
     use futures::SinkExt as _;
     use futures::StreamExt as _;
     use futures::future;
     use futures::sink;
     use futures::stream;
-    use strict_test_support::TestFailure;
+    use tracing_core::subscriber::SubscriberError;
+    /// Native failures from these behavioral checks.
+    #[derive(Debug, thiserror::Error)]
+    enum TestError {
+      /// A boolean expectation failed.
+      #[error(transparent)]
+      Condition(#[from] strict_test_support::ConditionFailure),
+      /// Preserves the complete native failure and its inputs.
+      #[error(transparent)]
+      Option(#[from] strict_test_support::OptionFailure<()>),
+      /// Preserves the complete native failure and its inputs.
+      #[error(transparent)]
+      OptionResultConvertInfallible(#[from] strict_test_support::OptionFailure<Result<(), convert::Infallible>>),
+      /// Preserves the complete native failure and its inputs.
+      #[error(transparent)]
+      ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+    }
+
     use strict_test_support::ensure;
     use strict_test_support::ensure_ok;
     use strict_test_support::ensure_some;
@@ -486,7 +509,7 @@ mod tests {
     use crate::Instrument;
 
     #[test]
-    fn stream_enter_exit_is_reasonable() -> Result<(), TestFailure> {
+    fn stream_enter_exit_is_reasonable() -> Result<(), TestError> {
       let (subscriber, handle) = subscriber::mock()
         .enter(expect::span().named("foo"))
         .exit(expect::span().named("foo"))
@@ -507,14 +530,14 @@ mod tests {
             .now_or_never(),
           "instrumented futures 0.3 stream resolves synchronously",
         )?;
-        Ok::<(), TestFailure>(())
+        Ok::<(), TestError>(())
       })?;
       ensure_ok(handle.finished(), "mock expectations should finish")?;
       Ok(())
     }
 
     #[test]
-    fn sink_enter_exit_is_reasonable() -> Result<(), TestFailure> {
+    fn sink_enter_exit_is_reasonable() -> Result<(), TestError> {
       let (subscriber, handle) = subscriber::mock()
         .enter(expect::span().named("foo"))
         .exit(expect::span().named("foo"))
@@ -534,6 +557,8 @@ mod tests {
           "instrumented futures 0.3 sink resolves synchronously",
         )?;
         ensure(output.is_ok(), "instrumented futures 0.3 sink send succeeds")
+          .map(drop)
+          .map_err(TestError::from)
       })?;
       ensure_ok(handle.finished(), "mock expectations should finish")?;
       Ok(())

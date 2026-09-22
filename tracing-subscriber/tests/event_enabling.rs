@@ -7,7 +7,7 @@ mod tests {
   use std::sync::atomic::AtomicUsize;
   use std::sync::atomic::Ordering;
 
-  use strict_test_support::TestFailure;
+  use strict_test_support::ComparisonFailure;
   use strict_test_support::ensure_eq;
   use tracing::Event;
   use tracing::Metadata;
@@ -46,7 +46,7 @@ mod tests {
   }
 
   #[test]
-  fn event_enabled_is_only_called_once() -> Result<(), TestFailure> {
+  fn event_enabled_is_only_called_once() -> Result<(), ComparisonFailure<usize, usize>> {
     let event_enabled_count = Arc::new(AtomicUsize::default());
     let count = Arc::clone(&event_enabled_count);
     let subscriber = registry().with(TrackingLayer {
@@ -59,15 +59,11 @@ mod tests {
       tracing::error!("hiya!");
     });
 
-    ensure_eq(
-      &1,
-      &count.load(Ordering::SeqCst),
-      "event_enabled is called once for an enabled event",
-    )
+    ensure_eq(1, count.load(Ordering::SeqCst), "event_enabled is called once for an enabled event").map(drop)
   }
 
   #[test]
-  fn event_enabled_not_called_when_not_enabled() -> Result<(), TestFailure> {
+  fn event_enabled_not_called_when_not_enabled() -> Result<(), ComparisonFailure<usize, usize>> {
     let event_enabled_count = Arc::new(AtomicUsize::default());
     let count = Arc::clone(&event_enabled_count);
     let subscriber = registry().with(TrackingLayer {
@@ -81,14 +77,15 @@ mod tests {
     });
 
     ensure_eq(
-      &0,
-      &count.load(Ordering::SeqCst),
+      0,
+      count.load(Ordering::SeqCst),
       "event_enabled is skipped when the layer is disabled",
     )
+    .map(drop)
   }
 
   #[test]
-  fn event_disabled_does_disable_event() -> Result<(), TestFailure> {
+  fn event_disabled_does_disable_event() -> Result<(), ComparisonFailure<usize, usize>> {
     let on_event_count = Arc::new(AtomicUsize::default());
     let count = Arc::clone(&on_event_count);
     let subscriber = registry().with(TrackingLayer {
@@ -101,6 +98,6 @@ mod tests {
       tracing::error!("hiya!");
     });
 
-    ensure_eq(&0, &count.load(Ordering::SeqCst), "disabled events are not observed by on_event")
+    ensure_eq(0, count.load(Ordering::SeqCst), "disabled events are not observed by on_event").map(drop)
   }
 }

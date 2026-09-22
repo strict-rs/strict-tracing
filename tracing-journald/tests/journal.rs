@@ -4,13 +4,43 @@
 #[cfg(test)]
 mod tests {
   use std::collections::HashMap;
+  use std::io;
   use std::process;
   use std::process::Command;
   use std::thread;
   use std::time::Duration;
 
   use serde::Deserialize;
-  use strict_test_support::TestFailure;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSerdeJsonError(#[from] strict_test_support::ResultFailure<serde_json::Error>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultError(#[from] strict_test_support::ResultFailure<io::Error>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonString(#[from] strict_test_support::ComparisonFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionString(#[from] OptionFailure<String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionVecString(#[from] OptionFailure<Vec<String>>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionTestsField(#[from] OptionFailure<Field>),
+    /// Retains the native journal failure.
+    #[error(transparent)]
+    Journal(#[from] OptionFailure<HashMap<String, Field>>),
+  }
+
+  use strict_test_support::OptionFailure;
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
@@ -29,7 +59,7 @@ mod tests {
   use tracing_subscriber::Registry;
   use tracing_subscriber::layer::SubscriberExt as _;
 
-  fn with_journald(f: impl FnOnce() -> Result<(), TestFailure>) -> Result<(), TestFailure> {
+  fn with_journald(f: impl FnOnce() -> Result<(), TestError>) -> Result<(), TestError> {
     with_journald_layer(
       JournalNamespace::System,
       ensure_ok(Layer::new(), "system journald layer opens")?
@@ -46,7 +76,7 @@ mod tests {
     clippy::single_call_fn,
     reason = "user-journal setup keeps optional socket skip policy parallel to system journald tests"
   )]
-  fn with_user_journald(f: impl FnOnce() -> Result<(), TestFailure>) -> Result<(), TestFailure> {
+  fn with_user_journald(f: impl FnOnce() -> Result<(), TestError>) -> Result<(), TestError> {
     let Ok(layer) = Layer::new_user() else {
       return Ok(());
     };
@@ -61,11 +91,7 @@ mod tests {
     )
   }
 
-  fn with_journald_layer(
-    _namespace: JournalNamespace,
-    layer: Layer,
-    f: impl FnOnce() -> Result<(), TestFailure>,
-  ) -> Result<(), TestFailure> {
+  fn with_journald_layer(_namespace: JournalNamespace, layer: Layer, f: impl FnOnce() -> Result<(), TestError>) -> Result<(), TestError> {
     if Command::new("journalctl").arg("--version").output().is_err() {
       return Ok(());
     }
@@ -76,6 +102,7 @@ mod tests {
 
   #[derive(Debug, PartialEq, Deserialize)]
   #[serde(untagged)]
+  #[derive(Clone)]
   enum Field {
     Text(String),
     Array(Vec<String>),
@@ -111,19 +138,18 @@ mod tests {
     clippy::single_call_fn,
     reason = "journald integration tests need a named polling boundary for eventual journal visibility"
   )]
-  fn retry<T>(f: impl Fn() -> Option<T>) -> Result<T, TestFailure> {
+  fn retry<T>(f: impl Fn() -> Option<T>) -> Result<T, OptionFailure<T>> {
     let attempts = 30;
     let interval = Duration::from_millis(100);
+    let mut observed = None;
     for _attempt in 0..attempts {
-      if let Some(result) = f() {
-        return Ok(result);
+      observed = f();
+      if observed.is_some() {
+        break;
       }
       thread::sleep(interval);
     }
-
-    Err(TestFailure::Condition {
-      context: "journal entry should become visible",
-    })
+    ensure_some(observed, "journal entry should become visible")
   }
 
   /// Read from journal with `journalctl`.
@@ -131,7 +157,7 @@ mod tests {
     clippy::single_call_fn,
     reason = "journalctl invocation stays isolated from assertion helpers and namespace retry logic"
   )]
-  fn read_from_journal(namespace: JournalNamespace, test_name: &str) -> Result<Vec<HashMap<String, Field>>, TestFailure> {
+  fn read_from_journal(namespace: JournalNamespace, test_name: &str) -> Result<Vec<HashMap<String, Field>>, TestError> {
     let mut command = Command::new("journalctl");
     if namespace == JournalNamespace::User {
       let _command = command.arg("--user");
@@ -152,12 +178,12 @@ mod tests {
 
     stdout
       .lines()
-      .map(|line| ensure_ok(serde_json::from_str(line), "parse journalctl JSON line"))
+      .map(|line| ensure_ok(serde_json::from_str(line), "parse journalctl JSON line").map_err(TestError::from))
       .collect()
   }
 
   /// Read exactly one line from journal for the given test name.
-  fn retry_read_one_line_from_journal(testname: &str) -> Result<HashMap<String, Field>, TestFailure> {
+  fn retry_read_one_line_from_journal(testname: &str) -> Result<HashMap<String, Field>, TestError> {
     retry_read_one_line_from_namespace(JournalNamespace::System, testname)
   }
 
@@ -165,48 +191,68 @@ mod tests {
     clippy::single_call_fn,
     reason = "user-journal tests keep namespace-specific read helper parallel to system reads"
   )]
-  fn retry_read_one_line_from_user_journal(testname: &str) -> Result<HashMap<String, Field>, TestFailure> {
+  fn retry_read_one_line_from_user_journal(testname: &str) -> Result<HashMap<String, Field>, TestError> {
     retry_read_one_line_from_namespace(JournalNamespace::User, testname)
   }
 
-  fn retry_read_one_line_from_namespace(namespace: JournalNamespace, testname: &str) -> Result<HashMap<String, Field>, TestFailure> {
+  fn retry_read_one_line_from_namespace(namespace: JournalNamespace, testname: &str) -> Result<HashMap<String, Field>, TestError> {
     retry(|| {
       let mut messages = read_from_journal(namespace, testname).ok()?;
       if messages.len() == 1 { messages.pop() } else { None }
     })
+    .map_err(TestError::from)
   }
 
-  fn field<'a>(message: &'a HashMap<String, Field>, name: &'static str) -> Result<&'a Field, TestFailure> {
+  fn field<'a>(message: &'a HashMap<String, Field>, name: &'static str) -> Result<&'a Field, TestError> {
     ensure_some(message.get(name), "journal field exists")
+      .map_err(|failure| OptionFailure {
+        context: failure.context,
+        option:  failure.option.cloned(),
+      })
+      .map_err(TestError::from)
   }
 
-  fn ensure_text(message: &HashMap<String, Field>, name: &'static str, expected: &str) -> Result<(), TestFailure> {
-    let actual = ensure_some(field(message, name)?.as_text(), "journal field is text")?;
-    ensure_eq(&actual, &expected, "journal text field matches")
+  fn ensure_text(message: &HashMap<String, Field>, name: &'static str, expected: &str) -> Result<(), TestError> {
+    let actual = ensure_some(field(message, name)?.as_text(), "journal field is text").map_err(|failure| OptionFailure {
+      context: failure.context,
+      option:  failure.option.map(String::from),
+    })?;
+    ensure_eq(String::from(actual), String::from(expected), "journal text field matches")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[allow(
     clippy::single_call_fn,
     reason = "binary journal field assertion mirrors text and array assertion helpers in protocol tests"
   )]
-  fn ensure_binary(message: &HashMap<String, Field>, name: &'static str, expected: &[u8]) -> Result<(), TestFailure> {
+  fn ensure_binary(message: &HashMap<String, Field>, name: &'static str, expected: &[u8]) -> Result<(), TestError> {
     ensure(field(message, name)?.bytes_eq(expected), "journal binary field matches")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
-  fn ensure_array(message: &HashMap<String, Field>, name: &'static str, expected: &[&str]) -> Result<(), TestFailure> {
-    let actual = ensure_some(field(message, name)?.as_array(), "journal field is array")?;
+  fn ensure_array(message: &HashMap<String, Field>, name: &'static str, expected: &[&str]) -> Result<(), TestError> {
+    let actual = ensure_some(field(message, name)?.as_array(), "journal field is array").map_err(|failure| OptionFailure {
+      context: failure.context,
+      option:  failure.option.map(<[String]>::to_vec),
+    })?;
     ensure(
       actual.iter().map(String::as_str).eq(expected.iter().copied()),
       "journal array field matches",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
-  fn ensure_text_present(message: &HashMap<String, Field>, name: &'static str) -> Result<(), TestFailure> {
+  fn ensure_text_present(message: &HashMap<String, Field>, name: &'static str) -> Result<(), TestError> {
     ensure(field(message, name)?.as_text().is_some(), "journal text field is present")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn simple_message() -> Result<(), TestFailure> {
+  fn simple_message() -> Result<(), TestError> {
     with_journald(|| {
       info!(test.name = "simple_message", "Hello World");
 
@@ -217,7 +263,7 @@ mod tests {
   }
 
   #[test]
-  fn simple_message_user_journal() -> Result<(), TestFailure> {
+  fn simple_message_user_journal() -> Result<(), TestError> {
     with_user_journald(|| {
       info!(test.name = "simple_message_user_journal", "Hello User Journal");
 
@@ -228,8 +274,8 @@ mod tests {
   }
 
   #[test]
-  fn custom_priorities() -> Result<(), TestFailure> {
-    fn check_message(level: &str, priority: &str) -> Result<(), TestFailure> {
+  fn custom_priorities() -> Result<(), TestError> {
+    fn check_message(level: &str, priority: &str) -> Result<(), TestError> {
       let entry = retry_read_one_line_from_journal(&format!("custom_priority.{level}"))?;
       ensure_text(&entry, "MESSAGE", &format!("hello {level}"))?;
       ensure_text(&entry, "PRIORITY", priority)
@@ -262,7 +308,7 @@ mod tests {
   }
 
   #[test]
-  fn multiline_message() -> Result<(), TestFailure> {
+  fn multiline_message() -> Result<(), TestError> {
     with_journald(|| {
       warn!(test.name = "multiline_message", "Hello\nMultiline\nWorld");
 
@@ -273,7 +319,7 @@ mod tests {
   }
 
   #[test]
-  fn multiline_message_trailing_newline() -> Result<(), TestFailure> {
+  fn multiline_message_trailing_newline() -> Result<(), TestError> {
     with_journald(|| {
       error!(test.name = "multiline_message_trailing_newline", "A trailing newline\n");
 
@@ -284,7 +330,7 @@ mod tests {
   }
 
   #[test]
-  fn internal_null_byte() -> Result<(), TestFailure> {
+  fn internal_null_byte() -> Result<(), TestError> {
     with_journald(|| {
       debug!(test.name = "internal_null_byte", "An internal\x00byte");
 
@@ -295,7 +341,7 @@ mod tests {
   }
 
   #[test]
-  fn large_message() -> Result<(), TestFailure> {
+  fn large_message() -> Result<(), TestError> {
     let large_string = "b".repeat(512_000);
     with_journald(|| {
       debug!(test.name = "large_message", "Message: {}", large_string);
@@ -307,7 +353,7 @@ mod tests {
   }
 
   #[test]
-  fn simple_metadata() -> Result<(), TestFailure> {
+  fn simple_metadata() -> Result<(), TestError> {
     let sub = ensure_ok(Layer::new(), "system journald layer opens")?
       .with_field_prefix(None)
       .with_syslog_identifier("test_ident".to_owned());
@@ -329,7 +375,7 @@ mod tests {
   }
 
   #[test]
-  fn journal_fields() -> Result<(), TestFailure> {
+  fn journal_fields() -> Result<(), TestError> {
     let sub = ensure_ok(Layer::new(), "system journald layer opens")?
       .with_field_prefix(None)
       .with_custom_fields([("SYSLOG_FACILITY", "17")])
@@ -354,7 +400,7 @@ mod tests {
   }
 
   #[test]
-  fn span_metadata() -> Result<(), TestFailure> {
+  fn span_metadata() -> Result<(), TestError> {
     with_journald(|| {
       let s1 = info_span!("span1", span_field1 = "foo1");
       let _g1 = s1.enter();
@@ -379,7 +425,7 @@ mod tests {
   }
 
   #[test]
-  fn multiple_spans_metadata() -> Result<(), TestFailure> {
+  fn multiple_spans_metadata() -> Result<(), TestError> {
     with_journald(|| {
       let s1 = info_span!("span1", span_field1 = "foo1");
       let _g1 = s1.enter();
@@ -401,13 +447,19 @@ mod tests {
       ensure_text_present(&message, "CODE_FILE")?;
       ensure_text_present(&message, "CODE_LINE")?;
       let _span_code_file = field(&message, "SPAN_CODE_FILE")?;
-      let span_code_line = ensure_some(field(&message, "SPAN_CODE_LINE")?.as_array(), "span code line is array")?;
+      let span_code_line =
+        ensure_some(field(&message, "SPAN_CODE_LINE")?.as_array(), "span code line is array").map_err(|failure| OptionFailure {
+          context: failure.context,
+          option:  failure.option.map(<[String]>::to_vec),
+        })?;
       ensure(span_code_line.len() == 2, "span code line contains both spans")
+        .map(drop)
+        .map_err(TestError::from)
     })
   }
 
   #[test]
-  fn spans_field_collision() -> Result<(), TestFailure> {
+  fn spans_field_collision() -> Result<(), TestError> {
     with_journald(|| {
       let s1 = info_span!("span1", span_field = "foo1");
       let _g1 = s1.enter();

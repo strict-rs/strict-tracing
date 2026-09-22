@@ -2,7 +2,7 @@
 name = "tracing-tower"
 version.workspace = true
 authors = ["Eliza Weisman <eliza@buoyant.io>"]
-edition.workspace = true
+edition = { workspace = true }
 repository.workspace = true
 homepage = "https://tokio.rs"
 description = """
@@ -15,7 +15,7 @@ categories = [
 ]
 keywords = ["logging", "tracing"]
 license.workspace = true
-rust-version.workspace = true
+rust-version = { workspace = true }
 readme = "README.md"
 
 [features]
@@ -34,6 +34,8 @@ pin-project-lite = { workspace = true, optional = true }
 http = { workspace = true, optional = true }
 
 [dev-dependencies]
+tracing-core = { workspace = true }
+thiserror = { workspace = true }
 strict-test-support = { workspace = true }
 tracing-mock = { workspace = true }
 futures = { workspace = true, default-features = true }

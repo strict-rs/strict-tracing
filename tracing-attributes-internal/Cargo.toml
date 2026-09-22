@@ -18,8 +18,8 @@ categories = [
 ]
 keywords = ["logging", "tracing", "macro", "instrument", "log"]
 license.workspace = true
-edition.workspace = true
-rust-version.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
 publish = false
 
 [dependencies]
@@ -28,6 +28,7 @@ syn = { workspace = true }
 quote = { workspace = true }
 
 [dev-dependencies]
+thiserror = { workspace = true }
 strict-test-support = { workspace = true }
 
 [lints]

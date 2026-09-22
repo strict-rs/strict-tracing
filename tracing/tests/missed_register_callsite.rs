@@ -2,17 +2,27 @@
 
 #[cfg(test)]
 mod tests {
+  use std::io;
   use std::thread;
   use std::thread::JoinHandle;
   use std::time::Duration;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultError(#[from] strict_test_support::ResultFailure<io::Error>),
+  }
 
-  use strict_test_support::TestFailure;
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use tracing::subscriber::set_default;
   use tracing_core::test_util::CallsiteTrackingSubscriber;
 
-  fn subscriber_thread(idx: usize, register_sleep_micros: u64) -> Result<JoinHandle<bool>, TestFailure> {
+  fn subscriber_thread(idx: usize, register_sleep_micros: u64) -> Result<JoinHandle<bool>, TestError> {
     ensure_ok(
       thread::Builder::new().name(format!("subscriber-{idx}")).spawn(move || {
         // We use a sleep to ensure the starting order of the 2 threads.
@@ -29,10 +39,11 @@ mod tests {
       }),
       "subscriber thread should spawn",
     )
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn event_before_register() -> Result<(), TestFailure> {
+  fn event_before_register() -> Result<(), TestError> {
     let subscriber_1_register_sleep_micros = 100;
     let subscriber_2_register_sleep_micros = 0;
 
@@ -44,20 +55,31 @@ mod tests {
 
     let subscriber1_mismatched = match jh1.join() {
       Ok(mismatched) => mismatched,
-      Err(_panic) => return ensure(false, "first subscriber thread should join"),
+      Err(_panic) => {
+        return ensure(false, "first subscriber thread should join")
+          .map(drop)
+          .map_err(TestError::from);
+      }
     };
     let subscriber2_mismatched = match jh2.join() {
       Ok(mismatched) => mismatched,
-      Err(_panic) => return ensure(false, "second subscriber thread should join"),
+      Err(_panic) => {
+        return ensure(false, "second subscriber thread should join")
+          .map(drop)
+          .map_err(TestError::from);
+      }
     };
 
     ensure(
       !subscriber1_mismatched,
       "first subscriber event callsite should match registered callsite",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       !subscriber2_mismatched,
       "second subscriber event callsite should match registered callsite",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

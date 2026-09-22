@@ -3,10 +3,12 @@
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use strict_test_support::ResultFailure;
   use strict_test_support::ensure_ok;
   use tracing::Level;
   use tracing::subscriber::set_default;
+  use tracing_core::subscriber::SubscriberError;
   use tracing_mock::expect;
   use tracing_mock::layer;
   use tracing_mock::layer::MockLayer;
@@ -15,7 +17,7 @@ mod tests {
   use tracing_subscriber::prelude::*;
 
   #[test]
-  fn layer_filters() -> Result<(), TestFailure> {
+  fn layer_filters() -> Result<(), ResultFailure<SubscriberError>> {
     let (unfiltered, unfiltered_handle) = unfiltered("unfiltered");
     let (filtered, filtered_handle) = filtered("filtered");
 
@@ -32,7 +34,7 @@ mod tests {
   }
 
   #[test]
-  fn layered_layer_filters() -> Result<(), TestFailure> {
+  fn layered_layer_filters() -> Result<(), ResultFailure<SubscriberError>> {
     let (unfiltered1, unfiltered1_handle) = unfiltered("unfiltered_1");
     let (unfiltered2, unfiltered2_handle) = unfiltered("unfiltered_2");
     let unfiltered = unfiltered1.and_then(unfiltered2);
@@ -54,7 +56,7 @@ mod tests {
   }
 
   #[test]
-  fn out_of_order() -> Result<(), TestFailure> {
+  fn out_of_order() -> Result<(), ResultFailure<SubscriberError>> {
     let (unfiltered1, unfiltered1_handle) = unfiltered("unfiltered_1");
     let (unfiltered2, unfiltered2_handle) = unfiltered("unfiltered_2");
 
@@ -77,7 +79,7 @@ mod tests {
   }
 
   #[test]
-  fn mixed_layered() -> Result<(), TestFailure> {
+  fn mixed_layered() -> Result<(), ResultFailure<SubscriberError>> {
     let (unfiltered1, unfiltered1_handle) = unfiltered("unfiltered_1");
     let (unfiltered2, unfiltered2_handle) = unfiltered("unfiltered_2");
     let (filtered1, filtered1_handle) = filtered("filtered_1");

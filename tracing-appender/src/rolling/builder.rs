@@ -349,7 +349,26 @@ mod tests {
   use std::fs;
   use std::io::Write as _;
 
-  use strict_test_support::TestFailure;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// The rejected directory unexpectedly produced an appender.
+    #[error("builder accepted a file as its log directory: {0:?}")]
+    UnexpectedAppender(Box<RollingFileAppender>),
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultInitError(#[from] strict_test_support::ResultFailure<InitError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultError(#[from] strict_test_support::ResultFailure<io::Error>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonString(#[from] strict_test_support::ComparisonFailure<String, String>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
@@ -357,28 +376,30 @@ mod tests {
   use super::*;
 
   #[test]
-  fn builder_defaults_to_never_rotation_and_no_optional_filename_parts() -> Result<(), TestFailure> {
+  fn builder_defaults_to_never_rotation_and_no_optional_filename_parts() -> Result<(), TestError> {
     let builder = Builder::new();
 
-    ensure(builder.rotation == Rotation::NEVER, "default builder never rotates")?;
-    ensure(builder.prefix.is_none(), "default builder has no filename prefix")?;
-    ensure(builder.suffix.is_none(), "default builder has no filename suffix")?;
-    ensure(builder.latest_symlink.is_none(), "default builder has no latest symlink")?;
+    ensure(builder.rotation == Rotation::NEVER, "default builder never rotates").map(drop)?;
+    ensure(builder.prefix.is_none(), "default builder has no filename prefix").map(drop)?;
+    ensure(builder.suffix.is_none(), "default builder has no filename suffix").map(drop)?;
+    ensure(builder.latest_symlink.is_none(), "default builder has no latest symlink").map(drop)?;
     ensure(builder.max_files.is_none(), "default builder has no retention limit")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn builder_normalizes_empty_and_non_empty_filename_options() -> Result<(), TestFailure> {
+  fn builder_normalizes_empty_and_non_empty_filename_options() -> Result<(), TestError> {
     let empty_builder = Builder::new()
       .filename_prefix("")
       .filename_suffix("")
       .latest_symlink("")
       .max_log_files(0);
 
-    ensure(empty_builder.prefix.is_none(), "empty prefix is omitted")?;
-    ensure(empty_builder.suffix.is_none(), "empty suffix is omitted")?;
-    ensure(empty_builder.latest_symlink.is_none(), "empty latest symlink is omitted")?;
-    ensure(empty_builder.max_files.is_none(), "zero retention limit disables pruning")?;
+    ensure(empty_builder.prefix.is_none(), "empty prefix is omitted").map(drop)?;
+    ensure(empty_builder.suffix.is_none(), "empty suffix is omitted").map(drop)?;
+    ensure(empty_builder.latest_symlink.is_none(), "empty latest symlink is omitted").map(drop)?;
+    ensure(empty_builder.max_files.is_none(), "zero retention limit disables pruning").map(drop)?;
 
     let configured_builder = Builder::new()
       .rotation(Rotation::HOURLY)
@@ -390,24 +411,30 @@ mod tests {
     ensure(
       configured_builder.rotation == Rotation::HOURLY,
       "configured builder stores rotation",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       configured_builder.prefix.as_deref() == Some("app"),
       "configured builder stores prefix",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       configured_builder.suffix.as_deref() == Some("log"),
       "configured builder stores suffix",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       configured_builder.latest_symlink.as_deref() == Some("latest.log"),
       "configured builder stores latest symlink",
-    )?;
+    )
+    .map(drop)?;
     ensure(configured_builder.max_files == Some(3), "configured builder stores retention limit")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn build_creates_parent_directories_and_writes_configured_filename() -> Result<(), TestFailure> {
+  fn build_creates_parent_directories_and_writes_configured_filename() -> Result<(), TestError> {
     let root = ensure_ok(tempfile::tempdir(), "create tempdir")?;
     let directory = root.path().join("nested").join("logs");
     let mut appender = ensure_ok(
@@ -423,18 +450,22 @@ mod tests {
     ensure_ok(appender.flush(), "flush builder-created appender")?;
 
     let contents = ensure_ok(fs::read_to_string(directory.join("app.log")), "read configured log file")?;
-    ensure_eq(&contents.as_str(), &"hello\n", "configured filename receives written bytes")
+    ensure_eq(
+      String::from(contents.as_str()),
+      String::from("hello\n"),
+      "configured filename receives written bytes",
+    )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn build_reports_contextual_io_error_when_directory_is_a_file() -> Result<(), TestFailure> {
+  fn build_reports_contextual_io_error_when_directory_is_a_file() -> Result<(), TestError> {
     let file = ensure_ok(tempfile::NamedTempFile::new(), "create temp file")?;
     let result = Builder::new().filename_prefix("app").build(file.path());
     let error = match result {
-      Ok(_appender) => {
-        return Err(TestFailure::Condition {
-          context: "builder should reject file path as log directory",
-        });
+      Ok(appender) => {
+        return Err(TestError::UnexpectedAppender(Box::new(appender)));
       }
       Err(error) => error,
     };
@@ -442,7 +473,10 @@ mod tests {
     ensure(
       error.to_string().contains("failed to create log file"),
       "builder error reports log file creation context",
-    )?;
+    )
+    .map(drop)?;
     ensure(error.source().is_some(), "builder error preserves source I/O error")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

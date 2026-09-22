@@ -49,7 +49,21 @@ pub fn trace_request<A>(req: &http::Request<A>) -> tracing::Span {
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultHttpError(#[from] strict_test_support::ResultFailure<http::Error>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionStaticTracingMetadata(#[from] strict_test_support::OptionFailure<&'static tracing::Metadata<'static>>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use strict_test_support::ensure_some;
@@ -61,7 +75,7 @@ mod tests {
   use super::trace_request;
   use super::warn_request;
 
-  fn request_with_body<A>(body: A) -> Result<http::Request<A>, TestFailure> {
+  fn request_with_body<A>(body: A) -> Result<http::Request<A>, TestError> {
     ensure_ok(
       http::Request::builder()
         .method("PATCH")
@@ -71,6 +85,7 @@ mod tests {
         .body(body),
       "test HTTP request builds",
     )
+    .map_err(TestError::from)
   }
 
   fn ensure_request_metadata(
@@ -79,26 +94,29 @@ mod tests {
     has_version: bool,
     has_headers: bool,
     context: &'static str,
-  ) -> Result<(), TestFailure> {
+  ) -> Result<(), TestError> {
     let metadata = ensure_some(span.metadata(), "request constructor returns a metadata-bearing span")?;
     let fields = metadata.fields();
 
-    ensure(metadata.name() == "request", context)?;
-    ensure(*metadata.level() == level, "request span level matches constructor")?;
-    ensure(fields.field("method").is_some(), "request span records method")?;
-    ensure(fields.field("uri").is_some(), "request span records uri")?;
+    ensure(metadata.name() == "request", context).map(drop)?;
+    ensure(*metadata.level() == level, "request span level matches constructor").map(drop)?;
+    ensure(fields.field("method").is_some(), "request span records method").map(drop)?;
+    ensure(fields.field("uri").is_some(), "request span records uri").map(drop)?;
     ensure(
       fields.field("version").is_some() == has_version,
       "request span version field polarity matches constructor",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       fields.field("headers").is_some() == has_headers,
       "request span headers field polarity matches constructor",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn level_constructors_retain_metadata_without_subscriber() -> Result<(), TestFailure> {
+  fn level_constructors_retain_metadata_without_subscriber() -> Result<(), TestError> {
     let request = request_with_body(())?;
 
     ensure_request_metadata(&info_request(&request), Level::INFO, false, false, "info request span metadata")?;
@@ -109,7 +127,7 @@ mod tests {
   }
 
   #[test]
-  fn request_constructors_accept_different_body_types() -> Result<(), TestFailure> {
+  fn request_constructors_accept_different_body_types() -> Result<(), TestError> {
     let string_request = request_with_body(String::from("body"))?;
     let bytes_request = request_with_body([1_u8, 2_u8, 3_u8])?;
 

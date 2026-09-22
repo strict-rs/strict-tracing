@@ -7,7 +7,21 @@ mod tests {
   use std::sync::atomic::AtomicUsize;
   use std::sync::atomic::Ordering;
 
-  use strict_test_support::TestFailure;
+  use tracing_subscriber::reload;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonLevelFilter(#[from] strict_test_support::ComparisonFailure<LevelFilter, LevelFilter>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonUsize(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultTracingSubscriberReloadReloadError(#[from] strict_test_support::ResultFailure<reload::ReloadError>),
+  }
+
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
   use tracing_core::Dispatch;
@@ -72,7 +86,7 @@ mod tests {
   /// it, but runs all tests in serial. The only way to run tests in serial in a
   /// single file is this way.
   #[test]
-  fn run_all_reload_test() -> Result<(), TestFailure> {
+  fn run_all_reload_test() -> Result<(), TestError> {
     reload_handle()?;
     reload_filter()
   }
@@ -81,7 +95,7 @@ mod tests {
     clippy::single_call_fn,
     reason = "reload tests keep serialized subcases named under one max-level-sensitive test"
   )]
-  fn reload_handle() -> Result<(), TestFailure> {
+  fn reload_handle() -> Result<(), TestError> {
     static FILTER1_CALLS: AtomicUsize = AtomicUsize::new(0);
     static FILTER2_CALLS: AtomicUsize = AtomicUsize::new(0);
 
@@ -116,43 +130,44 @@ mod tests {
 
     let subscriber = Dispatch::new(layer.with_subscriber(NopSubscriber));
 
-    with_default(&subscriber, || -> Result<(), TestFailure> {
-      ensure_eq(&FILTER1_CALLS.load(Ordering::SeqCst), &0, "first reload layer starts with no calls")?;
-      ensure_eq(
-        &FILTER2_CALLS.load(Ordering::SeqCst),
-        &0,
-        "second reload layer starts with no calls",
-      )?;
+    with_default(&subscriber, || -> Result<(), TestError> {
+      ensure_eq(FILTER1_CALLS.load(Ordering::SeqCst), 0, "first reload layer starts with no calls").map(drop)?;
+      ensure_eq(FILTER2_CALLS.load(Ordering::SeqCst), 0, "second reload layer starts with no calls").map(drop)?;
 
       event();
 
-      ensure_eq(&FILTER1_CALLS.load(Ordering::SeqCst), &1, "first reload layer sees the first event")?;
+      ensure_eq(FILTER1_CALLS.load(Ordering::SeqCst), 1, "first reload layer sees the first event").map(drop)?;
       ensure_eq(
-        &FILTER2_CALLS.load(Ordering::SeqCst),
-        &0,
+        FILTER2_CALLS.load(Ordering::SeqCst),
+        0,
         "second reload layer does not see the first event",
-      )?;
+      )
+      .map(drop)?;
 
       ensure_eq(
-        &LevelFilter::current(),
-        &LevelFilter::INFO,
+        LevelFilter::current(),
+        LevelFilter::INFO,
         "initial reload layer max level is current",
-      )?;
+      )
+      .map(drop)?;
       ensure_ok(handle.reload(Filter::Two), "reload layer swaps to second filter")?;
-      ensure_eq(&LevelFilter::current(), &LevelFilter::DEBUG, "reloaded layer max level is current")?;
+      ensure_eq(LevelFilter::current(), LevelFilter::DEBUG, "reloaded layer max level is current").map(drop)?;
 
       event();
 
       ensure_eq(
-        &FILTER1_CALLS.load(Ordering::SeqCst),
-        &1,
+        FILTER1_CALLS.load(Ordering::SeqCst),
+        1,
         "first reload layer call count is unchanged after reload",
-      )?;
+      )
+      .map(drop)?;
       ensure_eq(
-        &FILTER2_CALLS.load(Ordering::SeqCst),
-        &1,
+        FILTER2_CALLS.load(Ordering::SeqCst),
+        1,
         "second reload layer sees the event after reload",
       )
+      .map(drop)
+      .map_err(TestError::from)
     })
   }
 
@@ -160,7 +175,7 @@ mod tests {
     clippy::single_call_fn,
     reason = "reload tests keep serialized subcases named under one max-level-sensitive test"
   )]
-  fn reload_filter() -> Result<(), TestFailure> {
+  fn reload_filter() -> Result<(), TestError> {
     struct NopLayer;
     impl<S: Subscriber> tracing_subscriber::Layer<S> for NopLayer {
       fn register_callsite(&self, _metadata: &'static Metadata<'static>) -> SubscriberResult<Interest> {
@@ -202,51 +217,44 @@ mod tests {
 
     let dispatcher = Dispatch::new(tracing_subscriber::registry().with(NopLayer.with_filter(filter)));
 
-    with_default(&dispatcher, || -> Result<(), TestFailure> {
-      ensure_eq(
-        &FILTER1_CALLS.load(Ordering::SeqCst),
-        &0,
-        "first reload filter starts with no calls",
-      )?;
-      ensure_eq(
-        &FILTER2_CALLS.load(Ordering::SeqCst),
-        &0,
-        "second reload filter starts with no calls",
-      )?;
+    with_default(&dispatcher, || -> Result<(), TestError> {
+      ensure_eq(FILTER1_CALLS.load(Ordering::SeqCst), 0, "first reload filter starts with no calls").map(drop)?;
+      ensure_eq(FILTER2_CALLS.load(Ordering::SeqCst), 0, "second reload filter starts with no calls").map(drop)?;
 
       event();
 
+      ensure_eq(FILTER1_CALLS.load(Ordering::SeqCst), 1, "first reload filter sees the first event").map(drop)?;
       ensure_eq(
-        &FILTER1_CALLS.load(Ordering::SeqCst),
-        &1,
-        "first reload filter sees the first event",
-      )?;
-      ensure_eq(
-        &FILTER2_CALLS.load(Ordering::SeqCst),
-        &0,
+        FILTER2_CALLS.load(Ordering::SeqCst),
+        0,
         "second reload filter does not see the first event",
-      )?;
+      )
+      .map(drop)?;
 
       ensure_eq(
-        &LevelFilter::current(),
-        &LevelFilter::INFO,
+        LevelFilter::current(),
+        LevelFilter::INFO,
         "initial reload filter max level is current",
-      )?;
+      )
+      .map(drop)?;
       ensure_ok(handle.reload(Filter::Two), "reload filter swaps to second filter")?;
-      ensure_eq(&LevelFilter::current(), &LevelFilter::DEBUG, "reloaded filter max level is current")?;
+      ensure_eq(LevelFilter::current(), LevelFilter::DEBUG, "reloaded filter max level is current").map(drop)?;
 
       event();
 
       ensure_eq(
-        &FILTER1_CALLS.load(Ordering::SeqCst),
-        &1,
+        FILTER1_CALLS.load(Ordering::SeqCst),
+        1,
         "first reload filter call count is unchanged after reload",
-      )?;
+      )
+      .map(drop)?;
       ensure_eq(
-        &FILTER2_CALLS.load(Ordering::SeqCst),
-        &1,
+        FILTER2_CALLS.load(Ordering::SeqCst),
+        1,
         "second reload filter sees the event after reload",
       )
+      .map(drop)
+      .map_err(TestError::from)
     })
   }
 }

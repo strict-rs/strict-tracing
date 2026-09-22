@@ -2,7 +2,7 @@
 name = "tracing-futures"
 version.workspace = true
 authors = ["Eliza Weisman <eliza@buoyant.io>", "Tokio Contributors <team@tokio.rs>"]
-edition.workspace = true
+edition = { workspace = true }
 repository.workspace = true
 readme = "README.md"
 homepage = "https://tokio.rs"
@@ -16,7 +16,7 @@ categories = [
 ]
 keywords = ["logging", "profiling", "tracing", "futures", "async"]
 license.workspace = true
-rust-version.workspace = true
+rust-version = { workspace = true }
 
 [features]
 default = ["std-future", "std"]
@@ -31,6 +31,7 @@ pin-project-lite = { workspace = true, optional = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+thiserror = { workspace = true }
 futures = { workspace = true, default-features = true }
 strict-test-support = { workspace = true }
 tokio-test = { workspace = true }

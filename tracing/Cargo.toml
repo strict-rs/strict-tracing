@@ -21,8 +21,8 @@ categories = [
     "no-std",
 ]
 keywords = ["logging", "tracing", "metrics", "async"]
-edition.workspace = true
-rust-version.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
 
 [dependencies]
 tracing-core = { workspace = true }
@@ -31,6 +31,7 @@ tracing-attributes = { workspace = true, optional = true }
 pin-project-lite = { workspace = true }
 
 [dev-dependencies]
+thiserror = { workspace = true }
 criterion = { workspace = true }
 futures = { workspace = true }
 log = { workspace = true }

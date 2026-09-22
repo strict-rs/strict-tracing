@@ -1,7 +1,20 @@
 //! Tests for using `EnvFilter` as a per-layer filter (rather than a global
 //! `Layer` filter).
 #![cfg(feature = "registry")]
-use strict_test_support::TestFailure;
+
+use tracing_core::subscriber::SubscriberError;
+use tracing_subscriber::filter;
+/// Native failures from these behavioral checks.
+#[derive(Debug, thiserror::Error)]
+enum TestError {
+  /// Preserves the complete native failure and its inputs.
+  #[error(transparent)]
+  ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  /// Retains the native parse failure.
+  #[error(transparent)]
+  Parse(#[from] strict_test_support::ResultFailure<filter::ParseError>),
+}
+
 use strict_test_support::ensure_ok;
 use tracing::subscriber::set_default;
 use tracing_mock::expect;
@@ -10,7 +23,7 @@ use tracing_mock::layer;
 use super::*;
 
 #[test]
-fn level_filter_event() -> Result<(), TestFailure> {
+fn level_filter_event() -> Result<(), TestError> {
   let filter: EnvFilter = ensure_ok("info".parse(), "per-layer level filter parses")?;
   let (layer, handle) = layer::mock()
     .event(expect::event().at_level(Level::INFO))
@@ -33,7 +46,7 @@ fn level_filter_event() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn same_name_spans() -> Result<(), TestFailure> {
+fn same_name_spans() -> Result<(), TestError> {
   let filter: EnvFilter = ensure_ok(
     "[foo{bar}]=trace,[foo{baz}]=trace".parse(),
     "per-layer same-name span filter parses",
@@ -65,7 +78,7 @@ fn same_name_spans() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn level_filter_event_with_target() -> Result<(), TestFailure> {
+fn level_filter_event_with_target() -> Result<(), TestError> {
   let filter: EnvFilter = ensure_ok("info,stuff=debug".parse(), "per-layer targeted level filter parses")?;
   let (layer, handle) = layer::mock()
     .event(expect::event().at_level(Level::INFO))
@@ -93,7 +106,7 @@ fn level_filter_event_with_target() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn level_filter_event_with_target_and_span() -> Result<(), TestFailure> {
+fn level_filter_event_with_target_and_span() -> Result<(), TestError> {
   let filter: EnvFilter = ensure_ok("stuff[cool_span]=debug".parse(), "per-layer target-and-span filter parses")?;
 
   let cool_span = expect::span().named("cool_span");
@@ -124,7 +137,7 @@ fn level_filter_event_with_target_and_span() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn not_order_dependent() -> Result<(), TestFailure> {
+fn not_order_dependent() -> Result<(), TestError> {
   // this test reproduces tokio-rs/tracing#623
 
   let filter: EnvFilter = ensure_ok("stuff=debug,info".parse(), "per-layer order-independent filter parses")?;
@@ -154,7 +167,7 @@ fn not_order_dependent() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn add_directive_enables_event() -> Result<(), TestFailure> {
+fn add_directive_enables_event() -> Result<(), TestError> {
   // this test reproduces tokio-rs/tracing#591
 
   // by default, use info level
@@ -180,7 +193,7 @@ fn add_directive_enables_event() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn span_name_filter_is_dynamic() -> Result<(), TestFailure> {
+fn span_name_filter_is_dynamic() -> Result<(), TestError> {
   let filter: EnvFilter = ensure_ok("info,[cool_span]=debug".parse(), "per-layer span-name dynamic filter parses")?;
   let expected_cool_span = expect::span().named("cool_span");
   let expected_uncool_span = expect::span().named("uncool_span");
@@ -249,7 +262,7 @@ fn span_name_filter_is_dynamic() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn multiple_dynamic_filters() -> Result<(), TestFailure> {
+fn multiple_dynamic_filters() -> Result<(), TestError> {
   // Test that multiple dynamic (span) filters only apply to the layers
   // they're attached to.
   let (layer1, handle1) = {

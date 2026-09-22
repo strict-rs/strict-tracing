@@ -1,12 +1,13 @@
-use strict_test_support::TestFailure;
+use strict_test_support::ResultFailure;
 use strict_test_support::ensure_ok;
+use tracing_core::subscriber::SubscriberError;
 use tracing_mock::expect;
 use tracing_mock::layer::MockLayer;
 
 use super::*;
 
 #[test]
-fn filters_span_scopes() -> Result<(), TestFailure> {
+fn filters_span_scopes() -> Result<(), ResultFailure<SubscriberError>> {
   let (debug_layer, debug_handle) = layer::named("debug")
     .enter(expect::span().at_level(Level::DEBUG))
     .enter(expect::span().at_level(Level::INFO))
@@ -73,7 +74,7 @@ fn filters_span_scopes() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn filters_interleaved_span_scopes() -> Result<(), TestFailure> {
+fn filters_interleaved_span_scopes() -> Result<(), ResultFailure<SubscriberError>> {
   fn target_layer(target: &'static str) -> (MockLayer, subscriber::MockHandle) {
     layer::named(format!("target_{target}"))
       .enter(expect::span().with_target(target))

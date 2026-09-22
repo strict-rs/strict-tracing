@@ -5,14 +5,16 @@
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use strict_test_support::ResultFailure;
   use strict_test_support::ensure_ok;
   use tracing::subscriber::with_default;
+  use tracing_core::subscriber::SubscriberError;
   use tracing_mock::layer;
   use tracing_subscriber::layer::SubscriberExt as _;
 
   #[test]
-  fn on_register_dispatch_is_called() -> Result<(), TestFailure> {
+  fn on_register_dispatch_is_called() -> Result<(), ResultFailure<SubscriberError>> {
     let (inner_layer, inner_handle) = layer::named("inner").on_register_dispatch().run_with_handle();
 
     let (outer_layer, outer_handle) = layer::named("outer").on_register_dispatch().run_with_handle();

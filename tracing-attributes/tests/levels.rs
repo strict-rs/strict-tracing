@@ -1,15 +1,16 @@
 //! Example binary for tracing workspace checks.
 #![cfg(test)]
 
-use strict_test_support::TestFailure;
+use strict_test_support::ResultFailure;
 use strict_test_support::ensure_ok;
 use tracing::Level;
 use tracing::subscriber::with_default;
 use tracing_attributes::instrument;
+use tracing_core::subscriber::SubscriberError;
 use tracing_mock::*;
 
 #[test]
-fn named_levels() -> Result<(), TestFailure> {
+fn named_levels() -> Result<(), ResultFailure<SubscriberError>> {
   #[instrument(level = "trace")]
   fn trace() {}
 
@@ -56,7 +57,7 @@ fn named_levels() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn numeric_levels() -> Result<(), TestFailure> {
+fn numeric_levels() -> Result<(), ResultFailure<SubscriberError>> {
   #[instrument(level = 1)]
   fn trace() {}
 
@@ -103,7 +104,7 @@ fn numeric_levels() -> Result<(), TestFailure> {
 }
 
 #[test]
-fn enum_levels() -> Result<(), TestFailure> {
+fn enum_levels() -> Result<(), ResultFailure<SubscriberError>> {
   #[instrument(level = Level::TRACE)]
   fn trace() {}
 

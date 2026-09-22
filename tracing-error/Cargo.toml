@@ -28,8 +28,8 @@ keywords = [
     "exception-reporting",
     "backtrace"
 ]
-edition.workspace = true
-rust-version.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
 
 [features]
 default = ["traced-error"]
@@ -40,6 +40,7 @@ tracing-subscriber = { workspace = true, features = ["registry", "fmt"] }
 tracing = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
+thiserror = { workspace = true }
 strict-test-support = { workspace = true }
 
 [badges]

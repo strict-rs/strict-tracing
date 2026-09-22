@@ -14,7 +14,22 @@ mod tests {
   use std::sync::atomic::AtomicUsize;
   use std::sync::atomic::Ordering;
 
-  use strict_test_support::TestFailure;
+  use tracing_core::dispatcher;
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonUsize(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultDispatcherSetGlobalDefaultError(#[from] strict_test_support::ResultFailure<dispatcher::SetGlobalDefaultError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
   use tracing::Level;
@@ -25,7 +40,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn filters_are_not_reevaluated_for_the_same_span() -> Result<(), TestFailure> {
+  fn filters_are_not_reevaluated_for_the_same_span() -> Result<(), TestError> {
     // Asserts that the `span!` macro caches the result of calling
     // `Subscriber::enabled` for each span.
     let alice_count = Arc::new(AtomicUsize::new(0));
@@ -67,42 +82,43 @@ mod tests {
 
     // The filter should have seen each span a single time.
     ensure_eq(
-      &alice_count.load(Ordering::Relaxed),
-      &expected,
+      alice_count.load(Ordering::Relaxed),
+      expected,
       "alice filter runs once after first span",
-    )?;
-    ensure_eq(
-      &bob_count.load(Ordering::Relaxed),
-      &expected,
-      "bob filter runs once after first span",
-    )?;
+    )
+    .map(drop)?;
+    ensure_eq(bob_count.load(Ordering::Relaxed), expected, "bob filter runs once after first span").map(drop)?;
 
     alice.in_scope(|| bob.in_scope(|| {}));
 
     // The subscriber should see "bob" again, but the filter should not have
     // been called.
     ensure_eq(
-      &alice_count.load(Ordering::Relaxed),
-      &expected,
+      alice_count.load(Ordering::Relaxed),
+      expected,
       "alice filter remains cached after nested enter",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &bob_count.load(Ordering::Relaxed),
-      &expected,
+      bob_count.load(Ordering::Relaxed),
+      expected,
       "bob filter remains cached after nested enter",
-    )?;
+    )
+    .map(drop)?;
 
     bob.in_scope(|| {});
     ensure_eq(
-      &alice_count.load(Ordering::Relaxed),
-      &expected,
+      alice_count.load(Ordering::Relaxed),
+      expected,
       "alice filter remains cached after bob re-enter",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &bob_count.load(Ordering::Relaxed),
-      &expected,
+      bob_count.load(Ordering::Relaxed),
+      expected,
       "bob filter remains cached after bob re-enter",
-    )?;
+    )
+    .map(drop)?;
 
     ensure_ok(handle.finished(), "mock expectations should finish")?;
     Ok(())

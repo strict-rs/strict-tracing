@@ -10,7 +10,17 @@ mod tests {
   use std::sync::atomic::Ordering;
   use std::thread::spawn;
 
-  use strict_test_support::TestFailure;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonUsize(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use tracing::Dispatch;
@@ -227,7 +237,7 @@ mod tests {
   }
 
   #[test]
-  fn span_entered_on_different_thread_from_subscriber() -> Result<(), TestFailure> {
+  fn span_entered_on_different_thread_from_subscriber() -> Result<(), TestError> {
     let counts = Arc::new(LifecycleCounts::default());
 
     let layer = CountingLayer {
@@ -249,21 +259,20 @@ mod tests {
     ensure(
       thread_result.is_ok(),
       "span can be entered on a thread without a direct subscriber relationship",
-    )?;
+    )
+    .map(drop)?;
 
-    ensure_eq(&counts.layer_new(), &1, "layer observes one new span")?;
-    ensure_eq(&counts.layer_enter(), &1, "layer observes one enter")?;
-    ensure_eq(&counts.layer_exit(), &1, "layer observes one exit")?;
-    ensure_eq(&counts.layer_close(), &1, "layer observes one close")?;
+    ensure_eq(counts.layer_new(), 1, "layer observes one new span").map(drop)?;
+    ensure_eq(counts.layer_enter(), 1, "layer observes one enter").map(drop)?;
+    ensure_eq(counts.layer_exit(), 1, "layer observes one exit").map(drop)?;
+    ensure_eq(counts.layer_close(), 1, "layer observes one close").map(drop)?;
 
     let sub_new_and_clone = counts.sub_new().saturating_add(counts.sub_clone());
-    ensure_eq(&counts.sub_new(), &1, "subscriber observes one new span")?;
-    ensure_eq(&sub_new_and_clone, &counts.sub_close(), "subscriber closes each new or cloned span")?;
-    ensure_eq(
-      &counts.sub_enter(),
-      &counts.layer_enter(),
-      "subscriber and layer enter counts match",
-    )?;
-    ensure_eq(&counts.sub_exit(), &counts.layer_exit(), "subscriber and layer exit counts match")
+    ensure_eq(counts.sub_new(), 1, "subscriber observes one new span").map(drop)?;
+    ensure_eq(sub_new_and_clone, counts.sub_close(), "subscriber closes each new or cloned span").map(drop)?;
+    ensure_eq(counts.sub_enter(), counts.layer_enter(), "subscriber and layer enter counts match").map(drop)?;
+    ensure_eq(counts.sub_exit(), counts.layer_exit(), "subscriber and layer exit counts match")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

@@ -107,6 +107,15 @@ impl<'a> Event<'a> {
     self.metadata
   }
 
+  /// Borrows the complete requested parent relationship.
+  ///
+  /// The returned value distinguishes an explicit root from inheritance of
+  /// the current context and retains the identifier of an explicit parent.
+  #[must_use]
+  pub const fn parent_relationship(&self) -> &Parent {
+    &self.parent
+  }
+
   /// Returns true if the new event should be a root.
   #[must_use]
   pub const fn is_root(&self) -> bool {

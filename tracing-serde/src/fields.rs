@@ -31,8 +31,9 @@ impl Serialize for SerializeFieldMap<'_, Event<'_>> {
   where
     S: Serializer,
   {
-    let len = self.0.fields().count();
-    let map = serializer.serialize_map(Some(len))?;
+    // Declared fields can be absent or intentionally record no value.
+    // The definition count is not the number of serialized entries.
+    let map = serializer.serialize_map(None)?;
     let mut visitor = SerdeMapVisitor::new(map);
     self.0.record(&mut visitor);
     visitor.finish()
@@ -44,8 +45,8 @@ impl Serialize for SerializeFieldMap<'_, Attributes<'_>> {
   where
     S: Serializer,
   {
-    let len = self.0.metadata().fields().len();
-    let map = serializer.serialize_map(Some(len))?;
+    // Value visitation can omit declared fields, including `Empty` values.
+    let map = serializer.serialize_map(None)?;
     let mut visitor = SerdeMapVisitor::new(map);
     self.0.record(&mut visitor);
     visitor.finish()

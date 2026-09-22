@@ -15,7 +15,24 @@ mod tests {
   use std::sync::atomic::AtomicBool;
   use std::sync::atomic::Ordering;
 
-  use strict_test_support::TestFailure;
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Retains the searched text and expected substring.
+    #[error(transparent)]
+    Substring(#[from] strict_test_support::SubstringFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+    /// Retains the native registration failure.
+    #[error(transparent)]
+    Registration(#[from] strict_test_support::OptionFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use tracing::Event;
@@ -40,7 +57,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn event_macros_dont_infinite_loop() -> Result<(), TestFailure> {
+  fn event_macros_dont_infinite_loop() -> Result<(), TestError> {
     // This test ensures that an event macro within a subscriber
     // won't cause an infinite loop of events.
     struct TestSubscriber {
@@ -109,16 +126,19 @@ mod tests {
     ensure(
       !missing_enabled_field.load(Ordering::Relaxed),
       "enabled callback should see the original event field",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       !missing_event_field.load(Ordering::Relaxed),
       "event callback should see the original event field",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn boxed_subscriber() -> Result<(), TestFailure> {
+  fn boxed_subscriber() -> Result<(), TestError> {
     let (mock_subscriber, handle) = subscriber::mock()
       .expect_when(STATIC_MAX_LEVEL.enables(Level::TRACE), |builder| {
         builder
@@ -158,7 +178,7 @@ mod tests {
   )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn arced_subscriber() -> Result<(), TestFailure> {
+  fn arced_subscriber() -> Result<(), TestError> {
     let (mock_subscriber, handle) = subscriber::mock()
       .new_span(
         expect::span()
@@ -190,7 +210,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn boxed_subscriber_receives_on_register_dispatch() -> Result<(), TestFailure> {
+  fn boxed_subscriber_receives_on_register_dispatch() -> Result<(), TestError> {
     let (mock_subscriber, handle) = subscriber::mock().on_register_dispatch().only().run_with_handle();
     let subscriber: Box<dyn Subscriber + Send + Sync + 'static> = Box::new(mock_subscriber);
 
@@ -205,7 +225,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn arced_subscriber_receives_on_register_dispatch() -> Result<(), TestFailure> {
+  fn arced_subscriber_receives_on_register_dispatch() -> Result<(), TestError> {
     let (mock_subscriber, handle) = subscriber::mock().on_register_dispatch().only().run_with_handle();
     let subscriber: Arc<dyn Subscriber + Send + Sync + 'static> = Arc::new(mock_subscriber);
 
@@ -230,7 +250,7 @@ mod tests {
   )))]
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn non_forwarding_wrapper_drops_on_register_dispatch() -> Result<(), TestFailure> {
+  fn non_forwarding_wrapper_drops_on_register_dispatch() -> Result<(), TestError> {
     use strict_test_support::ensure_contains;
     use strict_test_support::ensure_some;
 
@@ -296,9 +316,11 @@ mod tests {
 
     let error = ensure_some(handle.finished().err(), "dropped registration should surface as a mock failure")?;
     ensure_contains(
-      &error.to_string(),
-      "expected on_register_dispatch to be called",
+      error.to_string(),
+      String::from("expected on_register_dispatch to be called"),
       "mock expectation error names the missed registration callback",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

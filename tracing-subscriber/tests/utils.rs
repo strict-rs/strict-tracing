@@ -3,13 +3,19 @@
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  use strict_test_support::ResultFailure;
   use strict_test_support::ensure_ok;
+  use tracing_core::subscriber::SubscriberError;
   use tracing_mock::*;
+  #[cfg(all(feature = "fmt", feature = "env-filter"))]
   use tracing_subscriber::EnvFilter;
+  #[cfg(feature = "fmt")]
   use tracing_subscriber::fmt;
+  #[cfg(all(feature = "fmt", feature = "env-filter"))]
   use tracing_subscriber::fmt::layer as fmt_layer;
   use tracing_subscriber::prelude::*;
+  #[cfg(all(feature = "fmt", feature = "env-filter"))]
   use tracing_subscriber::registry;
 
   // This test target owns `SubscriberInitExt` coverage, including the
@@ -18,7 +24,7 @@ mod tests {
   // does not become part of their expected event stream.
 
   #[test]
-  fn init_ext_works() -> Result<(), TestFailure> {
+  fn init_ext_works() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, mock_handle) = subscriber::mock()
       .event(expect::event().at_level(tracing::Level::INFO).with_target("init_works"))
       .run_with_handle();
@@ -31,7 +37,7 @@ mod tests {
 
   #[test]
   #[cfg(feature = "tracing-log")]
-  fn set_default_initializes_log_tracer() -> Result<(), TestFailure> {
+  fn set_default_initializes_log_tracer() -> Result<(), ResultFailure<SubscriberError>> {
     let (subscriber, mock_handle) = subscriber::mock()
       .event(
         expect::event()

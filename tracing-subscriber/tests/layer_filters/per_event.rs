@@ -1,12 +1,13 @@
 use core::fmt::Debug;
 
-use strict_test_support::TestFailure;
+use strict_test_support::ResultFailure;
 use strict_test_support::ensure_ok;
 use tracing::Event;
 use tracing::Level;
 use tracing::Metadata;
 use tracing::subscriber::set_default;
 use tracing_core::Field;
+use tracing_core::subscriber::SubscriberError;
 use tracing_core::subscriber::SubscriberResult;
 use tracing_mock::expect;
 use tracing_mock::layer;
@@ -40,7 +41,7 @@ impl<S> Filter<S> for FilterEvent {
 }
 
 #[test]
-fn per_layer_event_field_filtering() -> Result<(), TestFailure> {
+fn per_layer_event_field_filtering() -> Result<(), ResultFailure<SubscriberError>> {
   let (expect, handle) = layer::mock()
     .event(expect::event().at_level(Level::TRACE))
     .event(expect::event().at_level(Level::INFO))

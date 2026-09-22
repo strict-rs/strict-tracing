@@ -6,7 +6,24 @@ mod tests {
   use std::sync::Arc;
 
   use parking_lot::Mutex;
-  use strict_test_support::TestFailure;
+
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonBool(#[from] strict_test_support::ComparisonFailure<bool, bool>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionBoolOptionOwnedMetadata(#[from] Box<strict_test_support::OptionFailure<NormalizedMetadataObservation>>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultLogSetLoggerError(#[from] strict_test_support::ResultFailure<log::SetLoggerError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
@@ -104,7 +121,7 @@ mod tests {
 
   /// Normalize metadata for log-sourced events and ignore plain tracing events.
   #[test]
-  fn normalized_metadata() -> Result<(), TestFailure> {
+  fn normalized_metadata() -> Result<(), TestError> {
     ensure_ok(LogTracer::init(), "`LogTracer` should initialize")?;
     let me = Arc::new(State {
       normalized_metadata: Mutex::new(Vec::new()),
@@ -161,16 +178,20 @@ mod tests {
         lock.iter().any(|entry| !entry.0 && entry.1.as_ref().is_none())
       };
       ensure(found, "expected matching event in observed metadata")
+        .map(drop)
+        .map_err(TestError::from)
     })
   }
 
   /// Assert that the last observed event has the expected log classification and metadata.
-  fn last(state: &State, should_be_log: bool, expected: Option<&OwnedMetadata>) -> Result<(), TestFailure> {
+  fn last(state: &State, should_be_log: bool, expected: Option<&OwnedMetadata>) -> Result<(), TestError> {
     let (is_log, metadata) = {
       let lock = state.normalized_metadata.lock();
-      ensure_some(lock.last().cloned(), "expected at least one event")?
+      ensure_some(lock.last().cloned(), "expected at least one event").map_err(Box::new)?
     };
-    ensure_eq(&is_log, &should_be_log, "event log classification matches")?;
+    ensure_eq(is_log, should_be_log, "event log classification matches").map(drop)?;
     ensure(metadata.as_ref() == expected, "normalized metadata matches")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

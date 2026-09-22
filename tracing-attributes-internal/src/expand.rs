@@ -353,7 +353,7 @@ fn rename_custom_field_inputs(args: &mut InstrumentArgs, param_names: Vec<Rename
   reason = "err and ret event token generation is a named macro pipeline stage"
 )]
 fn gen_events(args: &InstrumentArgs, target: &TokenStream, args_level: &Level) -> (Option<TokenStream>, Option<TokenStream>) {
-  let err_event = args.err_args.as_ref().map(|event_args| {
+  let err_event = args.err_args.clone().map(|event_args| {
     let level_tokens = event_args.level(Level::Error);
     match event_args.mode {
       FormatMode::Default | FormatMode::Display => quote!(::tracing::event!(target: #target, #level_tokens, error = %__tracing_attr_error)),
@@ -361,7 +361,7 @@ fn gen_events(args: &InstrumentArgs, target: &TokenStream, args_level: &Level) -
     }
   });
 
-  let ret_event = args.ret_args.as_ref().map(|event_args| {
+  let ret_event = args.ret_args.clone().map(|event_args| {
     let level_tokens = event_args.level(args_level.clone());
     match event_args.mode {
       FormatMode::Display => quote!(::tracing::event!(target: #target, #level_tokens, return = %__tracing_attr_return)),
@@ -971,7 +971,28 @@ mod tests {
   use proc_macro2::TokenStream;
   use quote::ToTokens as _;
   use quote::quote;
-  use strict_test_support::TestFailure;
+
+  use crate::attr;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Retains the native parse failure.
+    #[error(transparent)]
+    Parse(#[from] strict_test_support::ResultFailure<syn::Error>),
+    /// Retains the native stringcomparison failure.
+    #[error(transparent)]
+    StringComparison(#[from] strict_test_support::ComparisonFailure<String, String>),
+    /// Retains the native expansion failure.
+    #[error(transparent)]
+    Expansion(#[from] strict_test_support::OptionFailure<TokenStream>),
+    /// Retains the native eventargs failure.
+    #[error(transparent)]
+    EventArgs(#[from] strict_test_support::OptionFailure<attr::EventArgs>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
@@ -987,7 +1008,7 @@ mod tests {
   use crate::attr::Level;
 
   /// Parse args and a function item, returning the generated function tokens.
-  fn generated_function(arg_tokens: TokenStream, item_tokens: TokenStream) -> Result<String, TestFailure> {
+  fn generated_function(arg_tokens: TokenStream, item_tokens: TokenStream) -> Result<String, TestError> {
     let parsed_args = ensure_ok(
       syn::parse2::<InstrumentArgs>(arg_tokens),
       "instrument arguments parse for generated function test",
@@ -1001,12 +1022,12 @@ mod tests {
   }
 
   /// Parse a function and return it as a `syn::ItemFn`.
-  fn parsed_fn(item: TokenStream) -> Result<ItemFn, TestFailure> {
-    ensure_ok(syn::parse2::<ItemFn>(item), "function fixture parses")
+  fn parsed_fn(item: TokenStream) -> Result<ItemFn, TestError> {
+    ensure_ok(syn::parse2::<ItemFn>(item), "function fixture parses").map_err(TestError::from)
   }
 
   #[test]
-  fn generated_span_records_value_debug_destructured_and_receiver_fields() -> Result<(), TestFailure> {
+  fn generated_span_records_value_debug_destructured_and_receiver_fields() -> Result<(), TestError> {
     let output = generated_function(quote!(fields(custom = answer)), quote! {
       fn demo(&self, answer: u64, custom: Custom, (left, right): (u8, u8)) {
         let _ = (&self, answer, custom, left, right);
@@ -1016,47 +1037,55 @@ mod tests {
     ensure(
       output.contains("self = :: tracing :: field :: debug (& self)"),
       "receiver is recorded with debug",
-    )?;
-    ensure(output.contains("answer = answer"), "primitive parameters are recorded as values")?;
-    ensure(output.contains("custom = answer"), "custom field expression is emitted")?;
+    )
+    .map(drop)?;
+    ensure(output.contains("answer = answer"), "primitive parameters are recorded as values").map(drop)?;
+    ensure(output.contains("custom = answer"), "custom field expression is emitted").map(drop)?;
     ensure(
       !output.contains("custom = :: tracing :: field :: debug (& custom)"),
       "custom field shadows automatic parameter recording",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       output.contains("left = :: tracing :: field :: debug (& left)"),
       "destructured tuple elements are recorded with debug",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       output.contains("right = :: tracing :: field :: debug (& right)"),
       "all destructured tuple elements are recorded",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn generated_span_rejects_missing_skips_and_honors_skip_all() -> Result<(), TestFailure> {
+  fn generated_span_rejects_missing_skips_and_honors_skip_all() -> Result<(), TestError> {
     let missing_skip = generated_function(quote!(skip(missing)), quote! {
       fn demo(answer: u64) {
         let _ = answer;
       }
     })?;
-    ensure(missing_skip.contains("compile_error !"), "missing skip emits compile error")?;
+    ensure(missing_skip.contains("compile_error !"), "missing skip emits compile error").map(drop)?;
     ensure(
       missing_skip.contains("attempting to skip non-existent parameter"),
       "missing skip diagnostic is preserved",
-    )?;
+    )
+    .map(drop)?;
 
     let skip_all = generated_function(quote!(skip_all, fields(answer = 42)), quote! {
       fn demo(answer: u64, other: u64) {
         let _ = (answer, other);
       }
     })?;
-    ensure(skip_all.contains("answer = 42"), "custom field remains when skip_all is set")?;
+    ensure(skip_all.contains("answer = 42"), "custom field remains when skip_all is set").map(drop)?;
     ensure(!skip_all.contains("other = other"), "skip_all prevents automatic fields")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn generated_sync_body_emits_err_and_ret_events_with_requested_modes() -> Result<(), TestFailure> {
+  fn generated_sync_body_emits_err_and_ret_events_with_requested_modes() -> Result<(), TestError> {
     let output = generated_function(quote!(level = "warn", err(Debug, level = "error"), ret(Display)), quote! {
       fn demo(answer: Result<u64, Error>) -> Result<u64, Error> {
         answer
@@ -1066,20 +1095,25 @@ mod tests {
     ensure(
       output.contains("match (move ||"),
       "sync functions wrap the body for result instrumentation",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       output.contains("error = ? __tracing_attr_error"),
       "err(Debug) records the error with debug formatting",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       output.contains("return = % __tracing_attr_return"),
       "ret(Display) records the return value with display formatting",
-    )?;
+    )
+    .map(drop)?;
     ensure(output.contains(":: tracing :: Level :: ERROR"), "err level override is emitted")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn generated_async_body_emits_future_instrumentation_and_events() -> Result<(), TestFailure> {
+  fn generated_async_body_emits_future_instrumentation_and_events() -> Result<(), TestError> {
     let output = generated_function(quote!(err(Display), ret(Debug)), quote! {
       async fn demo(answer: Result<u64, Error>) -> Result<u64, Error> {
         answer
@@ -1089,23 +1123,28 @@ mod tests {
     ensure(
       output.contains("async move"),
       "async functions generate an async instrumentation wrapper",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       output.contains(":: tracing :: Instrument :: instrument"),
       "enabled async spans instrument the generated future",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       output.contains("error = % __tracing_attr_error"),
       "err(Display) records the error with display formatting",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       output.contains("return = ? __tracing_attr_return"),
       "ret(Debug) records the return value with debug formatting",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn impl_trait_return_type_is_erased_for_the_fake_return_edge() -> Result<(), TestFailure> {
+  fn impl_trait_return_type_is_erased_for_the_fake_return_edge() -> Result<(), TestError> {
     let output = generated_function(quote!(), quote! {
       fn demo() -> impl Clone {
         1_u64
@@ -1116,10 +1155,12 @@ mod tests {
       output.contains("Option :: < _ > :: None"),
       "impl Trait return type is erased in the fake return edge",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn parameter_name_collection_handles_nested_patterns_without_inventing_fields() -> Result<(), TestFailure> {
+  fn parameter_name_collection_handles_nested_patterns_without_inventing_fields() -> Result<(), TestError> {
     let item = parsed_fn(quote! {
       fn demo((first, Struct { second, nested: (third, _) }): Input, _: Ignored) {}
     })?;
@@ -1139,24 +1180,27 @@ mod tests {
       params == vec![String::from("first"), String::from("second"), String::from("third")],
       "nested irrefutable patterns expose only named bindings",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn async_info_detects_supported_async_trait_shapes_and_rejects_plain_functions() -> Result<(), TestFailure> {
+  fn async_info_detects_supported_async_trait_shapes_and_rejects_plain_functions() -> Result<(), TestError> {
     let plain_async = parsed_fn(quote! {
       async fn demo() {}
     })?;
     ensure(
       AsyncInfo::from_fn(&plain_async).is_none(),
       "native async fn does not look like async-trait output",
-    )?;
+    )
+    .map(drop)?;
 
     let async_block = parsed_fn(quote! {
       fn demo() -> impl Future<Output = u64> {
         async move { 1_u64 }
       }
     })?;
-    ensure(AsyncInfo::from_fn(&async_block).is_some(), "async move return block is detected")?;
+    ensure(AsyncInfo::from_fn(&async_block).is_some(), "async move return block is detected").map(drop)?;
 
     let pinned_async_block = parsed_fn(quote! {
       fn demo() -> Pin<Box<dyn Future<Output = u64>>> {
@@ -1166,7 +1210,8 @@ mod tests {
     ensure(
       AsyncInfo::from_fn(&pinned_async_block).is_some(),
       "Box::pin(async move) return block is detected",
-    )?;
+    )
+    .map(drop)?;
 
     let old_async_trait = parsed_fn(quote! {
       fn demo(_self: &Demo) -> Pin<Box<dyn Future<Output = u64>>> {
@@ -1176,24 +1221,26 @@ mod tests {
         Box::pin(inner(_self))
       }
     })?;
-    let info = ensure_some(
-      AsyncInfo::from_fn(&old_async_trait),
-      "immediately invoked async function shape is detected",
-    )?;
     let args = ensure_ok(
       syn::parse2::<InstrumentArgs>(quote!(fields(ty = core::mem::size_of::<Self>(), this = self))),
       "field rewrite args parse",
     )?;
-    let output = info.gen_async(&args, "demo").to_string();
-    ensure(output.contains("Box :: pin"), "old async-trait output remains pinned")?;
+    let output = ensure_some(
+      AsyncInfo::from_fn(&old_async_trait).map(|info| info.gen_async(&args, "demo")),
+      "immediately invoked async function shape is detected",
+    )?
+    .to_string();
+    ensure(output.contains("Box :: pin"), "old async-trait output remains pinned").map(drop)?;
     ensure(
       output.contains("ty = core :: mem :: size_of :: < Demo > ()"),
       "Self type positions in custom fields are rewritten to concrete receiver type",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       output.contains("this = _self"),
       "receiver binding in custom fields is rewritten to generated _self",
-    )?;
+    )
+    .map(drop)?;
 
     let nonmatching = parsed_fn(quote! {
       fn demo() -> u64 {
@@ -1204,26 +1251,31 @@ mod tests {
       AsyncInfo::from_fn(&nonmatching).is_none(),
       "plain synchronous function is not detected as async-trait output",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn event_args_default_levels_follow_span_or_error_defaults() -> Result<(), TestFailure> {
+  fn event_args_default_levels_follow_span_or_error_defaults() -> Result<(), TestError> {
     let args = ensure_ok(
       syn::parse2::<InstrumentArgs>(quote!(level = "debug", err, ret)),
       "default event arguments parse",
     )?;
-    let err_level = ensure_some(args.err_args.as_ref(), "err args exist")?.level(Level::Warn);
-    let ret_level = ensure_some(args.ret_args.as_ref(), "ret args exist")?.level(args.level());
+    let err_level = ensure_some(args.err_args.clone(), "err args exist")?.level(Level::Warn);
+    let ret_level = ensure_some(args.ret_args.clone(), "ret args exist")?.level(args.level());
 
     ensure_eq(
-      &err_level.to_token_stream().to_string(),
-      &quote!(::tracing::Level::WARN).to_string(),
+      err_level.to_token_stream().to_string(),
+      quote!(::tracing::Level::WARN).to_string(),
       "err event defaults to caller-provided error level",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &ret_level.to_token_stream().to_string(),
-      &quote!(::tracing::Level::DEBUG).to_string(),
+      ret_level.to_token_stream().to_string(),
+      quote!(::tracing::Level::DEBUG).to_string(),
       "ret event defaults to span level",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

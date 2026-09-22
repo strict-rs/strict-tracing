@@ -26,4 +26,5 @@ template-core.workspace  = true
 template-stask.workspace = true
 
 [dev-dependencies]
+thiserror = { workspace = true }
 strict-test-support.workspace = true

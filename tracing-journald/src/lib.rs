@@ -852,7 +852,21 @@ mod tests {
   use std::sync::Arc;
 
   use parking_lot::Mutex;
-  use strict_test_support::TestFailure;
+
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultError(#[from] strict_test_support::ResultFailure<io::Error>),
+    /// Retains the searched text and expected substring.
+    #[error(transparent)]
+    Substring(#[from] strict_test_support::SubstringFailure<String, String>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_contains;
   use strict_test_support::ensure_ok;
@@ -896,36 +910,50 @@ mod tests {
   }
 
   /// Ensures a native-protocol payload contains the expected field.
-  fn ensure_field(payload: &[u8], name: &str, field_value: &[u8], context: &'static str) -> Result<(), TestFailure> {
+  fn ensure_field(payload: &[u8], name: &str, field_value: &[u8], context: &'static str) -> Result<(), TestError> {
     let mut cursor = 0_usize;
     while cursor < payload.len() {
       let Some(remainder) = payload.get(cursor..) else {
-        return ensure(false, "native field cursor is in bounds");
+        return ensure(false, "native field cursor is in bounds")
+          .map(drop)
+          .map_err(TestError::from);
       };
       let Some(name_offset) = remainder.iter().position(|byte| *byte == b'\n') else {
-        return ensure(false, "native field name terminator is present");
+        return ensure(false, "native field name terminator is present")
+          .map(drop)
+          .map_err(TestError::from);
       };
       let name_end = cursor.saturating_add(name_offset);
       let length_start = name_end.saturating_add(1);
       let length_end = length_start.saturating_add(8);
       let Some(length_bytes) = payload.get(length_start..length_end) else {
-        return ensure(false, "native field length is present");
+        return ensure(false, "native field length is present")
+          .map(drop)
+          .map_err(TestError::from);
       };
       let mut length_buffer = [0_u8; 8];
       for (slot, byte) in length_buffer.iter_mut().zip(length_bytes.iter().copied()) {
         *slot = byte;
       }
       let Ok(value_len) = usize::try_from(u64::from_le_bytes(length_buffer)) else {
-        return ensure(false, "native field length fits in usize");
+        return ensure(false, "native field length fits in usize")
+          .map(drop)
+          .map_err(TestError::from);
       };
       let Some(value_end) = length_end.checked_add(value_len) else {
-        return ensure(false, "native field length does not overflow");
+        return ensure(false, "native field length does not overflow")
+          .map(drop)
+          .map_err(TestError::from);
       };
       let Some(actual_name) = payload.get(cursor..name_end) else {
-        return ensure(false, "native field name is in bounds");
+        return ensure(false, "native field name is in bounds")
+          .map(drop)
+          .map_err(TestError::from);
       };
       let Some(actual_value) = payload.get(length_end..value_end) else {
-        return ensure(false, "native field value is in bounds");
+        return ensure(false, "native field value is in bounds")
+          .map(drop)
+          .map_err(TestError::from);
       };
       if actual_name == name.as_bytes() && actual_value == field_value {
         return Ok(());
@@ -933,24 +961,26 @@ mod tests {
       cursor = value_end.saturating_add(1);
     }
 
-    ensure(false, context)
+    ensure(false, context).map(drop).map_err(TestError::from)
   }
 
   #[test]
-  fn priority_mappings_preserve_journald_priority_bytes() -> Result<(), TestFailure> {
+  fn priority_mappings_preserve_journald_priority_bytes() -> Result<(), TestError> {
     let mappings = PriorityMappings::new();
-    ensure(mappings.error.as_byte() == b'3', "default error priority is journald error")?;
-    ensure(mappings.warn.as_byte() == b'4', "default warn priority is journald warning")?;
-    ensure(mappings.info.as_byte() == b'5', "default info priority is journald notice")?;
-    ensure(mappings.debug.as_byte() == b'6', "default debug priority is journald informational")?;
-    ensure(mappings.trace.as_byte() == b'7', "default trace priority is journald debug")?;
-    ensure(Priority::Emergency.as_byte() == b'0', "emergency priority byte is stable")?;
-    ensure(Priority::Alert.as_byte() == b'1', "alert priority byte is stable")?;
+    ensure(mappings.error.as_byte() == b'3', "default error priority is journald error").map(drop)?;
+    ensure(mappings.warn.as_byte() == b'4', "default warn priority is journald warning").map(drop)?;
+    ensure(mappings.info.as_byte() == b'5', "default info priority is journald notice").map(drop)?;
+    ensure(mappings.debug.as_byte() == b'6', "default debug priority is journald informational").map(drop)?;
+    ensure(mappings.trace.as_byte() == b'7', "default trace priority is journald debug").map(drop)?;
+    ensure(Priority::Emergency.as_byte() == b'0', "emergency priority byte is stable").map(drop)?;
+    ensure(Priority::Alert.as_byte() == b'1', "alert priority byte is stable").map(drop)?;
     ensure(Priority::Critical.as_byte() == b'2', "critical priority byte is stable")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn field_encoding_sanitizes_names_and_preserves_multiline_values() -> Result<(), TestFailure> {
+  fn field_encoding_sanitizes_names_and_preserves_multiline_values() -> Result<(), TestError> {
     let mut payload = Vec::new();
     put_field_length_encoded(&mut payload, "__bad.field-name", |buf| {
       buf.extend_from_slice(b"first\nsecond\0third");
@@ -974,7 +1004,7 @@ mod tests {
   }
 
   #[test]
-  fn metadata_encoding_writes_target_file_and_line_with_optional_prefix() -> Result<(), TestFailure> {
+  fn metadata_encoding_writes_target_file_and_line_with_optional_prefix() -> Result<(), TestError> {
     let mut payload = Vec::new();
     put_metadata(&mut payload, JOURNALD_TEST_CALLSITE.metadata(), Some("SPAN_"));
 
@@ -989,7 +1019,7 @@ mod tests {
   }
 
   #[test]
-  fn wellformed_fields_and_priority_encoding_match_native_protocol() -> Result<(), TestFailure> {
+  fn wellformed_fields_and_priority_encoding_match_native_protocol() -> Result<(), TestError> {
     let mut payload = Vec::new();
     put_field_wellformed(&mut payload, "TARGET", b"journal");
     ensure_field(&payload, "TARGET", b"journal", "well-formed fields use native encoding")?;
@@ -1001,21 +1031,37 @@ mod tests {
 
   #[cfg(unix)]
   #[test]
-  fn layer_configuration_debug_includes_journald_fields() -> Result<(), TestFailure> {
+  fn layer_configuration_debug_includes_journald_fields() -> Result<(), TestError> {
     let layer = test_layer()?
       .with_field_prefix(Some("APP".to_owned()))
       .with_syslog_identifier("journald-test".to_owned())
       .with_custom_fields([("SYSLOG_FACILITY", "17")]);
     let rendered = format!("{layer:?}");
-    ensure_contains(&rendered, "field_prefix", "debug output names field prefix")?;
-    ensure_contains(&rendered, "journald-test", "debug output includes syslog identifier")?;
-    ensure_contains(&rendered, "additional_fields", "debug output includes custom field storage")?;
-    ensure_contains(&rendered, "priority_mappings", "debug output includes priority mappings")
+    ensure_contains((rendered).clone(), String::from("field_prefix"), "debug output names field prefix").map(drop)?;
+    ensure_contains(
+      (rendered).clone(),
+      String::from("journald-test"),
+      "debug output includes syslog identifier",
+    )
+    .map(drop)?;
+    ensure_contains(
+      (rendered).clone(),
+      String::from("additional_fields"),
+      "debug output includes custom field storage",
+    )
+    .map(drop)?;
+    ensure_contains(
+      rendered,
+      String::from("priority_mappings"),
+      "debug output includes priority mappings",
+    )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[cfg(unix)]
   #[test]
-  fn layer_formats_span_records_and_events_before_ignoring_socket_errors() -> Result<(), TestFailure> {
+  fn layer_formats_span_records_and_events_before_ignoring_socket_errors() -> Result<(), TestError> {
     #[derive(Clone, Debug, Default)]
     struct EventCounter {
       events: Arc<Mutex<Vec<String>>>,
@@ -1052,26 +1098,31 @@ mod tests {
       *events == ["journald_contracts".to_owned()],
       "journald layer returns success even when sending to a missing socket fails",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[cfg(unix)]
   #[test]
-  fn namespace_paths_select_system_and_user_journal_locations() -> Result<(), TestFailure> {
+  fn namespace_paths_select_system_and_user_journal_locations() -> Result<(), TestError> {
     ensure(
       JournalNamespace::System.socket_path().as_path() == Path::new(SYSTEM_JOURNALD_PATH),
       "system namespace selects the system journald socket",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       JournalNamespace::User
         .socket_path()
         .ends_with(Path::new("systemd/journal/socket")),
       "user namespace selects a user journald socket suffix",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   /// Builds a journald layer pointed at a deliberately missing socket.
   #[cfg(unix)]
-  fn test_layer() -> Result<Layer, TestFailure> {
+  fn test_layer() -> Result<Layer, TestError> {
     Ok(Layer {
       socket:            ensure_ok(UnixDatagram::unbound(), "test journald datagram socket opens")?,
       socket_path:       PathBuf::from("/tmp/strict-tracing-missing-journald.sock"),

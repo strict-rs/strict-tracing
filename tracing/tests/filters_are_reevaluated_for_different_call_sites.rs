@@ -14,7 +14,18 @@ mod tests {
   use std::sync::atomic::AtomicUsize;
   use std::sync::atomic::Ordering;
 
-  use strict_test_support::TestFailure;
+  use tracing_core::dispatcher;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonUsize(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultDispatcherSetGlobalDefaultError(#[from] strict_test_support::ResultFailure<dispatcher::SetGlobalDefaultError>),
+  }
+
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
   use tracing::Level;
@@ -25,7 +36,7 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn filters_are_reevaluated_for_different_call_sites() -> Result<(), TestFailure> {
+  fn filters_are_reevaluated_for_different_call_sites() -> Result<(), TestError> {
     // Asserts that the `span!` macro caches the result of calling
     // `Subscriber::enabled` for each span.
     let charlie_count = Arc::new(AtomicUsize::new(0));
@@ -68,58 +79,67 @@ mod tests {
 
     // The filter should have seen each span a single time.
     ensure_eq(
-      &charlie_count.load(Ordering::Relaxed),
-      &expected_once,
+      charlie_count.load(Ordering::Relaxed),
+      expected_once,
       "charlie filter runs once after first span",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &dave_count.load(Ordering::Relaxed),
-      &expected_once,
+      dave_count.load(Ordering::Relaxed),
+      expected_once,
       "dave filter runs once after first span",
-    )?;
+    )
+    .map(drop)?;
 
     charlie.in_scope(|| dave.in_scope(|| {}));
 
     // The subscriber should see "dave" again, but the filter should not have
     // been called.
     ensure_eq(
-      &charlie_count.load(Ordering::Relaxed),
-      &expected_once,
+      charlie_count.load(Ordering::Relaxed),
+      expected_once,
       "charlie filter remains cached after nested enter",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &dave_count.load(Ordering::Relaxed),
-      &expected_once,
+      dave_count.load(Ordering::Relaxed),
+      expected_once,
       "dave filter remains cached after nested enter",
-    )?;
+    )
+    .map(drop)?;
 
     // A different span with the same name has a different call site, so it
     // should cause the filter to be reapplied.
     let charlie2 = span!(Level::TRACE, "charlie");
     charlie.in_scope(|| {});
     ensure_eq(
-      &charlie_count.load(Ordering::Relaxed),
-      &expected_twice,
+      charlie_count.load(Ordering::Relaxed),
+      expected_twice,
       "new charlie callsite evaluates filter",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &dave_count.load(Ordering::Relaxed),
-      &expected_once,
+      dave_count.load(Ordering::Relaxed),
+      expected_once,
       "dave filter stays cached before second dave callsite",
-    )?;
+    )
+    .map(drop)?;
 
     // But, the filter should not be re-evaluated for the new "charlie" span
     // when it is re-entered.
     charlie2.in_scope(|| span!(Level::TRACE, "dave").in_scope(|| {}));
     ensure_eq(
-      &charlie_count.load(Ordering::Relaxed),
-      &expected_twice,
+      charlie_count.load(Ordering::Relaxed),
+      expected_twice,
       "second charlie span stays cached",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &dave_count.load(Ordering::Relaxed),
-      &expected_twice,
+      dave_count.load(Ordering::Relaxed),
+      expected_twice,
       "new dave callsite evaluates filter",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

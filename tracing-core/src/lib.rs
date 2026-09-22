@@ -257,13 +257,18 @@ pub mod subscriber;
 pub mod test_util;
 
 /// Parent relationship requested for a new span or event.
-#[derive(Debug)]
-enum Parent {
-  /// The new span will be a root span.
+///
+/// This value preserves the difference between a root, the current context,
+/// and an explicit parent identifier. Subscribers and serialization adapters
+/// can borrow it from [`Event::parent_relationship`] or
+/// [`span::Attributes::parent_relationship`].
+#[derive(Copy, Clone, Debug)]
+pub enum Parent {
+  /// The new span or event starts a root trace.
   Root,
-  /// The new span will be rooted in the current span.
+  /// The new span or event inherits the current span, when one exists.
   Current,
-  /// The new span has an explicitly-specified parent.
+  /// The new span or event has the specified parent identifier.
   Explicit(span::Id),
 }
 

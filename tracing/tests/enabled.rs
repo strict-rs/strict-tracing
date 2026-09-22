@@ -12,7 +12,21 @@ use tracing_mock::subscriber;
 
 #[cfg(test)]
 mod tests {
-  use strict_test_support::TestFailure;
+
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonLevelFilter(#[from] strict_test_support::ComparisonFailure<LevelFilter, LevelFilter>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonBool(#[from] strict_test_support::ComparisonFailure<bool, bool>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
 
@@ -87,17 +101,19 @@ mod tests {
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn static_max_level_matches_active_feature_set() -> Result<(), TestFailure> {
+  fn static_max_level_matches_active_feature_set() -> Result<(), TestError> {
     ensure_eq(
-      &STATIC_MAX_LEVEL,
-      &expected_static_max_level(),
+      STATIC_MAX_LEVEL,
+      expected_static_max_level(),
       "static max level matches active feature set",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn level_and_target() -> Result<(), TestFailure> {
+  fn level_and_target() -> Result<(), TestError> {
     let subscriber = subscriber::mock()
       .with_filter(|meta| {
         if meta.target() == "debug_module" {
@@ -112,24 +128,28 @@ mod tests {
     let _guard = set_default(subscriber);
 
     ensure_eq(
-      &enabled!(target: "debug_module", Level::DEBUG),
-      &STATIC_MAX_LEVEL.enables(Level::DEBUG),
+      enabled!(target: "debug_module", Level::DEBUG),
+      STATIC_MAX_LEVEL.enables(Level::DEBUG),
       "targeted DEBUG enabled status matches static level",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &enabled!(Level::ERROR),
-      &STATIC_MAX_LEVEL.enables(Level::ERROR),
+      enabled!(Level::ERROR),
+      STATIC_MAX_LEVEL.enables(Level::ERROR),
       "ERROR enabled status matches static level",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       !enabled!(Level::DEBUG),
       "untargeted DEBUG remains disabled by the subscriber filter",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
   #[test]
-  fn span_and_event() -> Result<(), TestFailure> {
+  fn span_and_event() -> Result<(), TestError> {
     let subscriber = subscriber::mock()
       .with_filter(|meta| {
         if meta.target() == "debug_module" {
@@ -151,28 +171,34 @@ mod tests {
     ensure(
       !event_enabled!(Level::TRACE),
       "TRACE event remains disabled by the subscriber filter",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &event_enabled!(Level::DEBUG),
-      &STATIC_MAX_LEVEL.enables(Level::DEBUG),
+      event_enabled!(Level::DEBUG),
+      STATIC_MAX_LEVEL.enables(Level::DEBUG),
       "DEBUG event enabled status matches static level",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &span_enabled!(Level::TRACE),
-      &STATIC_MAX_LEVEL.enables(Level::TRACE),
+      span_enabled!(Level::TRACE),
+      STATIC_MAX_LEVEL.enables(Level::TRACE),
       "TRACE span enabled status matches static level",
-    )?;
+    )
+    .map(drop)?;
 
     // Target variants.
     ensure_eq(
-      &span_enabled!(target: "debug_module", Level::DEBUG),
-      &STATIC_MAX_LEVEL.enables(Level::DEBUG),
+      span_enabled!(target: "debug_module", Level::DEBUG),
+      STATIC_MAX_LEVEL.enables(Level::DEBUG),
       "targeted DEBUG span enabled status matches static level",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &event_enabled!(target: "debug_module", Level::DEBUG),
-      &STATIC_MAX_LEVEL.enables(Level::DEBUG),
+      event_enabled!(target: "debug_module", Level::DEBUG),
+      STATIC_MAX_LEVEL.enables(Level::DEBUG),
       "targeted DEBUG event enabled status matches static level",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

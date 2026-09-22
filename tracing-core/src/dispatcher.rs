@@ -978,7 +978,20 @@ mod test {
   #[cfg(feature = "std")]
   use std::sync::atomic::Ordering;
 
-  use strict_test_support::TestFailure;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Retains the native countcomparison failure.
+    #[error(transparent)]
+    CountComparison(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+    /// Retains the native subscriber failure.
+    #[error(transparent)]
+    Subscriber(#[from] strict_test_support::ResultFailure<subscriber::SubscriberError>),
+  }
+
   use strict_test_support::ensure;
   #[cfg(feature = "std")]
   use strict_test_support::ensure_eq;
@@ -998,18 +1011,22 @@ mod test {
   use crate::subscriber::Interest;
 
   #[test]
-  fn dispatch_is() -> Result<(), TestFailure> {
+  fn dispatch_is() -> Result<(), TestError> {
     let dispatcher = Dispatch::new(NoSubscriber::default());
     ensure(dispatcher.is::<NoSubscriber>(), "dispatcher type is NoSubscriber")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn dispatch_downcasts() -> Result<(), TestFailure> {
+  fn dispatch_downcasts() -> Result<(), TestError> {
     let dispatcher = Dispatch::new(NoSubscriber::default());
     ensure(
       dispatcher.downcast_ref::<NoSubscriber>().is_some(),
       "dispatcher downcasts to NoSubscriber",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[cfg(feature = "std")]
@@ -1045,7 +1062,7 @@ mod test {
 
   #[test]
   #[cfg(feature = "std")]
-  fn events_dont_infinite_loop() -> Result<(), TestFailure> {
+  fn events_dont_infinite_loop() -> Result<(), TestError> {
     static EVENTS: AtomicUsize = AtomicUsize::new(0);
 
     // This test ensures that an event triggered within a subscriber
@@ -1086,12 +1103,14 @@ mod test {
     with_default(&Dispatch::new(TestSubscriber), || {
       Event::dispatch(&TEST_META, &TEST_META.fields().value_set(&[]));
     });
-    ensure_eq(&EVENTS.load(Ordering::Relaxed), &1_usize, "event method is called once")
+    ensure_eq(EVENTS.load(Ordering::Relaxed), 1_usize, "event method is called once")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
   #[cfg(feature = "std")]
-  fn spans_dont_infinite_loop() -> Result<(), TestFailure> {
+  fn spans_dont_infinite_loop() -> Result<(), TestError> {
     static NEW_SPANS: AtomicUsize = AtomicUsize::new(0);
 
     // This test ensures that a span created within a subscriber
@@ -1135,17 +1154,21 @@ mod test {
     }
 
     with_default(&Dispatch::new(TestSubscriber), mk_span);
-    ensure_eq(&NEW_SPANS.load(Ordering::Relaxed), &1_usize, "new_span method is called once")
+    ensure_eq(NEW_SPANS.load(Ordering::Relaxed), 1_usize, "new_span method is called once")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn default_no_subscriber() -> Result<(), TestFailure> {
+  fn default_no_subscriber() -> Result<(), TestError> {
     let default_dispatcher = Dispatch::default();
     ensure(default_dispatcher.is::<NoSubscriber>(), "default dispatcher is NoSubscriber")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn weak_dispatch_upgrade_succeeds_while_strong_exists() -> Result<(), TestFailure> {
+  fn weak_dispatch_upgrade_succeeds_while_strong_exists() -> Result<(), TestError> {
     let strong = Dispatch::new(NoSubscriber::default());
     let weak = strong.downgrade();
 
@@ -1153,10 +1176,12 @@ mod test {
       weak.upgrade().is_some(),
       "weak dispatch upgrades while the strong dispatch remains alive",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn weak_dispatch_upgrade_fails_after_strong_is_dropped() -> Result<(), TestFailure> {
+  fn weak_dispatch_upgrade_fails_after_strong_is_dropped() -> Result<(), TestError> {
     let weak = {
       let strong = Dispatch::new(NoSubscriber::default());
       strong.downgrade()
@@ -1166,6 +1191,8 @@ mod test {
       weak.upgrade().is_none(),
       "weak dispatch does not upgrade after the strong dispatch is dropped",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[cfg(feature = "std")]
@@ -1261,7 +1288,7 @@ mod test {
 
   #[cfg(feature = "std")]
   #[test]
-  fn dispatch_forwards_registration_and_span_creation_hooks() -> Result<(), TestFailure> {
+  fn dispatch_forwards_registration_and_span_creation_hooks() -> Result<(), TestError> {
     let calls = Arc::new(DispatchCallCounts::default());
     let dispatch = Dispatch::new(CountingSubscriber {
       calls: Arc::clone(&calls)
@@ -1271,35 +1298,41 @@ mod test {
     let attrs = span::Attributes::new(&TEST_META, &values);
 
     let interest = ensure_ok(dispatch.register_callsite(&TEST_META), "dispatch forwards callsite registration")?;
-    ensure(interest.is_always(), "forwarded callsite registration returns interest")?;
+    ensure(interest.is_always(), "forwarded callsite registration returns interest").map(drop)?;
     ensure(
       dispatch.max_level_hint() == Some(LevelFilter::DEBUG),
       "dispatch forwards max-level hints",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       ensure_ok(dispatch.enabled(&TEST_META), "dispatch forwards enabled checks")?,
       "forwarded enabled check returns true",
-    )?;
+    )
+    .map(drop)?;
     let new_span_id = ensure_ok(dispatch.new_span(&attrs), "dispatch forwards new span")?;
-    ensure(new_span_id == id, "forwarded new span returns subscriber ID")?;
+    ensure(new_span_id == id, "forwarded new span returns subscriber ID").map(drop)?;
 
     ensure_eq(
-      &calls.register_callsite.load(Ordering::Relaxed),
-      &1,
+      calls.register_callsite.load(Ordering::Relaxed),
+      1,
       "callsite registration was forwarded once",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &calls.max_level_hint.load(Ordering::Relaxed),
-      &2,
+      calls.max_level_hint.load(Ordering::Relaxed),
+      2,
       "max-level hint is queried during registration and explicit forwarding",
-    )?;
-    ensure_eq(&calls.enabled.load(Ordering::Relaxed), &1, "enabled was forwarded once")?;
-    ensure_eq(&calls.new_span.load(Ordering::Relaxed), &1, "new span was forwarded once")
+    )
+    .map(drop)?;
+    ensure_eq(calls.enabled.load(Ordering::Relaxed), 1, "enabled was forwarded once").map(drop)?;
+    ensure_eq(calls.new_span.load(Ordering::Relaxed), 1, "new span was forwarded once")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[cfg(feature = "std")]
   #[test]
-  fn dispatch_forwards_record_event_and_lifecycle_hooks() -> Result<(), TestFailure> {
+  fn dispatch_forwards_record_event_and_lifecycle_hooks() -> Result<(), TestError> {
     let calls = Arc::new(DispatchCallCounts::default());
     let dispatch = Dispatch::new(CountingSubscriber {
       calls: Arc::clone(&calls)
@@ -1315,36 +1348,41 @@ mod test {
     ensure_ok(dispatch.enter(id), "dispatch forwards enter")?;
     ensure_ok(dispatch.exit(id), "dispatch forwards exit")?;
     let cloned_id = ensure_ok(dispatch.clone_span(id), "dispatch forwards clone-span")?;
-    ensure(cloned_id == id, "forwarded clone-span returns subscriber ID")?;
+    ensure(cloned_id == id, "forwarded clone-span returns subscriber ID").map(drop)?;
     ensure(
       ensure_ok(dispatch.try_close(id), "dispatch forwards try-close")?,
       "forwarded try-close returns subscriber close result",
-    )?;
+    )
+    .map(drop)?;
     let current = ensure_ok(dispatch.current_span(), "dispatch forwards current-span")?;
-    ensure(current.id().is_none(), "forwarded current-span returns subscriber current state")?;
+    ensure(current.id().is_none(), "forwarded current-span returns subscriber current state").map(drop)?;
 
-    ensure_eq(&calls.record.load(Ordering::Relaxed), &1, "record was forwarded once")?;
+    ensure_eq(calls.record.load(Ordering::Relaxed), 1, "record was forwarded once").map(drop)?;
     ensure_eq(
-      &calls.record_follows_from.load(Ordering::Relaxed),
-      &1,
+      calls.record_follows_from.load(Ordering::Relaxed),
+      1,
       "follows-from was forwarded once",
-    )?;
+    )
+    .map(drop)?;
     ensure_eq(
-      &calls.event_enabled.load(Ordering::Relaxed),
-      &1,
+      calls.event_enabled.load(Ordering::Relaxed),
+      1,
       "event-enabled gate ran for the enabled event",
-    )?;
-    ensure_eq(&calls.event.load(Ordering::Relaxed), &1, "enabled event was forwarded once")?;
-    ensure_eq(&calls.enter.load(Ordering::Relaxed), &1, "enter was forwarded once")?;
-    ensure_eq(&calls.exit.load(Ordering::Relaxed), &1, "exit was forwarded once")?;
-    ensure_eq(&calls.clone_span.load(Ordering::Relaxed), &1, "clone-span was forwarded once")?;
-    ensure_eq(&calls.try_close.load(Ordering::Relaxed), &1, "try-close was forwarded once")?;
-    ensure_eq(&calls.current_span.load(Ordering::Relaxed), &1, "current-span was forwarded once")
+    )
+    .map(drop)?;
+    ensure_eq(calls.event.load(Ordering::Relaxed), 1, "enabled event was forwarded once").map(drop)?;
+    ensure_eq(calls.enter.load(Ordering::Relaxed), 1, "enter was forwarded once").map(drop)?;
+    ensure_eq(calls.exit.load(Ordering::Relaxed), 1, "exit was forwarded once").map(drop)?;
+    ensure_eq(calls.clone_span.load(Ordering::Relaxed), 1, "clone-span was forwarded once").map(drop)?;
+    ensure_eq(calls.try_close.load(Ordering::Relaxed), 1, "try-close was forwarded once").map(drop)?;
+    ensure_eq(calls.current_span.load(Ordering::Relaxed), 1, "current-span was forwarded once")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[cfg(feature = "std")]
   #[test]
-  fn dispatch_event_checks_do_not_forward_disabled_events() -> Result<(), TestFailure> {
+  fn dispatch_event_checks_do_not_forward_disabled_events() -> Result<(), TestError> {
     let calls = Arc::new(DispatchCallCounts::default());
     let dispatch = Dispatch::new(CountingSubscriber {
       calls: Arc::clone(&calls)
@@ -1357,16 +1395,19 @@ mod test {
       "dispatch checks disabled events without forwarding them",
     )?;
     ensure_eq(
-      &calls.event_enabled.load(Ordering::Relaxed),
-      &1,
+      calls.event_enabled.load(Ordering::Relaxed),
+      1,
       "event-enabled gate ran for the disabled event",
-    )?;
-    ensure_eq(&calls.event.load(Ordering::Relaxed), &0, "disabled event was not forwarded")
+    )
+    .map(drop)?;
+    ensure_eq(calls.event.load(Ordering::Relaxed), 0, "disabled event was not forwarded")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[cfg(feature = "std")]
   #[test]
-  fn default_dispatch() -> Result<(), TestFailure> {
+  fn default_dispatch() -> Result<(), TestError> {
     struct TestSubscriber;
     impl Subscriber for TestSubscriber {
       fn enabled(&self, _: &Metadata<'_>) -> SubscriberResult<bool> {
@@ -1402,10 +1443,13 @@ mod test {
     ensure(
       scoped_dispatcher.is::<TestSubscriber>(),
       "default dispatcher follows scoped subscriber",
-    )?;
+    )
+    .map(drop)?;
 
     drop(guard);
     let reset_dispatcher = Dispatch::default();
     ensure(reset_dispatcher.is::<NoSubscriber>(), "default dispatcher resets to NoSubscriber")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

@@ -703,7 +703,32 @@ mod sealed {
 #[cfg(test)]
 mod test {
 
-  use strict_test_support::TestFailure;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionError(#[from] strict_test_support::OptionFailure<io::Error>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    OptionField(#[from] strict_test_support::OptionFailure<Field>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultError(#[from] strict_test_support::ResultFailure<io::Error>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonString(#[from] strict_test_support::ComparisonFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ComparisonLevel(#[from] strict_test_support::ComparisonFailure<Level, Level>),
+    /// Retains the native normalized failure.
+    #[error(transparent)]
+    Normalized(#[from] Box<strict_test_support::OptionFailure<NormalizedMetadata<'static>>>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
@@ -733,7 +758,7 @@ mod test {
     }
   }
 
-  fn test_callsite(level: log::Level) -> Result<(), TestFailure> {
+  fn test_callsite(level: log::Level) -> Result<(), TestError> {
     let record = log::Record::builder()
       .args(format_args!("Error!"))
       .level(level)
@@ -749,37 +774,40 @@ mod test {
     ensure(
       meta.callsite() == cs_meta.callsite(),
       "record metadata callsite matches synthetic metadata",
-    )?;
-    ensure_eq(meta.level(), &level.as_trace(), "metadata level matches log level")
+    )
+    .map(drop)?;
+    ensure_eq(*meta.level(), level.as_trace(), "metadata level matches log level")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn error_callsite_is_correct() -> Result<(), TestFailure> {
+  fn error_callsite_is_correct() -> Result<(), TestError> {
     test_callsite(log::Level::Error)
   }
 
   #[test]
-  fn warn_callsite_is_correct() -> Result<(), TestFailure> {
+  fn warn_callsite_is_correct() -> Result<(), TestError> {
     test_callsite(log::Level::Warn)
   }
 
   #[test]
-  fn info_callsite_is_correct() -> Result<(), TestFailure> {
+  fn info_callsite_is_correct() -> Result<(), TestError> {
     test_callsite(log::Level::Info)
   }
 
   #[test]
-  fn debug_callsite_is_correct() -> Result<(), TestFailure> {
+  fn debug_callsite_is_correct() -> Result<(), TestError> {
     test_callsite(log::Level::Debug)
   }
 
   #[test]
-  fn trace_callsite_is_correct() -> Result<(), TestFailure> {
+  fn trace_callsite_is_correct() -> Result<(), TestError> {
     test_callsite(log::Level::Trace)
   }
 
   #[test]
-  fn levels_convert_between_log_and_tracing_without_reordering() -> Result<(), TestFailure> {
+  fn levels_convert_between_log_and_tracing_without_reordering() -> Result<(), TestError> {
     let levels = [
       (Level::ERROR, log::Level::Error),
       (Level::WARN, log::Level::Warn),
@@ -789,15 +817,15 @@ mod test {
     ];
 
     for (trace_level, log_level) in levels {
-      ensure(trace_level.as_log() == log_level, "tracing level converts to matching log level")?;
-      ensure(log_level.as_trace() == trace_level, "log level converts to matching tracing level")?;
+      ensure(trace_level.as_log() == log_level, "tracing level converts to matching log level").map(drop)?;
+      ensure(log_level.as_trace() == trace_level, "log level converts to matching tracing level").map(drop)?;
     }
 
     Ok(())
   }
 
   #[test]
-  fn level_filters_convert_between_log_and_tracing_without_reordering() -> Result<(), TestFailure> {
+  fn level_filters_convert_between_log_and_tracing_without_reordering() -> Result<(), TestError> {
     let filters = [
       (LevelFilter::OFF, log::LevelFilter::Off),
       (LevelFilter::ERROR, log::LevelFilter::Error),
@@ -811,37 +839,41 @@ mod test {
       ensure(
         trace_filter.as_log() == log_filter,
         "tracing filter converts to matching log filter",
-      )?;
+      )
+      .map(drop)?;
       ensure(
         log_filter.as_trace() == trace_filter,
         "log filter converts to matching tracing filter",
-      )?;
+      )
+      .map(drop)?;
     }
 
     Ok(())
   }
 
   #[test]
-  fn metadata_conversions_preserve_level_target_and_source_location() -> Result<(), TestFailure> {
+  fn metadata_conversions_preserve_level_target_and_source_location() -> Result<(), TestError> {
     let trace_meta = INFO_META.as_log();
-    ensure(trace_meta.level() == log::Level::Info, "tracing metadata converts level")?;
-    ensure(trace_meta.target() == "log", "tracing metadata converts target")?;
+    ensure(trace_meta.level() == log::Level::Info, "tracing metadata converts level").map(drop)?;
+    ensure(trace_meta.target() == "log", "tracing metadata converts target").map(drop)?;
 
     let log_meta = log::Metadata::builder().level(log::Level::Warn).target("log_target").build();
     let converted = log_meta.as_trace();
-    ensure(converted.name() == "log record", "log metadata conversion uses synthetic name")?;
-    ensure(converted.level() == &Level::WARN, "log metadata conversion preserves level")?;
-    ensure(converted.target() == "log_target", "log metadata conversion preserves target")?;
-    ensure(converted.file().is_none(), "metadata conversion has no source file")?;
-    ensure(converted.line().is_none(), "metadata conversion has no source line")?;
+    ensure(converted.name() == "log record", "log metadata conversion uses synthetic name").map(drop)?;
+    ensure(converted.level() == &Level::WARN, "log metadata conversion preserves level").map(drop)?;
+    ensure(converted.target() == "log_target", "log metadata conversion preserves target").map(drop)?;
+    ensure(converted.file().is_none(), "metadata conversion has no source file").map(drop)?;
+    ensure(converted.line().is_none(), "metadata conversion has no source line").map(drop)?;
     ensure(
       converted.fields().field("message").is_some(),
       "metadata conversion exposes message field",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn record_conversion_preserves_source_location_fields() -> Result<(), TestFailure> {
+  fn record_conversion_preserves_source_location_fields() -> Result<(), TestError> {
     let record = log::Record::builder()
       .args(format_args!("record message"))
       .level(log::Level::Debug)
@@ -852,21 +884,24 @@ mod test {
       .build();
 
     let metadata = record.as_trace();
-    ensure(metadata.level() == &Level::DEBUG, "record conversion preserves level")?;
-    ensure(metadata.target() == "record_target", "record conversion preserves target")?;
+    ensure(metadata.level() == &Level::DEBUG, "record conversion preserves level").map(drop)?;
+    ensure(metadata.target() == "record_target", "record conversion preserves target").map(drop)?;
     ensure(
       metadata.module_path() == Some("record_module"),
       "record conversion preserves module path",
-    )?;
-    ensure(metadata.file() == Some("record.rs"), "record conversion preserves file")?;
+    )
+    .map(drop)?;
+    ensure(metadata.file() == Some("record.rs"), "record conversion preserves file").map(drop)?;
     ensure(metadata.line() == Some(37), "record conversion preserves line")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn field_lookup_accepts_every_synthetic_level_and_reports_stored_errors() -> Result<(), TestFailure> {
+  fn field_lookup_accepts_every_synthetic_level_and_reports_stored_errors() -> Result<(), TestError> {
     for level in [Level::TRACE, Level::DEBUG, Level::INFO, Level::WARN, Level::ERROR] {
       let fields = ensure_ok(level_to_fields(level), "lookup tracing field handles")?;
-      ensure(fields.message.name() == "message", "tracing field lookup returns message handle")?;
+      ensure(fields.message.name() == "message", "tracing field lookup returns message handle").map(drop)?;
     }
 
     for level in [
@@ -877,7 +912,7 @@ mod test {
       log::Level::Error,
     ] {
       let fields = ensure_ok(loglevel_to_fields(level), "lookup log field handles")?;
-      ensure(fields.target.name() == "log.target", "log field lookup returns target handle")?;
+      ensure(fields.target.name() == "log.target", "log field lookup returns target handle").map(drop)?;
     }
 
     let error = ensure_some(field_handles(&BAD_FIELD_HANDLES).err(), "stored field lookup error is returned")?;
@@ -885,10 +920,12 @@ mod test {
       error.kind() == io::ErrorKind::InvalidData,
       "stored field lookup error kind is preserved",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn log_visitor_records_only_matching_metadata_fields() -> Result<(), TestFailure> {
+  fn log_visitor_records_only_matching_metadata_fields() -> Result<(), TestError> {
     let fields = ensure_ok(level_to_fields(Level::INFO), "lookup info field handles")?;
     let wrong_field = ensure_some(TRACE_META.fields().field("message"), "lookup unrelated field")?;
     let mut visitor = LogVisitor {
@@ -902,24 +939,26 @@ mod test {
     visitor.record_debug(&wrong_field, &"ignored");
     visitor.record_str(&wrong_field, "ignored");
     visitor.record_u64(&wrong_field, 999);
-    ensure(visitor.target.is_none(), "unrelated string field does not set target")?;
-    ensure(visitor.module_path.is_none(), "unrelated string field does not set module path")?;
-    ensure(visitor.file.is_none(), "unrelated string field does not set file")?;
-    ensure(visitor.line.is_none(), "unrelated integer field does not set line")?;
+    ensure(visitor.target.is_none(), "unrelated string field does not set target").map(drop)?;
+    ensure(visitor.module_path.is_none(), "unrelated string field does not set module path").map(drop)?;
+    ensure(visitor.file.is_none(), "unrelated string field does not set file").map(drop)?;
+    ensure(visitor.line.is_none(), "unrelated integer field does not set line").map(drop)?;
 
     visitor.record_str(&fields.target, "real_target");
     visitor.record_str(&fields.module, "real_module");
     visitor.record_str(&fields.file, "real.rs");
     visitor.record_u64(&fields.line, 42);
 
-    ensure(visitor.target.as_deref() == Some("real_target"), "target field is recorded")?;
-    ensure(visitor.module_path.as_deref() == Some("real_module"), "module field is recorded")?;
-    ensure(visitor.file.as_deref() == Some("real.rs"), "file field is recorded")?;
+    ensure(visitor.target.as_deref() == Some("real_target"), "target field is recorded").map(drop)?;
+    ensure(visitor.module_path.as_deref() == Some("real_module"), "module field is recorded").map(drop)?;
+    ensure(visitor.file.as_deref() == Some("real.rs"), "file field is recorded").map(drop)?;
     ensure(visitor.line == Some(42), "line field is recorded")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn normalized_metadata_accessors_preserve_owned_log_context() -> Result<(), TestFailure> {
+  fn normalized_metadata_accessors_preserve_owned_log_context() -> Result<(), TestError> {
     let metadata = NormalizedMetadata {
       name:        "log event",
       target:      Cow::Owned("real_target".to_owned()),
@@ -931,33 +970,47 @@ mod test {
       kind:        Kind::EVENT,
     };
 
-    ensure_eq(&metadata.name(), &"log event", "normalized metadata exposes name")?;
-    ensure_eq(&metadata.target(), &"real_target", "normalized metadata exposes target")?;
-    ensure(metadata.level() == &Level::WARN, "normalized metadata exposes level")?;
+    ensure_eq(
+      String::from(metadata.name()),
+      String::from("log event"),
+      "normalized metadata exposes name",
+    )
+    .map(drop)?;
+    ensure_eq(
+      String::from(metadata.target()),
+      String::from("real_target"),
+      "normalized metadata exposes target",
+    )
+    .map(drop)?;
+    ensure(metadata.level() == &Level::WARN, "normalized metadata exposes level").map(drop)?;
     ensure(
       metadata.module_path() == Some("real_module"),
       "normalized metadata exposes module path",
-    )?;
-    ensure(metadata.file() == Some("real.rs"), "normalized metadata exposes file")?;
-    ensure(metadata.line() == Some(64), "normalized metadata exposes line")?;
-    ensure(metadata.callsite() == INFO_META.callsite(), "normalized metadata exposes callsite")?;
+    )
+    .map(drop)?;
+    ensure(metadata.file() == Some("real.rs"), "normalized metadata exposes file").map(drop)?;
+    ensure(metadata.line() == Some(64), "normalized metadata exposes line").map(drop)?;
+    ensure(metadata.callsite() == INFO_META.callsite(), "normalized metadata exposes callsite").map(drop)?;
     ensure(
       metadata.fields().field("message").is_some(),
       "normalized metadata exposes message field",
-    )?;
-    ensure(metadata.is_event(), "normalized metadata kind reports event")?;
-    ensure(!metadata.is_span(), "normalized metadata kind does not report span")?;
+    )
+    .map(drop)?;
+    ensure(metadata.is_event(), "normalized metadata kind reports event").map(drop)?;
+    ensure(!metadata.is_span(), "normalized metadata kind does not report span").map(drop)?;
 
     let converted = metadata.as_metadata();
-    ensure(converted.name() == "log event", "as_metadata preserves name")?;
-    ensure(converted.target() == "real_target", "as_metadata preserves target")?;
-    ensure(converted.module_path() == Some("real_module"), "as_metadata preserves module path")?;
-    ensure(converted.file() == Some("real.rs"), "as_metadata preserves file")?;
+    ensure(converted.name() == "log event", "as_metadata preserves name").map(drop)?;
+    ensure(converted.target() == "real_target", "as_metadata preserves target").map(drop)?;
+    ensure(converted.module_path() == Some("real_module"), "as_metadata preserves module path").map(drop)?;
+    ensure(converted.file() == Some("real.rs"), "as_metadata preserves file").map(drop)?;
     ensure(converted.line() == Some(64), "as_metadata preserves line")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn event_normalization_reconstructs_log_metadata_and_rejects_non_log_events() -> Result<(), TestFailure> {
+  fn event_normalization_reconstructs_log_metadata_and_rejects_non_log_events() -> Result<(), TestError> {
     let fields = ensure_ok(level_to_fields(Level::INFO), "lookup info field handles")?;
     let message_args = format_args!("hello");
     let message: &dyn field::Value = &message_args;
@@ -977,16 +1030,40 @@ mod test {
     let values = info_field_set.value_set(&info_values);
     let event = Event::new(&INFO_META, &values);
 
-    ensure(event.is_log(), "synthetic log event is recognized")?;
-    let normalized = ensure_some(event.normalized_metadata(), "synthetic log event normalizes")?;
-    ensure_eq(&normalized.name(), &"log event", "normalized event uses log event name")?;
-    ensure_eq(&normalized.target(), &"real_target", "normalized event uses recorded target")?;
+    ensure(event.is_log(), "synthetic log event is recognized").map(drop)?;
+    let normalized = ensure_some(
+      event.normalized_metadata().map(|metadata| NormalizedMetadata {
+        name:        metadata.name,
+        target:      Cow::Owned(metadata.target.into_owned()),
+        level:       metadata.level,
+        module_path: metadata.module_path.map(|value| Cow::Owned(value.into_owned())),
+        file:        metadata.file.map(|value| Cow::Owned(value.into_owned())),
+        line:        metadata.line,
+        callsite:    metadata.callsite,
+        kind:        metadata.kind,
+      }),
+      "synthetic log event normalizes",
+    )
+    .map_err(Box::new)?;
+    ensure_eq(
+      String::from(normalized.name()),
+      String::from("log event"),
+      "normalized event uses log event name",
+    )
+    .map(drop)?;
+    ensure_eq(
+      String::from(normalized.target()),
+      String::from("real_target"),
+      "normalized event uses recorded target",
+    )
+    .map(drop)?;
     ensure(
       normalized.module_path() == Some("real_module"),
       "normalized event uses recorded module",
-    )?;
-    ensure(normalized.file() == Some("real.rs"), "normalized event uses recorded file")?;
-    ensure(normalized.line() == Some(33), "normalized event uses recorded line")?;
+    )
+    .map(drop)?;
+    ensure(normalized.file() == Some("real.rs"), "normalized event uses recorded file").map(drop)?;
+    ensure(normalized.line() == Some(33), "normalized event uses recorded line").map(drop)?;
 
     let non_log_message: &dyn field::Value = &"not log";
     let non_log_field_set = NON_LOG_METADATA.fields();
@@ -994,7 +1071,9 @@ mod test {
     let non_log_value_pairs = [(&non_log_field, Some(non_log_message))];
     let non_log_values = non_log_field_set.value_set(&non_log_value_pairs);
     let non_log_event = Event::new(&NON_LOG_METADATA, &non_log_values);
-    ensure(!non_log_event.is_log(), "non-log event is not recognized as log")?;
+    ensure(!non_log_event.is_log(), "non-log event is not recognized as log").map(drop)?;
     ensure(non_log_event.normalized_metadata().is_none(), "non-log event does not normalize")
+      .map(drop)
+      .map_err(TestError::from)
   }
 }

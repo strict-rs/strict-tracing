@@ -7,7 +7,18 @@ mod tests {
   use std::sync::Arc;
 
   use parking_lot::Mutex;
-  use strict_test_support::TestFailure;
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use tracing::Level;
@@ -27,7 +38,7 @@ mod tests {
   }
 
   #[test]
-  fn layer_filter_interests_are_cached() -> Result<(), TestFailure> {
+  fn layer_filter_interests_are_cached() -> Result<(), TestError> {
     let seen = Arc::new(Mutex::new(HashMap::new()));
     let seen_filter = Arc::clone(&seen);
     let filter = filter::filter_fn(move |meta| {
@@ -45,7 +56,8 @@ mod tests {
     ensure(
       subscriber.max_level_hint().is_none(),
       "dynamic filter does not provide a max level hint",
-    )?;
+    )
+    .map(drop)?;
 
     let _subscriber = set_default(subscriber);
 
@@ -54,14 +66,14 @@ mod tests {
       let seen_counts = seen.lock();
       seen_counts.values().all(|&count| count == 1)
     };
-    ensure(first_counts_cached, "each callsite is seen once after the first event set")?;
+    ensure(first_counts_cached, "each callsite is seen once after the first event set").map(drop)?;
 
     events();
     let second_counts_cached = {
       let seen_counts = seen.lock();
       seen_counts.values().all(|&count| count == 1)
     };
-    ensure(second_counts_cached, "each callsite is still seen once after the second event set")?;
+    ensure(second_counts_cached, "each callsite is still seen once after the second event set").map(drop)?;
 
     ensure_ok(handle.finished(), "mock expectations should finish")?;
     Ok(())

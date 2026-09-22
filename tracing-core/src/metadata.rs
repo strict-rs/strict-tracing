@@ -1244,7 +1244,47 @@ mod tests {
   use alloc::format;
   use alloc::string::String;
 
-  use strict_test_support::TestFailure;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Retains the native levelparse failure.
+    #[error(transparent)]
+    LevelParse(#[from] strict_test_support::ResultFailure<ParseLevelError>),
+    /// Retains the native filterparse failure.
+    #[error(transparent)]
+    FilterParse(#[from] strict_test_support::ResultFailure<ParseLevelFilterError>),
+    /// Retains the native booleancomparison failure.
+    #[error(transparent)]
+    BooleanComparison(#[from] strict_test_support::ComparisonFailure<bool, bool>),
+    /// Retains the native text failure.
+    #[error(transparent)]
+    Text(#[from] strict_test_support::OptionFailure<&'static str>),
+    /// Retains the native line failure.
+    #[error(transparent)]
+    Line(#[from] strict_test_support::OptionFailure<u32>),
+    /// Retains the native textcomparison failure.
+    #[error(transparent)]
+    TextComparison(#[from] strict_test_support::ComparisonFailure<&'static str, &'static str>),
+    /// Retains the native linecomparison failure.
+    #[error(transparent)]
+    LineComparison(#[from] strict_test_support::ComparisonFailure<u32, u32>),
+    /// Retains the native levelcomparison failure.
+    #[error(transparent)]
+    LevelComparison(#[from] strict_test_support::ComparisonFailure<Level, Level>),
+    /// Retains the native filtercomparison failure.
+    #[error(transparent)]
+    FilterComparison(#[from] strict_test_support::ComparisonFailure<LevelFilter, LevelFilter>),
+    /// Retains the native countcomparison failure.
+    #[error(transparent)]
+    CountComparison(#[from] strict_test_support::ComparisonFailure<usize, usize>),
+    /// Retains the native stringcomparison failure.
+    #[error(transparent)]
+    StringComparison(#[from] strict_test_support::ComparisonFailure<String, String>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_eq;
   use strict_test_support::ensure_ok;
@@ -1276,17 +1316,19 @@ mod tests {
   }
 
   #[test]
-  fn level_from_str() -> Result<(), TestFailure> {
+  fn level_from_str() -> Result<(), TestError> {
     let error_level = ensure_ok("error".parse::<Level>(), "error level parses")?;
     let debug_level = ensure_ok("4".parse::<Level>(), "debug numeric level parses")?;
 
-    ensure_eq(&error_level, &Level::ERROR, "error string maps to ERROR")?;
-    ensure_eq(&debug_level, &Level::DEBUG, "4 maps to DEBUG")?;
+    ensure_eq(error_level, Level::ERROR, "error string maps to ERROR").map(drop)?;
+    ensure_eq(debug_level, Level::DEBUG, "4 maps to DEBUG").map(drop)?;
     ensure("0".parse::<Level>().is_err(), "0 is not a valid Level")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn filter_level_conversion() -> Result<(), TestFailure> {
+  fn filter_level_conversion() -> Result<(), TestError> {
     let mapping = [
       (LevelFilter::OFF, None),
       (LevelFilter::ERROR, Some(Level::ERROR)),
@@ -1296,20 +1338,20 @@ mod tests {
       (LevelFilter::TRACE, Some(Level::TRACE)),
     ];
     for &(filter, level) in &mapping {
-      ensure(filter.into_level() == level, "filter converts into expected level")?;
+      ensure(filter.into_level() == level, "filter converts into expected level").map(drop)?;
       if let Some(mapped_level) = level {
         let actual: LevelFilter = mapped_level.into();
-        ensure_eq(&actual, &filter, "level converts back into filter")?;
+        ensure_eq(actual, filter, "level converts back into filter").map(drop)?;
       } else {
         let actual: LevelFilter = None.into();
-        ensure_eq(&actual, &filter, "None converts into OFF filter")?;
+        ensure_eq(actual, filter, "None converts into OFF filter").map(drop)?;
       }
     }
     Ok(())
   }
 
   #[test]
-  fn level_filter_encoding_round_trips() -> Result<(), TestFailure> {
+  fn level_filter_encoding_round_trips() -> Result<(), TestError> {
     let mapping = [
       (LevelFilter::OFF, LevelFilter::OFF_USIZE),
       (LevelFilter::ERROR, LevelFilter::ERROR_USIZE),
@@ -1319,14 +1361,14 @@ mod tests {
       (LevelFilter::TRACE, LevelFilter::TRACE_USIZE),
     ];
     for &(filter, expected) in &mapping {
-      ensure_eq(&expected, &filter.encode(), "level filter encodes")?;
-      ensure_eq(&filter, &LevelFilter::decode(expected), "level filter decodes")?;
+      ensure_eq(expected, filter.encode(), "level filter encodes").map(drop)?;
+      ensure_eq(filter, LevelFilter::decode(expected), "level filter decodes").map(drop)?;
     }
     Ok(())
   }
 
   #[test]
-  fn enables_matches_partial_ord_comparison() -> Result<(), TestFailure> {
+  fn enables_matches_partial_ord_comparison() -> Result<(), TestError> {
     let level_table = [Level::TRACE, Level::DEBUG, Level::INFO, Level::WARN, Level::ERROR];
     let filter_table = [
       LevelFilter::OFF,
@@ -1339,72 +1381,79 @@ mod tests {
     for &filter in &filter_table {
       for &level in &level_table {
         ensure_eq(
-          &filter.enables(level),
-          &(level <= filter),
+          filter.enables(level),
+          level <= filter,
           "enables agrees with the level <= filter ordering",
-        )?;
+        )
+        .map(drop)?;
       }
     }
     Ok(())
   }
 
   #[test]
-  fn off_filter_enables_no_level() -> Result<(), TestFailure> {
+  fn off_filter_enables_no_level() -> Result<(), TestError> {
     let level_table = [Level::TRACE, Level::DEBUG, Level::INFO, Level::WARN, Level::ERROR];
     for &level in &level_table {
-      ensure(!LevelFilter::OFF.enables(level), "OFF enables no level")?;
+      ensure(!LevelFilter::OFF.enables(level), "OFF enables no level").map(drop)?;
     }
     Ok(())
   }
 
   #[test]
-  fn enables_honors_the_verbosity_cap() -> Result<(), TestFailure> {
-    ensure(LevelFilter::DEBUG.enables(Level::DEBUG), "a filter enables its own level")?;
-    ensure(LevelFilter::DEBUG.enables(Level::ERROR), "a filter enables less verbose levels")?;
+  fn enables_honors_the_verbosity_cap() -> Result<(), TestError> {
+    ensure(LevelFilter::DEBUG.enables(Level::DEBUG), "a filter enables its own level").map(drop)?;
+    ensure(LevelFilter::DEBUG.enables(Level::ERROR), "a filter enables less verbose levels").map(drop)?;
     ensure(
       !LevelFilter::DEBUG.enables(Level::TRACE),
       "levels more verbose than the filter are disabled",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn empty_source_location_has_no_components() -> Result<(), TestFailure> {
+  fn empty_source_location_has_no_components() -> Result<(), TestError> {
     let location = SourceLocation::empty();
-    ensure(location.module_path().is_none(), "empty location has no module path")?;
-    ensure(location.file().is_none(), "empty location has no file")?;
+    ensure(location.module_path().is_none(), "empty location has no module path").map(drop)?;
+    ensure(location.file().is_none(), "empty location has no file").map(drop)?;
     ensure(location.line().is_none(), "empty location has no line")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn source_location_setters_round_trip() -> Result<(), TestFailure> {
+  fn source_location_setters_round_trip() -> Result<(), TestError> {
     let location = SourceLocation::empty()
       .with_module_path(Some("tracing_core::metadata"))
       .with_file(Some("src/metadata.rs"))
       .with_line(Some(7));
     let module_path = ensure_some(location.module_path(), "module path is recorded")?;
-    ensure_eq(&module_path, &"tracing_core::metadata", "module path round-trips")?;
+    ensure_eq(module_path, "tracing_core::metadata", "module path round-trips").map(drop)?;
     let file = ensure_some(location.file(), "file is recorded")?;
-    ensure_eq(&file, &"src/metadata.rs", "file round-trips")?;
+    ensure_eq(file, "src/metadata.rs", "file round-trips").map(drop)?;
     let line = ensure_some(location.line(), "line is recorded")?;
-    ensure_eq(&line, &7_u32, "line round-trips")
+    ensure_eq(line, 7_u32, "line round-trips").map(drop).map_err(TestError::from)
   }
 
   #[test]
-  fn source_location_setters_leave_other_components_untouched() -> Result<(), TestFailure> {
+  fn source_location_setters_leave_other_components_untouched() -> Result<(), TestError> {
     let located_file = SourceLocation::empty().with_file(Some("src/metadata.rs"));
-    ensure(located_file.module_path().is_none(), "with_file leaves the module path unset")?;
-    ensure(located_file.line().is_none(), "with_file leaves the line unset")?;
+    ensure(located_file.module_path().is_none(), "with_file leaves the module path unset").map(drop)?;
+    ensure(located_file.line().is_none(), "with_file leaves the line unset").map(drop)?;
     let recorded_file = ensure_some(located_file.file(), "with_file records the file")?;
-    ensure_eq(&recorded_file, &"src/metadata.rs", "with_file records the given file")?;
+    ensure_eq(recorded_file, "src/metadata.rs", "with_file records the given file").map(drop)?;
 
     let cleared_line = located_file.with_line(Some(7)).with_line(None);
     let kept_file = ensure_some(cleared_line.file(), "with_line(None) keeps the file")?;
-    ensure_eq(&kept_file, &"src/metadata.rs", "with_line(None) keeps the recorded file")?;
+    ensure_eq(kept_file, "src/metadata.rs", "with_line(None) keeps the recorded file").map(drop)?;
     ensure(cleared_line.line().is_none(), "with_line(None) clears the line")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn metadata_new_preserves_flat_accessors() -> Result<(), TestFailure> {
+  fn metadata_new_preserves_flat_accessors() -> Result<(), TestError> {
     let location = SourceLocation::empty()
       .with_module_path(Some("metadata::tests"))
       .with_file(Some("metadata.rs"))
@@ -1412,18 +1461,20 @@ mod tests {
     let fields = FieldSet::new(&["answer"], crate::identify_callsite!(&METADATA_TEST_CALLSITE));
     let metadata = Metadata::new("metadata_new", "metadata_target", Level::WARN, &location, &fields, Kind::SPAN);
 
-    ensure_eq(&metadata.name(), &"metadata_new", "metadata name accessor")?;
-    ensure_eq(&metadata.target(), &"metadata_target", "metadata target accessor")?;
-    ensure_eq(metadata.level(), &Level::WARN, "metadata level accessor")?;
+    ensure_eq(metadata.name(), "metadata_new", "metadata name accessor").map(drop)?;
+    ensure_eq(metadata.target(), "metadata_target", "metadata target accessor").map(drop)?;
+    ensure_eq(*metadata.level(), Level::WARN, "metadata level accessor").map(drop)?;
     let module_path = ensure_some(metadata.module_path(), "metadata module path is present")?;
-    ensure_eq(&module_path, &"metadata::tests", "metadata module path accessor")?;
+    ensure_eq(module_path, "metadata::tests", "metadata module path accessor").map(drop)?;
     let file = ensure_some(metadata.file(), "metadata file is present")?;
-    ensure_eq(&file, &"metadata.rs", "metadata file accessor")?;
+    ensure_eq(file, "metadata.rs", "metadata file accessor").map(drop)?;
     let line = ensure_some(metadata.line(), "metadata line is present")?;
-    ensure_eq(&line, &42_u32, "metadata line accessor")?;
-    ensure_eq(&metadata.fields().len(), &1_usize, "metadata field set accessor")?;
-    ensure(metadata.is_span(), "metadata kind marks spans")?;
+    ensure_eq(line, 42_u32, "metadata line accessor").map(drop)?;
+    ensure_eq(metadata.fields().len(), 1_usize, "metadata field set accessor").map(drop)?;
+    ensure(metadata.is_span(), "metadata kind marks spans").map(drop)?;
     ensure(!metadata.is_event(), "span metadata is not event metadata")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   /// Builds metadata with a caller-selected location and kind.
@@ -1433,7 +1484,7 @@ mod tests {
   }
 
   #[test]
-  fn metadata_debug_formats_each_location_shape() -> Result<(), TestFailure> {
+  fn metadata_debug_formats_each_location_shape() -> Result<(), TestError> {
     let full = metadata_with_location(
       &SourceLocation::empty()
         .with_module_path(Some("debug::module"))
@@ -1446,56 +1497,62 @@ mod tests {
     let no_location = metadata_with_location(&SourceLocation::empty(), Kind::EVENT);
 
     let full_debug = format!("{full:?}");
-    ensure(full_debug.contains("debug_metadata"), "metadata debug includes name")?;
-    ensure(full_debug.contains("debug_target"), "metadata debug includes target")?;
-    ensure(full_debug.contains("debug::module"), "metadata debug includes module path")?;
-    ensure(full_debug.contains("debug.rs:12"), "metadata debug combines file and line")?;
-    ensure(full_debug.contains("answer"), "metadata debug includes fields")?;
-    ensure(full_debug.contains("Kind(EVENT)"), "metadata debug includes kind")?;
+    ensure(full_debug.contains("debug_metadata"), "metadata debug includes name").map(drop)?;
+    ensure(full_debug.contains("debug_target"), "metadata debug includes target").map(drop)?;
+    ensure(full_debug.contains("debug::module"), "metadata debug includes module path").map(drop)?;
+    ensure(full_debug.contains("debug.rs:12"), "metadata debug combines file and line").map(drop)?;
+    ensure(full_debug.contains("answer"), "metadata debug includes fields").map(drop)?;
+    ensure(full_debug.contains("Kind(EVENT)"), "metadata debug includes kind").map(drop)?;
 
     ensure(
       format!("{file_only:?}").contains("file: debug.rs"),
       "metadata debug includes file-only locations",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       format!("{line_only:?}").contains("line: 12"),
       "metadata debug includes line-only locations",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       !format!("{no_location:?}").contains("location"),
       "metadata debug omits absent locations",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn kind_flags_and_debug_output_cover_each_public_kind() -> Result<(), TestFailure> {
+  fn kind_flags_and_debug_output_cover_each_public_kind() -> Result<(), TestError> {
     let event_hint = Kind::EVENT.hint();
     let span_hint = Kind::SPAN.hint();
 
-    ensure(Kind::EVENT.is_event(), "event kind marks events")?;
-    ensure(!Kind::EVENT.is_span(), "event kind does not mark spans")?;
-    ensure(Kind::SPAN.is_span(), "span kind marks spans")?;
-    ensure(!Kind::SPAN.is_event(), "span kind does not mark events")?;
-    ensure(Kind::HINT.is_hint(), "hint kind marks hints")?;
-    ensure(!Kind::HINT.is_event(), "bare hint kind does not mark events")?;
-    ensure(event_hint.is_event(), "event hint preserves event bit")?;
-    ensure(event_hint.is_hint(), "event hint sets hint bit")?;
-    ensure(span_hint.is_span(), "span hint preserves span bit")?;
-    ensure(span_hint.is_hint(), "span hint sets hint bit")?;
+    ensure(Kind::EVENT.is_event(), "event kind marks events").map(drop)?;
+    ensure(!Kind::EVENT.is_span(), "event kind does not mark spans").map(drop)?;
+    ensure(Kind::SPAN.is_span(), "span kind marks spans").map(drop)?;
+    ensure(!Kind::SPAN.is_event(), "span kind does not mark events").map(drop)?;
+    ensure(Kind::HINT.is_hint(), "hint kind marks hints").map(drop)?;
+    ensure(!Kind::HINT.is_event(), "bare hint kind does not mark events").map(drop)?;
+    ensure(event_hint.is_event(), "event hint preserves event bit").map(drop)?;
+    ensure(event_hint.is_hint(), "event hint sets hint bit").map(drop)?;
+    ensure(span_hint.is_span(), "span hint preserves span bit").map(drop)?;
+    ensure(span_hint.is_hint(), "span hint sets hint bit").map(drop)?;
 
-    ensure_eq(&format!("{:?}", Kind::EVENT), &String::from("Kind(EVENT)"), "event kind debug")?;
-    ensure_eq(&format!("{:?}", Kind::SPAN), &String::from("Kind(SPAN)"), "span kind debug")?;
-    ensure_eq(&format!("{event_hint:?}"), &String::from("Kind(EVENT | HINT)"), "event hint debug")?;
-    ensure_eq(&format!("{span_hint:?}"), &String::from("Kind(SPAN | HINT)"), "span hint debug")?;
+    ensure_eq(format!("{:?}", Kind::EVENT), String::from("Kind(EVENT)"), "event kind debug").map(drop)?;
+    ensure_eq(format!("{:?}", Kind::SPAN), String::from("Kind(SPAN)"), "span kind debug").map(drop)?;
+    ensure_eq(format!("{event_hint:?}"), String::from("Kind(EVENT | HINT)"), "event hint debug").map(drop)?;
+    ensure_eq(format!("{span_hint:?}"), String::from("Kind(SPAN | HINT)"), "span hint debug").map(drop)?;
     ensure_eq(
-      &format!("{:?}", Kind(0)),
-      &String::from("Kind(0b0)"),
+      format!("{:?}", Kind(0)),
+      String::from("Kind(0b0)"),
       "empty kind debug falls back to bits",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn levels_parse_display_and_report_errors_stably() -> Result<(), TestFailure> {
+  fn levels_parse_display_and_report_errors_stably() -> Result<(), TestError> {
     let levels = [
       (Level::ERROR, "ERROR", "error", "1"),
       (Level::WARN, "WARN", "warn", "2"),
@@ -1505,38 +1562,46 @@ mod tests {
     ];
 
     for &(level, display, name, number) in &levels {
-      ensure_eq(&level.as_str(), &display, "level as_str matches display")?;
-      ensure_eq(&format!("{level}"), &String::from(display), "level Display output")?;
+      ensure_eq(level.as_str(), display, "level as_str matches display").map(drop)?;
+      ensure_eq(format!("{level}"), String::from(display), "level Display output").map(drop)?;
       ensure_eq(
-        &ensure_ok(name.parse::<Level>(), "lowercase level parses")?,
-        &level,
+        ensure_ok(name.parse::<Level>(), "lowercase level parses")?,
+        level,
         "name parses to level",
-      )?;
+      )
+      .map(drop)?;
       ensure_eq(
-        &ensure_ok(display.parse::<Level>(), "uppercase level parses")?,
-        &level,
+        ensure_ok(display.parse::<Level>(), "uppercase level parses")?,
+        level,
         "uppercase name parses to level",
-      )?;
+      )
+      .map(drop)?;
       ensure_eq(
-        &ensure_ok(number.parse::<Level>(), "numeric level parses")?,
-        &level,
+        ensure_ok(number.parse::<Level>(), "numeric level parses")?,
+        level,
         "number parses to level",
-      )?;
+      )
+      .map(drop)?;
     }
 
     let Err(invalid_level) = "verbose".parse::<Level>() else {
-      return ensure(false, "invalid level strings are rejected");
+      return ensure(false, "invalid level strings are rejected")
+        .map(drop)
+        .map_err(TestError::from);
     };
     ensure_eq(
-      &format!("{invalid_level}"),
-      &String::from("error parsing level: expected one of \"error\", \"warn\", \"info\", \"debug\", \"trace\", or a number 1-5"),
+      format!("{invalid_level}"),
+      String::from("error parsing level: expected one of \"error\", \"warn\", \"info\", \"debug\", \"trace\", or a number 1-5"),
       "level parse error display",
-    )?;
+    )
+    .map(drop)?;
     ensure("6".parse::<Level>().is_err(), "out-of-range numeric levels are rejected")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn level_filters_parse_display_debug_and_report_errors_stably() -> Result<(), TestFailure> {
+  fn level_filters_parse_display_debug_and_report_errors_stably() -> Result<(), TestError> {
     let filters = [
       (LevelFilter::OFF, "off", "LevelFilter::OFF", "0"),
       (LevelFilter::ERROR, "error", "LevelFilter::ERROR", "1"),
@@ -1547,84 +1612,101 @@ mod tests {
     ];
 
     for &(filter, display, debug, number) in &filters {
-      ensure_eq(&format!("{filter}"), &String::from(display), "filter Display output")?;
-      ensure_eq(&format!("{filter:?}"), &String::from(debug), "filter Debug output")?;
+      ensure_eq(format!("{filter}"), String::from(display), "filter Display output").map(drop)?;
+      ensure_eq(format!("{filter:?}"), String::from(debug), "filter Debug output").map(drop)?;
       ensure_eq(
-        &ensure_ok(display.parse::<LevelFilter>(), "filter name parses")?,
-        &filter,
+        ensure_ok(display.parse::<LevelFilter>(), "filter name parses")?,
+        filter,
         "display name parses to filter",
-      )?;
+      )
+      .map(drop)?;
       ensure_eq(
-        &ensure_ok(number.parse::<LevelFilter>(), "numeric filter parses")?,
-        &filter,
+        ensure_ok(number.parse::<LevelFilter>(), "numeric filter parses")?,
+        filter,
         "number parses to filter",
-      )?;
+      )
+      .map(drop)?;
     }
 
     ensure_eq(
-      &ensure_ok("".parse::<LevelFilter>(), "empty filter parses")?,
-      &LevelFilter::ERROR,
+      ensure_ok("".parse::<LevelFilter>(), "empty filter parses")?,
+      LevelFilter::ERROR,
       "empty filter string maps to ERROR",
-    )?;
+    )
+    .map(drop)?;
     let Err(invalid_filter) = "verbose".parse::<LevelFilter>() else {
-      return ensure(false, "invalid filter strings are rejected");
+      return ensure(false, "invalid filter strings are rejected")
+        .map(drop)
+        .map_err(TestError::from);
     };
     ensure_eq(
-      &format!("{invalid_filter}"),
-      &String::from(
+      format!("{invalid_filter}"),
+      String::from(
         "error parsing level filter: expected one of \"off\", \"error\", \"warn\", \"info\", \"debug\", \"trace\", or a number 0-5",
       ),
       "filter parse error display",
-    )?;
+    )
+    .map(drop)?;
     ensure("6".parse::<LevelFilter>().is_err(), "out-of-range numeric filters are rejected")
+      .map(drop)
+      .map_err(TestError::from)
   }
 
   #[test]
-  fn level_and_filter_ordering_preserves_verbosity_semantics() -> Result<(), TestFailure> {
-    ensure(Level::TRACE > Level::DEBUG, "TRACE is more verbose than DEBUG")?;
-    ensure(Level::ERROR < Level::WARN, "ERROR is less verbose than WARN")?;
-    ensure(Level::INFO <= Level::INFO, "levels compare equal to themselves")?;
+  fn level_and_filter_ordering_preserves_verbosity_semantics() -> Result<(), TestError> {
+    ensure(Level::TRACE > Level::DEBUG, "TRACE is more verbose than DEBUG").map(drop)?;
+    ensure(Level::ERROR < Level::WARN, "ERROR is less verbose than WARN").map(drop)?;
+    ensure(Level::INFO <= Level::INFO, "levels compare equal to themselves").map(drop)?;
     ensure(
       Level::TRACE.cmp(&Level::DEBUG) == cmp::Ordering::Greater,
       "level Ord uses verbosity",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       Level::WARN.partial_cmp(&Level::ERROR) == Some(cmp::Ordering::Greater),
       "level PartialOrd uses verbosity",
-    )?;
+    )
+    .map(drop)?;
 
-    ensure(Level::INFO <= LevelFilter::INFO, "level compares equal to matching filter")?;
-    ensure(Level::TRACE > LevelFilter::DEBUG, "level is greater than less-verbose filter")?;
-    ensure(Level::ERROR < LevelFilter::WARN, "level is less than more-verbose filter")?;
+    ensure(Level::INFO <= LevelFilter::INFO, "level compares equal to matching filter").map(drop)?;
+    ensure(Level::TRACE > LevelFilter::DEBUG, "level is greater than less-verbose filter").map(drop)?;
+    ensure(Level::ERROR < LevelFilter::WARN, "level is less than more-verbose filter").map(drop)?;
     ensure(
       Level::DEBUG.partial_cmp(&LevelFilter::INFO) == Some(cmp::Ordering::Greater),
       "level-to-filter PartialOrd uses verbosity",
-    )?;
+    )
+    .map(drop)?;
 
     ensure(
       LevelFilter::TRACE > LevelFilter::DEBUG,
       "TRACE filter is more verbose than DEBUG filter",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       LevelFilter::ERROR < LevelFilter::WARN,
       "ERROR filter is less verbose than WARN filter",
-    )?;
-    ensure(LevelFilter::OFF < LevelFilter::TRACE, "OFF is less verbose than concrete filters")?;
+    )
+    .map(drop)?;
+    ensure(LevelFilter::OFF < LevelFilter::TRACE, "OFF is less verbose than concrete filters").map(drop)?;
     ensure(
       LevelFilter::WARN.cmp(&LevelFilter::ERROR) == cmp::Ordering::Greater,
       "filter Ord uses verbosity",
-    )?;
+    )
+    .map(drop)?;
     ensure(
       LevelFilter::DEBUG.partial_cmp(&LevelFilter::INFO) == Some(cmp::Ordering::Greater),
       "filter PartialOrd uses verbosity",
-    )?;
+    )
+    .map(drop)?;
 
-    ensure(LevelFilter::INFO >= Level::INFO, "filter compares equal to matching level")?;
-    ensure(LevelFilter::TRACE > Level::DEBUG, "filter is greater than less-verbose level")?;
-    ensure(LevelFilter::ERROR < Level::WARN, "filter is less than more-verbose level")?;
+    ensure(LevelFilter::INFO >= Level::INFO, "filter compares equal to matching level").map(drop)?;
+    ensure(LevelFilter::TRACE > Level::DEBUG, "filter is greater than less-verbose level").map(drop)?;
+    ensure(LevelFilter::ERROR < Level::WARN, "filter is less than more-verbose level").map(drop)?;
     ensure(
       LevelFilter::DEBUG.partial_cmp(&Level::INFO) == Some(cmp::Ordering::Greater),
       "filter-to-level PartialOrd uses verbosity",
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 }

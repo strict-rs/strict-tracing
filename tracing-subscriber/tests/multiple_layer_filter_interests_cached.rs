@@ -7,7 +7,18 @@ mod tests {
   use std::sync::Arc;
 
   use parking_lot::Mutex;
-  use strict_test_support::TestFailure;
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
+
   use strict_test_support::ensure;
   use strict_test_support::ensure_ok;
   use tracing::Level;
@@ -35,7 +46,7 @@ mod tests {
     drop(seen_levels);
   }
 
-  fn ensure_cached_counts(seen: &SeenLevels, context: &'static str) -> Result<(), TestFailure> {
+  fn ensure_cached_counts(seen: &SeenLevels, context: &'static str) -> Result<(), TestError> {
     let seen_levels = seen.lock();
     ensure(
       seen_levels
@@ -44,10 +55,12 @@ mod tests {
         .all(|entry| *entry.1 == 1),
       context,
     )
+    .map(drop)
+    .map_err(TestError::from)
   }
 
   #[test]
-  fn multiple_layer_filter_interests_are_cached() -> Result<(), TestFailure> {
+  fn multiple_layer_filter_interests_are_cached() -> Result<(), TestError> {
     let seen_info = Arc::new(Mutex::new(BTreeMap::new()));
     let seen_info_filter = Arc::clone(&seen_info);
     let info_filter = filter::filter_fn(move |meta| {
@@ -86,7 +99,8 @@ mod tests {
     ensure(
       subscriber.max_level_hint().is_none(),
       "combined dynamic filters do not provide a max level hint",
-    )?;
+    )
+    .map(drop)?;
 
     let _subscriber = set_default(subscriber);
 

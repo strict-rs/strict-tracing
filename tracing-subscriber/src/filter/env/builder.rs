@@ -1,13 +1,21 @@
-use super::{
-    directive::{self, Directive},
-    EnvFilter, FromEnvError,
-};
-use crate::{filter::ParseError, RwLock};
-use alloc::{format, string::String, vec::Vec};
+use alloc::format;
+use alloc::string::String;
+use alloc::vec::Vec;
 use core::fmt;
-use std::{collections::HashMap, env, io, iter};
+use std::collections::HashMap;
+use std::env;
+use std::io;
+use std::iter;
+
 use thread_local::ThreadLocal;
 use tracing::level_filters::STATIC_MAX_LEVEL;
+
+use super::EnvFilter;
+use super::FromEnvError;
+use super::directive::Directive;
+use super::directive;
+use crate::RwLock;
+use crate::filter::ParseError;
 
 /// A [builder] for constructing new [`EnvFilter`]s.
 ///
@@ -15,544 +23,552 @@ use tracing::level_filters::STATIC_MAX_LEVEL;
 #[derive(Debug, Clone)]
 #[must_use]
 pub struct Builder {
-    /// Whether value matchers parse non-literal values as regular expressions.
-    regex: bool,
-    /// The environment variable read by environment parsing methods.
-    env: Option<String>,
-    /// The directive used when parsing yields no directives.
-    default_directive: Option<Directive>,
+  /// Whether value matchers parse non-literal values as regular expressions.
+  regex:             bool,
+  /// The environment variable read by environment parsing methods.
+  env:               Option<String>,
+  /// The directive used when parsing yields no directives.
+  default_directive: Option<Directive>,
 }
 
 impl Builder {
-    /// Sets whether span field values can be matched with regular expressions.
-    ///
-    /// If this is `true`, field filter directives will be interpreted as
-    /// regular expressions if they are not able to be interpreted as a `bool`,
-    /// `i64`, `u64`, or `f64` literal. If this is `false,` those field values
-    /// will be interpreted as literal [`std::fmt::Debug`] output instead.
-    ///
-    /// By default, regular expressions are enabled.
-    ///
-    /// **Note**: when [`EnvFilter`]s are constructed from untrusted inputs,
-    /// disabling regular expressions is strongly encouraged.
-    pub fn with_regex(self, regex: bool) -> Self {
-        Self { regex, ..self }
+  /// Sets whether span field values can be matched with regular expressions.
+  ///
+  /// If this is `true`, field filter directives will be interpreted as
+  /// regular expressions if they are not able to be interpreted as a `bool`,
+  /// `i64`, `u64`, or `f64` literal. If this is `false,` those field values
+  /// will be interpreted as literal [`std::fmt::Debug`] output instead.
+  ///
+  /// By default, regular expressions are enabled.
+  ///
+  /// **Note**: when [`EnvFilter`]s are constructed from untrusted inputs,
+  /// disabling regular expressions is strongly encouraged.
+  pub fn with_regex(self, regex: bool) -> Self {
+    Self {
+      regex,
+      ..self
     }
+  }
 
-    /// Sets a default [filtering directive] that will be added to the filter if
-    /// the parsed string or environment variable contains no filter directives.
-    ///
-    /// By default, there is no default directive.
-    ///
-    /// # Examples
-    ///
-    /// If [`parse`], [`parse_lossy`], [`parse_env`], or [`parse_env_lossy`] are
-    /// called with an empty string or environment variable, the default
-    /// directive is used instead:
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// use tracing_subscriber::filter::{EnvFilter, LevelFilter};
-    ///
-    /// let filter = EnvFilter::builder()
-    ///     .with_default_directive(LevelFilter::INFO.into())
-    ///     .parse("")?;
-    ///
-    /// if format!("{}", filter) != "info" {
-    ///     return Err("default directive should be used for an empty filter".into());
-    /// }
-    /// # Ok(()) }
-    /// ```
-    ///
-    /// Note that the `lossy` variants ([`parse_lossy`] and [`parse_env_lossy`])
-    /// will ignore any invalid directives. If all directives in a filter
-    /// string or environment variable are invalid, those methods will also use
-    /// the default directive:
-    ///
-    /// ```rust
-    /// use tracing_subscriber::filter::{EnvFilter, LevelFilter};
-    ///
-    /// let filter = EnvFilter::builder()
-    ///     .with_default_directive(LevelFilter::INFO.into())
-    ///     .parse_lossy("some_target=fake level,foo::bar=lolwut");
-    ///
-    /// if format!("{}", filter) != "info" {
-    ///     return Err("lossy parsing should fall back to the default directive".into());
-    /// }
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    ///
-    ///
-    /// If the string or environment variable contains valid filtering
-    /// directives, the default directive is not used:
-    ///
-    /// ```rust
-    /// use tracing_subscriber::filter::{EnvFilter, LevelFilter};
-    ///
-    /// let filter = EnvFilter::builder()
-    ///     .with_default_directive(LevelFilter::INFO.into())
-    ///     .parse_lossy("foo=trace");
-    ///
-    /// // The default directive is *not* used:
-    /// if format!("{}", filter) != "foo=trace" {
-    ///     return Err("valid directives should replace the default directive".into());
-    /// }
-    /// # Ok::<(), Box<dyn std::error::Error>>(())
-    /// ```
-    ///
-    /// Parsing a more complex default directive from a string:
-    ///
-    /// ```rust
-    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-    /// use tracing_subscriber::filter::{EnvFilter, LevelFilter};
-    ///
-    /// let default = "myapp=debug".parse()?;
-    ///
-    /// let filter = EnvFilter::builder()
-    ///     .with_default_directive(default)
-    ///     .parse("")?;
-    ///
-    /// if format!("{}", filter) != "myapp=debug" {
-    ///     return Err("parsed default directive should be preserved".into());
-    /// }
-    /// # Ok(()) }
-    /// ```
-    ///
-    /// [`parse_lossy`]: Self::parse_lossy
-    /// [`parse_env_lossy`]: Self::parse_env_lossy
-    /// [`parse`]: Self::parse
-    /// [`parse_env`]: Self::parse_env
-    pub fn with_default_directive(self, default_directive: Directive) -> Self {
-        Self {
-            default_directive: Some(default_directive),
-            ..self
+  /// Sets a default [filtering directive] that will be added to the filter if
+  /// the parsed string or environment variable contains no filter directives.
+  ///
+  /// By default, there is no default directive.
+  ///
+  /// # Examples
+  ///
+  /// If [`parse`], [`parse_lossy`], [`parse_env`], or [`parse_env_lossy`] are
+  /// called with an empty string or environment variable, the default
+  /// directive is used instead:
+  ///
+  /// ```rust
+  /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+  /// use tracing_subscriber::filter::EnvFilter;
+  /// use tracing_subscriber::filter::LevelFilter;
+  ///
+  /// let filter = EnvFilter::builder()
+  ///   .with_default_directive(LevelFilter::INFO.into())
+  ///   .parse("")?;
+  ///
+  /// if format!("{}", filter) != "info" {
+  ///   return Err("default directive should be used for an empty filter".into());
+  /// }
+  /// # Ok(()) }
+  /// ```
+  ///
+  /// Note that the `lossy` variants ([`parse_lossy`] and [`parse_env_lossy`])
+  /// will ignore any invalid directives. If all directives in a filter
+  /// string or environment variable are invalid, those methods will also use
+  /// the default directive:
+  ///
+  /// ```rust
+  /// use tracing_subscriber::filter::EnvFilter;
+  /// use tracing_subscriber::filter::LevelFilter;
+  ///
+  /// let filter = EnvFilter::builder()
+  ///   .with_default_directive(LevelFilter::INFO.into())
+  ///   .parse_lossy("some_target=fake level,foo::bar=lolwut");
+  ///
+  /// if format!("{}", filter) != "info" {
+  ///   return Err("lossy parsing should fall back to the default directive".into());
+  /// }
+  /// # Ok::<(), Box<dyn std::error::Error>>(())
+  /// ```
+  ///
+  ///
+  /// If the string or environment variable contains valid filtering
+  /// directives, the default directive is not used:
+  ///
+  /// ```rust
+  /// use tracing_subscriber::filter::EnvFilter;
+  /// use tracing_subscriber::filter::LevelFilter;
+  ///
+  /// let filter = EnvFilter::builder()
+  ///   .with_default_directive(LevelFilter::INFO.into())
+  ///   .parse_lossy("foo=trace");
+  ///
+  /// // The default directive is *not* used:
+  /// if format!("{}", filter) != "foo=trace" {
+  ///   return Err("valid directives should replace the default directive".into());
+  /// }
+  /// # Ok::<(), Box<dyn std::error::Error>>(())
+  /// ```
+  ///
+  /// Parsing a more complex default directive from a string:
+  ///
+  /// ```rust
+  /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+  /// use tracing_subscriber::filter::EnvFilter;
+  /// use tracing_subscriber::filter::LevelFilter;
+  ///
+  /// let default = "myapp=debug".parse()?;
+  ///
+  /// let filter = EnvFilter::builder().with_default_directive(default).parse("")?;
+  ///
+  /// if format!("{}", filter) != "myapp=debug" {
+  ///   return Err("parsed default directive should be preserved".into());
+  /// }
+  /// # Ok(()) }
+  /// ```
+  ///
+  /// [`parse_lossy`]: Self::parse_lossy
+  /// [`parse_env_lossy`]: Self::parse_env_lossy
+  /// [`parse`]: Self::parse
+  /// [`parse_env`]: Self::parse_env
+  pub fn with_default_directive(self, default_directive: Directive) -> Self {
+    Self {
+      default_directive: Some(default_directive),
+      ..self
+    }
+  }
+
+  /// Sets the name of the environment variable used by the [`parse_env`],
+  /// [`parse_env_lossy`], and [`try_parse_env`] methods.
+  ///
+  /// By default, this is the value of [`EnvFilter::DEFAULT_ENV`]
+  /// (`RUST_LOG`).
+  ///
+  /// [`parse_env`]: Self::parse_env
+  /// [`parse_env_lossy`]: Self::parse_env_lossy
+  /// [`try_parse_env`]: Self::try_parse_env
+  pub fn with_env_var(self, var: impl Into<String>) -> Self {
+    Self {
+      env: Some(var.into()),
+      ..self
+    }
+  }
+
+  /// Returns a new [`EnvFilter`] from the directives in the given string,
+  /// *ignoring* any that are invalid.
+  ///
+  /// If `parse_lossy` is called with an empty string, then the
+  /// [default directive] is used instead.
+  ///
+  /// [default directive]: Self::with_default_directive
+  pub fn parse_lossy<Directives: AsRef<str>>(&self, directives: Directives) -> EnvFilter {
+    let parsed_directives = directive::split_directives(directives.as_ref())
+      .filter(|directive| !directive.is_empty())
+      .filter_map(|directive| match Directive::parse(directive, self.regex) {
+        Ok(parsed) => Some(parsed),
+        Err(err) => {
+          write_stderr_line(format_args!("ignoring `{directive}`: {err}"));
+          None
         }
+      });
+    self.build_from_directives(parsed_directives)
+  }
+
+  /// Returns a new [`EnvFilter`] from the directives in the given string,
+  /// or an error if any are invalid.
+  ///
+  /// If `parse` is called with an empty string, then the [default directive]
+  /// is used instead.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if any non-empty directive cannot be parsed.
+  ///
+  /// [default directive]: Self::with_default_directive
+  pub fn parse<Directives: AsRef<str>>(&self, directives: Directives) -> Result<EnvFilter, ParseError> {
+    let directive_spec = directives.as_ref();
+    if directive_spec.is_empty() {
+      return Ok(self.build_from_directives(iter::empty()));
+    }
+    let parsed_directives = directive::split_directives(directive_spec)
+      .filter(|directive| !directive.is_empty())
+      .map(|directive| Directive::parse(directive, self.regex))
+      .collect::<Result<Vec<_>, _>>()?;
+    Ok(self.build_from_directives(parsed_directives))
+  }
+
+  /// Returns a new [`EnvFilter`] from the directives in the configured
+  /// environment variable, ignoring any directives that are invalid.
+  ///
+  /// If the environment variable is empty, then the [default directive]
+  /// is used instead.
+  ///
+  /// [default directive]: Self::with_default_directive
+  #[must_use]
+  pub fn parse_env_lossy(&self) -> EnvFilter {
+    let var = env::var(self.env_var_name()).unwrap_or_default();
+    self.parse_lossy(var)
+  }
+
+  /// Returns a new [`EnvFilter`] from the directives in the configured
+  /// environment variable. If the environment variable is unset, no directive is added.
+  ///
+  /// An error is returned if the environment contains invalid directives.
+  ///
+  /// If the environment variable is empty, then the [default directive]
+  /// is used instead.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the configured environment variable contains any
+  /// invalid directives.
+  ///
+  /// [default directive]: Self::with_default_directive
+  pub fn parse_env(&self) -> Result<EnvFilter, FromEnvError> {
+    let var = env::var(self.env_var_name()).unwrap_or_default();
+    self.parse(var).map_err(Into::into)
+  }
+
+  /// Returns a new [`EnvFilter`] from the directives in the configured
+  /// environment variable, or an error if the environment variable is not set
+  /// or contains invalid directives.
+  ///
+  /// If the environment variable is empty, then the [default directive]
+  /// is used instead.
+  ///
+  /// # Errors
+  ///
+  /// Returns an error if the configured environment variable is unset or
+  /// contains any invalid directives.
+  ///
+  /// [default directive]: Self::with_default_directive
+  pub fn try_parse_env(&self) -> Result<EnvFilter, FromEnvError> {
+    let var = env::var(self.env_var_name())?;
+    self.parse(var).map_err(Into::into)
+  }
+
+  /// Builds an `EnvFilter` from parsed directives.
+  pub(super) fn build_from_directives(&self, directives: impl IntoIterator<Item = Directive>) -> EnvFilter {
+    let mut parsed_directives: Vec<_> = directives.into_iter().collect();
+    let mut disabled = Vec::new();
+    for directive in &mut parsed_directives {
+      if directive.level > STATIC_MAX_LEVEL {
+        disabled.push(directive.clone());
+      }
+      if !self.regex {
+        directive.deregexify();
+      }
     }
 
-    /// Sets the name of the environment variable used by the [`parse_env`],
-    /// [`parse_env_lossy`], and [`try_parse_env`] methods.
-    ///
-    /// By default, this is the value of [`EnvFilter::DEFAULT_ENV`]
-    /// (`RUST_LOG`).
-    ///
-    /// [`parse_env`]: Self::parse_env
-    /// [`parse_env_lossy`]: Self::parse_env_lossy
-    /// [`try_parse_env`]: Self::try_parse_env
-    pub fn with_env_var(self, var: impl Into<String>) -> Self {
-        Self {
-            env: Some(var.into()),
-            ..self
-        }
+    if !disabled.is_empty() {
+      emit_static_max_level_warnings(disabled);
     }
 
-    /// Returns a new [`EnvFilter`] from the directives in the given string,
-    /// *ignoring* any that are invalid.
-    ///
-    /// If `parse_lossy` is called with an empty string, then the
-    /// [default directive] is used instead.
-    ///
-    /// [default directive]: Self::with_default_directive
-    pub fn parse_lossy<Directives: AsRef<str>>(&self, directives: Directives) -> EnvFilter {
-        let parsed_directives = directive::split_directives(directives.as_ref())
-            .filter(|directive| !directive.is_empty())
-            .filter_map(|directive| match Directive::parse(directive, self.regex) {
-                Ok(parsed) => Some(parsed),
-                Err(err) => {
-                    write_stderr_line(format_args!("ignoring `{directive}`: {err}"));
-                    None
-                }
-            });
-        self.build_from_directives(parsed_directives)
+    let (dynamics, statics) = Directive::make_tables(parsed_directives);
+    let has_dynamics = !dynamics.is_empty();
+
+    let mut filter = EnvFilter {
+      statics,
+      dynamics,
+      has_dynamics,
+      by_id: RwLock::new(HashMap::default()),
+      by_cs: RwLock::new(HashMap::default()),
+      scope: ThreadLocal::new(),
+      regex: self.regex,
+    };
+
+    if !has_dynamics
+      && filter.statics.is_empty()
+      && let Some(default) = self.default_directive.as_ref()
+    {
+      filter = filter.add_directive(default.clone());
     }
 
-    /// Returns a new [`EnvFilter`] from the directives in the given string,
-    /// or an error if any are invalid.
-    ///
-    /// If `parse` is called with an empty string, then the [default directive]
-    /// is used instead.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if any non-empty directive cannot be parsed.
-    ///
-    /// [default directive]: Self::with_default_directive
-    pub fn parse<Directives: AsRef<str>>(
-        &self,
-        directives: Directives,
-    ) -> Result<EnvFilter, ParseError> {
-        let directive_spec = directives.as_ref();
-        if directive_spec.is_empty() {
-            return Ok(self.build_from_directives(iter::empty()));
-        }
-        let parsed_directives = directive::split_directives(directive_spec)
-            .filter(|directive| !directive.is_empty())
-            .map(|directive| Directive::parse(directive, self.regex))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(self.build_from_directives(parsed_directives))
-    }
+    filter
+  }
 
-    /// Returns a new [`EnvFilter`] from the directives in the configured
-    /// environment variable, ignoring any directives that are invalid.
-    ///
-    /// If the environment variable is empty, then the [default directive]
-    /// is used instead.
-    ///
-    /// [default directive]: Self::with_default_directive
-    #[must_use]
-    pub fn parse_env_lossy(&self) -> EnvFilter {
-        let var = env::var(self.env_var_name()).unwrap_or_default();
-        self.parse_lossy(var)
-    }
-
-    /// Returns a new [`EnvFilter`] from the directives in the configured
-    /// environment variable. If the environment variable is unset, no directive is added.
-    ///
-    /// An error is returned if the environment contains invalid directives.
-    ///
-    /// If the environment variable is empty, then the [default directive]
-    /// is used instead.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the configured environment variable contains any
-    /// invalid directives.
-    ///
-    /// [default directive]: Self::with_default_directive
-    pub fn parse_env(&self) -> Result<EnvFilter, FromEnvError> {
-        let var = env::var(self.env_var_name()).unwrap_or_default();
-        self.parse(var).map_err(Into::into)
-    }
-
-    /// Returns a new [`EnvFilter`] from the directives in the configured
-    /// environment variable, or an error if the environment variable is not set
-    /// or contains invalid directives.
-    ///
-    /// If the environment variable is empty, then the [default directive]
-    /// is used instead.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if the configured environment variable is unset or
-    /// contains any invalid directives.
-    ///
-    /// [default directive]: Self::with_default_directive
-    pub fn try_parse_env(&self) -> Result<EnvFilter, FromEnvError> {
-        let var = env::var(self.env_var_name())?;
-        self.parse(var).map_err(Into::into)
-    }
-
-    /// Builds an `EnvFilter` from parsed directives.
-    pub(super) fn build_from_directives(
-        &self,
-        directives: impl IntoIterator<Item = Directive>,
-    ) -> EnvFilter {
-        let mut parsed_directives: Vec<_> = directives.into_iter().collect();
-        let mut disabled = Vec::new();
-        for directive in &mut parsed_directives {
-            if directive.level > STATIC_MAX_LEVEL {
-                disabled.push(directive.clone());
-            }
-            if !self.regex {
-                directive.deregexify();
-            }
-        }
-
-        if !disabled.is_empty() {
-            emit_static_max_level_warnings(disabled);
-        }
-
-        let (dynamics, statics) = Directive::make_tables(parsed_directives);
-        let has_dynamics = !dynamics.is_empty();
-
-        let mut filter = EnvFilter {
-            statics,
-            dynamics,
-            has_dynamics,
-            by_id: RwLock::new(HashMap::default()),
-            by_cs: RwLock::new(HashMap::default()),
-            scope: ThreadLocal::new(),
-            regex: self.regex,
-        };
-
-        if !has_dynamics
-            && filter.statics.is_empty()
-            && let Some(default) = self.default_directive.as_ref()
-        {
-            filter = filter.add_directive(default.clone());
-        }
-
-        filter
-    }
-
-    /// Returns the configured environment variable name.
-    fn env_var_name(&self) -> &str {
-        self.env.as_deref().unwrap_or(EnvFilter::DEFAULT_ENV)
-    }
+  /// Returns the configured environment variable name.
+  fn env_var_name(&self) -> &str {
+    self.env.as_deref().unwrap_or(EnvFilter::DEFAULT_ENV)
+  }
 }
 
 impl Default for Builder {
-    fn default() -> Self {
-        Self {
-            regex: true,
-            env: None,
-            default_directive: None,
-        }
+  fn default() -> Self {
+    Self {
+      regex:             true,
+      env:               None,
+      default_directive: None,
     }
+  }
 }
 
 /// Emits warnings for directives disabled by the statically configured max level.
 #[allow(
-    clippy::single_call_fn,
-    reason = "static max-level warning assembly is kept separate from parsing control flow"
+  clippy::single_call_fn,
+  reason = "static max-level warning assembly is kept separate from parsing control flow"
 )]
 fn emit_static_max_level_warnings(disabled: Vec<Directive>) {
-    use tracing::Level;
+  use tracing::Level;
 
-    warn_static_max_level(
-        "some trace filter directives would enable traces that are disabled statically",
-    );
-    for directive in disabled {
-        let target = directive
-            .target
-            .as_ref()
-            .map_or_else(|| "all targets".into(), |target| {
-                format!("the `{target}` target")
-            });
-        let Some(level) = directive.level.into_level() else {
-            continue;
-        };
-        write_static_max_context(&format!(
-            "`{directive}` would enable the {level} level for {target}"
-        ));
-    }
-    write_static_max_prefixed(
-        "note:",
-        &format!("the static max level is `{STATIC_MAX_LEVEL}`"),
-    );
-
-    let (feature, earlier_level) = match STATIC_MAX_LEVEL.into_level() {
-        Some(Level::TRACE) => return,
-        Some(Level::DEBUG) => ("max_level_debug", format!("{} ", Level::TRACE)),
-        Some(Level::INFO) => ("max_level_info", format!("{} ", Level::DEBUG)),
-        Some(Level::WARN) => ("max_level_warn", format!("{} ", Level::INFO)),
-        Some(Level::ERROR) => ("max_level_error", format!("{} ", Level::WARN)),
-        None => ("max_level_off", String::new()),
+  warn_static_max_level("some trace filter directives would enable traces that are disabled statically");
+  for directive in disabled {
+    let target = directive
+      .target
+      .as_ref()
+      .map_or_else(|| "all targets".into(), |target| format!("the `{target}` target"));
+    let Some(level) = directive.level.into_level() else {
+      continue;
     };
-    write_static_max_prefixed("help:", &format!(
-        "to enable {earlier_level}logging, remove the `{feature}` feature from the `tracing` crate"
-    ));
+    write_static_max_context(&format!("`{directive}` would enable the {level} level for {target}"));
+  }
+  write_static_max_prefixed("note:", &format!("the static max level is `{STATIC_MAX_LEVEL}`"));
+
+  let (feature, earlier_level) = match STATIC_MAX_LEVEL.into_level() {
+    Some(Level::TRACE) => return,
+    Some(Level::DEBUG) => ("max_level_debug", format!("{} ", Level::TRACE)),
+    Some(Level::INFO) => ("max_level_info", format!("{} ", Level::DEBUG)),
+    Some(Level::WARN) => ("max_level_warn", format!("{} ", Level::INFO)),
+    Some(Level::ERROR) => ("max_level_error", format!("{} ", Level::WARN)),
+    None => ("max_level_off", String::new()),
+  };
+  write_static_max_prefixed(
+    "help:",
+    &format!("to enable {earlier_level}logging, remove the `{feature}` feature from the `tracing` crate"),
+  );
 }
 
 /// Emits a warning line for the static max-level diagnostic.
 #[allow(
-    clippy::single_call_fn,
-    reason = "warning formatting owns the feature-specific ANSI styling for static max-level diagnostics"
+  clippy::single_call_fn,
+  reason = "warning formatting owns the feature-specific ANSI styling for static max-level diagnostics"
 )]
 fn warn_static_max_level(message: &str) {
-    #[cfg(not(feature = "nu-ansi-term"))]
-    let formatted_message = format!("warning: {}", message);
-    #[cfg(feature = "nu-ansi-term")]
-    let formatted_message = {
-        use nu_ansi_term::{Color, Style};
+  #[cfg(not(feature = "nu-ansi-term"))]
+  let formatted_message = format!("warning: {message}");
+  #[cfg(feature = "nu-ansi-term")]
+  let formatted_message = {
+    use nu_ansi_term::Color;
+    use nu_ansi_term::Style;
 
-        let bold = Style::new().bold();
-        let mut warning = Color::Yellow.paint("warning");
-        warning.style_ref_mut().is_bold = true;
-        format!("{}{} {}", warning, bold.paint(":"), bold.paint(message))
-    };
-    write_stderr_line(format_args!("{formatted_message}"));
+    let bold = Style::new().bold();
+    let mut warning = Color::Yellow.paint("warning");
+    warning.style_ref_mut().is_bold = true;
+    format!("{}{} {}", warning, bold.paint(":"), bold.paint(message))
+  };
+  write_stderr_line(format_args!("{formatted_message}"));
 }
 
 /// Emits a note line for the static max-level diagnostic.
 #[allow(
-    clippy::single_call_fn,
-    reason = "context formatting owns the feature-specific ANSI styling for static max-level diagnostics"
+  clippy::single_call_fn,
+  reason = "context formatting owns the feature-specific ANSI styling for static max-level diagnostics"
 )]
 fn write_static_max_context(message: &str) {
-    #[cfg(not(feature = "nu-ansi-term"))]
-    let formatted_message = format!("note: {}", message);
-    #[cfg(feature = "nu-ansi-term")]
-    let formatted_message = {
-        use nu_ansi_term::Color;
+  #[cfg(not(feature = "nu-ansi-term"))]
+  let formatted_message = format!("note: {message}");
+  #[cfg(feature = "nu-ansi-term")]
+  let formatted_message = {
+    use nu_ansi_term::Color;
 
-        let mut pipe = Color::Fixed(21).paint("|");
-        pipe.style_ref_mut().is_bold = true;
-        format!(" {pipe} {message}")
-    };
-    write_stderr_line(format_args!("{formatted_message}"));
+    let mut pipe = Color::Fixed(21).paint("|");
+    pipe.style_ref_mut().is_bold = true;
+    format!(" {pipe} {message}")
+  };
+  write_stderr_line(format_args!("{formatted_message}"));
 }
 
 /// Emits a prefixed diagnostic line for the static max-level diagnostic.
 fn write_static_max_prefixed(prefix: &str, message: &str) {
-    #[cfg(not(feature = "nu-ansi-term"))]
-    let formatted_message = format!("{} {}", prefix, message);
-    #[cfg(feature = "nu-ansi-term")]
-    let formatted_message = {
-        use nu_ansi_term::{Color, Style};
+  #[cfg(not(feature = "nu-ansi-term"))]
+  let formatted_message = format!("{prefix} {message}");
+  #[cfg(feature = "nu-ansi-term")]
+  let formatted_message = {
+    use nu_ansi_term::Color;
+    use nu_ansi_term::Style;
 
-        let mut equal = Color::Fixed(21).paint("=");
-        equal.style_ref_mut().is_bold = true;
-        format!(
-            " {} {} {}",
-            equal,
-            Style::new().bold().paint(prefix),
-            message
-        )
-    };
-    write_stderr_line(format_args!("{formatted_message}"));
+    let mut equal = Color::Fixed(21).paint("=");
+    equal.style_ref_mut().is_bold = true;
+    format!(" {} {} {}", equal, Style::new().bold().paint(prefix), message)
+  };
+  write_stderr_line(format_args!("{formatted_message}"));
 }
 
 /// Writes one diagnostic line to standard error.
 fn write_stderr_line(args: fmt::Arguments<'_>) {
-    use io::Write as _;
+  use io::Write as _;
 
-    let mut stderr = io::stderr();
-    if stderr.write_fmt(args).is_ok() {
-        let _result = stderr.write_all(b"\n");
-    }
+  let mut stderr = io::stderr();
+  if stderr.write_fmt(args).is_ok() {
+    let _result = stderr.write_all(b"\n");
+  }
 }
 
 #[cfg(test)]
 #[cfg(feature = "std")]
 mod tests {
-    use alloc::string::ToString as _;
-    use std::format;
-    use std::process;
+  use alloc::string::String;
+  use alloc::string::ToString as _;
+  use std::format;
+  use std::process;
 
-    use strict_test_support::TestFailure;
-    use strict_test_support::ensure;
-    use strict_test_support::ensure_contains;
-    use strict_test_support::ensure_ok;
-    use tracing::Level;
-    use tracing::subscriber::with_default;
-    use tracing_mock::expect;
-    use tracing_mock::subscriber;
+  use tracing_core::subscriber::SubscriberError;
+  /// Native failures from these behavioral checks.
+  #[derive(Debug, thiserror::Error)]
+  enum TestError {
+    /// A boolean expectation failed.
+    #[error(transparent)]
+    Condition(#[from] strict_test_support::ConditionFailure),
+    /// Retains the searched text and expected substring.
+    #[error(transparent)]
+    Substring(#[from] strict_test_support::SubstringFailure<String, String>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultDirectiveParseError(#[from] strict_test_support::ResultFailure<ParseError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultFromEnvError(#[from] strict_test_support::ResultFailure<FromEnvError>),
+    /// Preserves the complete native failure and its inputs.
+    #[error(transparent)]
+    ResultSubscriberError(#[from] strict_test_support::ResultFailure<SubscriberError>),
+  }
 
-    use super::*;
-    use crate::filter::LevelFilter;
-    use crate::prelude::*;
+  use strict_test_support::ensure;
+  use strict_test_support::ensure_contains;
+  use strict_test_support::ensure_ok;
+  use tracing::Level;
+  use tracing::subscriber::with_default;
+  use tracing_mock::expect;
+  use tracing_mock::subscriber;
 
-    #[test]
-    fn parse_lossy_uses_default_when_every_directive_is_invalid() -> Result<(), TestFailure> {
-        let filter = Builder::default()
-            .with_default_directive(LevelFilter::INFO.into())
-            .parse_lossy("builder_test=fake_level,another::target=nope");
+  use super::*;
+  use crate::filter::LevelFilter;
+  use crate::prelude::*;
 
-        ensure(
-            filter.to_string() == "info",
-            "lossy parsing should fall back to the default directive when all directives are invalid",
-        )
-    }
+  #[test]
+  fn parse_lossy_uses_default_when_every_directive_is_invalid() -> Result<(), TestError> {
+    let filter = Builder::default()
+      .with_default_directive(LevelFilter::INFO.into())
+      .parse_lossy("builder_test=fake_level,another::target=nope");
 
-    #[test]
-    fn parse_lossy_keeps_valid_directives_instead_of_default() -> Result<(), TestFailure> {
-        let filter = Builder::default()
-            .with_default_directive(LevelFilter::INFO.into())
-            .parse_lossy("builder_test=fake_level,valid_builder_target=warn");
+    ensure(
+      filter.to_string() == "info",
+      "lossy parsing should fall back to the default directive when all directives are invalid",
+    )
+    .map(drop)
+    .map_err(TestError::from)
+  }
 
-        ensure(
-            filter.to_string() == "valid_builder_target=warn",
-            "lossy parsing should keep valid directives instead of using the default",
-        )
-    }
+  #[test]
+  fn parse_lossy_keeps_valid_directives_instead_of_default() -> Result<(), TestError> {
+    let filter = Builder::default()
+      .with_default_directive(LevelFilter::INFO.into())
+      .parse_lossy("builder_test=fake_level,valid_builder_target=warn");
 
-    #[test]
-    fn parse_rejects_invalid_non_empty_directives() -> Result<(), TestFailure> {
-        let parsed = Builder::default().parse("valid_builder_target=warn,builder_test=fake_level");
+    ensure(
+      filter.to_string() == "valid_builder_target=warn",
+      "lossy parsing should keep valid directives instead of using the default",
+    )
+    .map(drop)
+    .map_err(TestError::from)
+  }
 
-        ensure(parsed.is_err(), "strict parsing should reject any invalid directive")?;
-        let error_text = parsed.err().map(|error| error.to_string()).unwrap_or_default();
-        ensure_contains(
-            &error_text,
-            "error parsing level filter",
-            "strict parse errors should identify the directive parsing failure",
-        )
-    }
+  #[test]
+  fn parse_rejects_invalid_non_empty_directives() -> Result<(), TestError> {
+    let parsed = Builder::default().parse("valid_builder_target=warn,builder_test=fake_level");
 
-    #[test]
-    fn unset_custom_environment_uses_default_for_lossy_and_strict_parsing() -> Result<(), TestFailure> {
-        let environment_name = format!(
-            "STRICT_TRACING_SUBSCRIBER_BUILDER_TEST_UNSET_{}",
-            process::id()
-        );
-        let builder = Builder::default()
-            .with_env_var(environment_name)
-            .with_default_directive(LevelFilter::WARN.into());
+    ensure(parsed.is_err(), "strict parsing should reject any invalid directive").map(drop)?;
+    let error_text = parsed.err().map(|error| error.to_string()).unwrap_or_default();
+    ensure_contains(
+      error_text,
+      String::from("error parsing level filter"),
+      "strict parse errors should identify the directive parsing failure",
+    )
+    .map(drop)
+    .map_err(TestError::from)
+  }
 
-        let lossy = builder.parse_env_lossy();
-        ensure(
-            lossy.to_string() == "warn",
-            "lossy env parsing should use the default directive when the custom variable is unset",
-        )?;
+  #[test]
+  fn unset_custom_environment_uses_default_for_lossy_and_strict_parsing() -> Result<(), TestError> {
+    let environment_name = format!("STRICT_TRACING_SUBSCRIBER_BUILDER_TEST_UNSET_{}", process::id());
+    let builder = Builder::default()
+      .with_env_var(environment_name)
+      .with_default_directive(LevelFilter::WARN.into());
 
-        let strict = ensure_ok(
-            builder.parse_env(),
-            "strict env parsing should accept an unset variable by parsing the default empty value",
-        )?;
-        ensure(
-            strict.to_string() == "warn",
-            "strict env parsing should use the default directive when the custom variable is unset",
-        )?;
+    let lossy = builder.parse_env_lossy();
+    ensure(
+      lossy.to_string() == "warn",
+      "lossy env parsing should use the default directive when the custom variable is unset",
+    )
+    .map(drop)?;
 
-        let missing = builder.try_parse_env();
-        ensure(
-            missing.is_err(),
-            "try_parse_env should reject an unset custom environment variable",
-        )?;
-        let error_text = missing.err().map(|error| error.to_string()).unwrap_or_default();
-        ensure_contains(
-            &error_text,
-            "environment variable not found",
-            "unset custom environment errors should preserve the environment failure",
-        )
-    }
+    let strict = ensure_ok(
+      builder.parse_env(),
+      "strict env parsing should accept an unset variable by parsing the default empty value",
+    )?;
+    ensure(
+      strict.to_string() == "warn",
+      "strict env parsing should use the default directive when the custom variable is unset",
+    )
+    .map(drop)?;
 
-    #[test]
-    fn default_regex_mode_matches_debug_output_as_a_regular_expression() -> Result<(), TestFailure> {
-        let filter = ensure_ok(
-            Builder::default().parse("[name_span{name=alice.*}]=debug"),
-            "regex field directive should parse",
-        )?;
+    let missing = builder.try_parse_env();
+    ensure(missing.is_err(), "try_parse_env should reject an unset custom environment variable").map(drop)?;
+    let error_text = missing.err().map(|error| error.to_string()).unwrap_or_default();
+    ensure_contains(
+      error_text,
+      String::from("environment variable not found"),
+      "unset custom environment errors should preserve the environment failure",
+    )
+    .map(drop)
+    .map_err(TestError::from)
+  }
 
-        run_name_span_filter(filter, true)
-    }
+  #[test]
+  fn default_regex_mode_matches_debug_output_as_a_regular_expression() -> Result<(), TestError> {
+    let filter = ensure_ok(
+      Builder::default().parse("[name_span{name=alice.*}]=debug"),
+      "regex field directive should parse",
+    )?;
 
-    #[test]
-    fn disabled_regex_mode_matches_debug_output_exactly() -> Result<(), TestFailure> {
-        let filter = ensure_ok(
-            Builder::default()
-                .with_regex(false)
-                .parse("[name_span{name=alice.*}]=debug"),
-            "non-regex field directive should parse",
-        )?;
+    run_name_span_filter(filter, true)
+  }
 
-        run_name_span_filter(filter, false)
-    }
+  #[test]
+  fn disabled_regex_mode_matches_debug_output_exactly() -> Result<(), TestError> {
+    let filter = ensure_ok(
+      Builder::default().with_regex(false).parse("[name_span{name=alice.*}]=debug"),
+      "non-regex field directive should parse",
+    )?;
 
-    fn run_name_span_filter(filter: EnvFilter, should_emit_event: bool) -> Result<(), TestFailure> {
-        let (mock_subscriber, handle) = subscriber::mock()
-            .enter("name_span")
-            .expect_when(should_emit_event, |mock| {
-                mock.event(
-                    expect::event()
-                        .at_level(Level::DEBUG)
-                        .with_target("builder_regex_target"),
-                )
-            })
-            .exit("name_span")
-            .only()
-            .run_with_handle();
-        let subscriber = mock_subscriber.with(filter);
+    run_name_span_filter(filter, false)
+  }
 
-        with_default(subscriber, || {
-            let span_guard = tracing::info_span!("name_span", name = "alice-bob").entered();
-            tracing::debug!(target: "builder_regex_target", "field matcher polarity");
-            drop(span_guard);
-        });
+  fn run_name_span_filter(filter: EnvFilter, should_emit_event: bool) -> Result<(), TestError> {
+    let (mock_subscriber, handle) = subscriber::mock()
+      .enter("name_span")
+      .expect_when(should_emit_event, |mock| {
+        mock.event(expect::event().at_level(Level::DEBUG).with_target("builder_regex_target"))
+      })
+      .exit("name_span")
+      .only()
+      .run_with_handle();
+    let subscriber = mock_subscriber.with(filter);
 
-        ensure_ok(
-            handle.finished(),
-            "builder regex field filter should produce the expected event polarity",
-        )
-    }
+    with_default(subscriber, || {
+      let span_guard = tracing::info_span!("name_span", name = "alice-bob").entered();
+      tracing::debug!(target: "builder_regex_target", "field matcher polarity");
+      drop(span_guard);
+    });
+
+    ensure_ok(
+      handle.finished(),
+      "builder regex field filter should produce the expected event polarity",
+    )
+    .map_err(TestError::from)
+  }
 }

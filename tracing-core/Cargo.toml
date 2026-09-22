@@ -21,8 +21,8 @@ categories = [
     "asynchronous",
 ]
 keywords = ["logging", "tracing", "profiling"]
-edition.workspace = true
-rust-version.workspace = true
+edition = { workspace = true }
+rust-version = { workspace = true }
 
 [features]
 default = ["std", "valuable?/std"]
@@ -43,6 +43,7 @@ parking_lot = { workspace = true, optional = true }
 spin = { workspace = true }
 
 [dev-dependencies]
+thiserror = { workspace = true }
 strict-test-support = { workspace = true }
 # Self dev-dependency: enables the `test-util` feature for this crate's own
 # integration tests and doctests without turning it on for downstream builds.
