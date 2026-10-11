@@ -47,12 +47,14 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
   // Format fields using the provided closure.
   let format = format::debug_fn(|writer, field, field_value| {
     // We'll format the field name and value separated with a colon.
-    write!(writer, "{field}: {}", DebugValue { value: field_value })
+    write!(writer, "{field}: {}", DebugValue {
+      value: field_value
+    })
   })
-    // Separate each field with a comma.
-    // This method is provided by an extension trait in the
-    // `tracing-subscriber` prelude.
-    .delimited(", ");
+  // Separate each field with a comma.
+  // This method is provided by an extension trait in the
+  // `tracing-subscriber` prelude.
+  .delimited(", ");
 
   // Create a `fmt` subscriber that uses our custom event format, and set it
   // as the default.

@@ -152,9 +152,9 @@ pub trait WithSubscriber: Sized {
   /// };
   ///
   /// future
-  ///     // Attach the other `Subscriber` to the future before awaiting it
-  ///     .with_subscriber(other_subscriber)
-  ///     .await;
+  ///   // Attach the other `Subscriber` to the future before awaiting it
+  ///   .with_subscriber(other_subscriber)
+  ///   .await;
   ///
   /// // Once the future has completed, we return to the default `Subscriber`.
   /// tracing::info!("this event will be recorded by the default `Subscriber`");

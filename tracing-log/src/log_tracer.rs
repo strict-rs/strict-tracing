@@ -64,9 +64,9 @@ impl LogTracer {
   ///
   /// # fn main() -> Result<(), Box<dyn Error>> {
   /// LogTracer::builder()
-  ///     .ignore_crate("foo") // suppose the `foo` crate is using `tracing`'s log feature
-  ///     .with_max_level(log::LevelFilter::Info)
-  ///     .init()?;
+  ///   .ignore_crate("foo") // suppose the `foo` crate is using `tracing`'s log feature
+  ///   .with_max_level(log::LevelFilter::Info)
+  ///   .init()?;
   ///
   /// // will be available for Subscribers as a tracing Event
   /// log::info!("an example info log");

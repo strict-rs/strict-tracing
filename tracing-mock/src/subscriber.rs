@@ -1429,10 +1429,7 @@ where
 
   fn new_span(&self, span: &Attributes<'_>) -> SubscriberResult<Id> {
     let meta = span.metadata();
-    let allocated_slot = match self
-      .ids
-      .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |id| id.checked_add(1))
-    {
+    let allocated_slot = match self.ids.try_update(Ordering::SeqCst, Ordering::SeqCst, |id| id.checked_add(1)) {
       Ok(id) => id,
       Err(id) => {
         self.record_failure(format_args!("[{}] span ID allocator exhausted at {}", self.name, id));

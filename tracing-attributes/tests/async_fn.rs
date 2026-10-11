@@ -426,43 +426,43 @@ fn async_fn_with_async_trait_and_fields_expressions_with_generic_parameter() -> 
   let span3 = expect::span().named("call_with_mut_self");
   let span4 = expect::span().named("sync_fun");
   let (subscriber, handle) = subscriber::mock()
-        /*.new_span(span.clone()
-            .with_fields(
-                expect::field("Self").with_value(&"TestImpler")))
-        .enter(span.clone())
-        .exit(span.clone())
-        .close_span(span)*/
-        .new_span(
-            span2
-                .clone()
-                .with_fields(expect::field("Self").with_value(&type_name::<TestImpl>())),
-        )
-        .enter(span2.clone())
-        .new_span(
-            span4
-                .clone()
-                .with_fields(expect::field("Self").with_value(&type_name::<TestImpl>())),
-        )
-        .enter(span4.clone())
-        .exit(span4.clone())
-        .enter(span4.clone())
-        .exit(span4)
-        .exit(span2.clone())
-        .enter(span2.clone())
-        .exit(span2.clone())
-        .close_span(span2)
-        .new_span(
-            span3
-                .clone()
-                .with_fields(expect::field("Self").with_value(&type_name::<TestImpl>())),
-        )
-        .enter(span3.clone())
-        .exit(span3.clone())
-        .enter(span3.clone())
-        .exit(span3.clone())
-        .close_span(span3)
-        .only()
-        .run_with_handle();
+    // .new_span(span.clone()
+    // .with_fields(
+    // expect::field("Self").with_value(&"TestImpler")))
+    // .enter(span.clone())
+    // .exit(span.clone())
+    // .close_span(span)
+    .new_span(
+      span2
+        .clone()
+        .with_fields(expect::field("Self").with_value(&type_name::<TestImpl>())),
+    )
+    .enter(span2.clone())
+    .new_span(
+      span4
+        .clone()
+        .with_fields(expect::field("Self").with_value(&type_name::<TestImpl>())),
+    )
+    .enter(span4.clone())
+    .exit(span4.clone())
+    .enter(span4.clone())
+    .exit(span4)
+    .exit(span2.clone())
+    .enter(span2.clone())
+    .exit(span2.clone())
+    .close_span(span2)
+    .new_span(
+      span3
+        .clone()
+        .with_fields(expect::field("Self").with_value(&type_name::<TestImpl>())),
+    )
+    .enter(span3.clone())
+    .exit(span3.clone())
+    .enter(span3.clone())
+    .exit(span3.clone())
+    .close_span(span3)
+    .only()
+    .run_with_handle();
 
   with_default(subscriber, || {
     block_on_future(async {
@@ -534,16 +534,16 @@ fn manual_impl_future() -> Result<(), TestError> {
   let poll_event = || expect::event().with_fields(expect::field("poll").with_value(&true));
 
   let (subscriber, handle) = subscriber::mock()
-        // await manual_impl_future
-        .new_span(span.clone())
-        .enter(span.clone())
-        .event(poll_event())
-        .exit(span.clone())
-        .enter(span.clone())
-        .exit(span.clone())
-        .close_span(span)
-        .only()
-        .run_with_handle();
+    // await manual_impl_future
+    .new_span(span.clone())
+    .enter(span.clone())
+    .event(poll_event())
+    .exit(span.clone())
+    .enter(span.clone())
+    .exit(span.clone())
+    .close_span(span)
+    .only()
+    .run_with_handle();
 
   with_default(subscriber, || {
     block_on_future(async {
@@ -568,16 +568,16 @@ fn manual_box_pin() -> Result<(), TestError> {
   let poll_event = || expect::event().with_fields(expect::field("poll").with_value(&true));
 
   let (subscriber, handle) = subscriber::mock()
-        // await manual_box_pin
-        .new_span(span.clone())
-        .enter(span.clone())
-        .event(poll_event())
-        .exit(span.clone())
-        .enter(span.clone())
-        .exit(span.clone())
-        .close_span(span)
-        .only()
-        .run_with_handle();
+    // await manual_box_pin
+    .new_span(span.clone())
+    .enter(span.clone())
+    .event(poll_event())
+    .exit(span.clone())
+    .enter(span.clone())
+    .exit(span.clone())
+    .close_span(span)
+    .only()
+    .run_with_handle();
 
   with_default(subscriber, || {
     block_on_future(async {

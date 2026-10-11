@@ -166,12 +166,12 @@ mod tests {
     let pid = process::id();
     let output = ensure_ok(
       command
-                // We pass --all to circumvent journalctl's default limit of 4096 bytes for field values
-                .args(["--output=json", "--all"])
-                // Filter by the PID of the current test process
-                .arg(format!("_PID={pid}"))
-                .arg(format!("TEST_NAME={test_name}"))
-                .output(),
+        // We pass --all to circumvent journalctl's default limit of 4096 bytes for field values
+        .args(["--output=json", "--all"])
+        // Filter by the PID of the current test process
+        .arg(format!("_PID={pid}"))
+        .arg(format!("TEST_NAME={test_name}"))
+        .output(),
       "read journalctl output",
     )?;
     let stdout = String::from_utf8_lossy(&output.stdout);

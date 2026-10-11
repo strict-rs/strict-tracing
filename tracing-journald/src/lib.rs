@@ -228,12 +228,12 @@ impl Layer {
       socket_path,
       field_prefix: Some("F".into()),
       syslog_identifier: args_os()
-                .next()
-                .as_ref()
-                .and_then(|path| Path::new(path).file_name())
-                .map(|name| name.to_string_lossy().into_owned())
-                // If we fail to get the name of the current executable fall back to an empty string.
-                .unwrap_or_default(),
+        .next()
+        .as_ref()
+        .and_then(|path| Path::new(path).file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        // If we fail to get the name of the current executable fall back to an empty string.
+        .unwrap_or_default(),
       additional_fields: Vec::new(),
       priority_mappings: PriorityMappings::new(),
     };
@@ -265,13 +265,15 @@ impl Layer {
   /// let registry = tracing_subscriber::registry();
   /// match tracing_journald::layer() {
   ///   Ok(layer) => {
-  ///     registry.with(layer
-  ///                 // We can tweak the mappings between the trace level and
-  ///                 // the journal priorities.
-  ///                 .with_priority_mappings(PriorityMappings {
-  ///                     info: Priority::Informational,
-  ///                     ..PriorityMappings::new()
-  ///                 }));
+  ///     registry.with(
+  ///       layer
+  ///         // We can tweak the mappings between the trace level and
+  ///         // the journal priorities.
+  ///         .with_priority_mappings(PriorityMappings {
+  ///           info: Priority::Informational,
+  ///           ..PriorityMappings::new()
+  ///         }),
+  ///     );
   ///   }
   ///   // journald is typically available on Linux systems, but nowhere else. Portable software
   ///   // should handle its absence gracefully.

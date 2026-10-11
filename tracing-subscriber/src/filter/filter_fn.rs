@@ -267,13 +267,13 @@ where
   ///
   /// # fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync + 'static>> {
   /// let my_filter = filter_fn(|metadata| {
-  ///     // Only enable spans or events with targets starting with `my_crate`
-  ///     // and levels at or below `INFO`.
-  ///     metadata.level() <= &Level::INFO && metadata.target().starts_with("my_crate")
+  ///   // Only enable spans or events with targets starting with `my_crate`
+  ///   // and levels at or below `INFO`.
+  ///   metadata.level() <= &Level::INFO && metadata.target().starts_with("my_crate")
   /// })
-  ///     // Since the filter closure will only enable the `INFO` level and
-  ///     // below, set the max level hint
-  ///     .with_max_level_hint(LevelFilter::INFO);
+  /// // Since the filter closure will only enable the `INFO` level and
+  /// // below, set the max level hint
+  /// .with_max_level_hint(LevelFilter::INFO);
   ///
   /// let my_layer = tracing_subscriber::fmt::layer();
   ///
@@ -451,25 +451,25 @@ where
   /// // Only enable spans or events with levels at or below `INFO`, if
   /// // we are inside a span called "interesting_span".
   /// let my_filter = DynFilterFn::new(|metadata, cx| {
-  ///     // If the level is greater than INFO, disable it.
-  ///     if metadata.level() > &Level::INFO {
-  ///         return false;
+  ///   // If the level is greater than INFO, disable it.
+  ///   if metadata.level() > &Level::INFO {
+  ///     return false;
+  ///   }
+  ///
+  ///   // If any span in the current scope is named "interesting_span",
+  ///   // enable this span or event.
+  ///   for span in cx.lookup_current().iter().flat_map(|span| span.scope()) {
+  ///     if span.name() == "interesting_span" {
+  ///       return true;
   ///     }
-  ///   
-  ///     // If any span in the current scope is named "interesting_span",
-  ///     // enable this span or event.
-  ///     for span in cx.lookup_current().iter().flat_map(|span| span.scope()) {
-  ///         if span.name() == "interesting_span" {
-  ///             return true;
-  ///          }
-  ///     }
-  ///   
-  ///     // Otherwise, disable it.
-  ///     false
+  ///   }
+  ///
+  ///   // Otherwise, disable it.
+  ///   false
   /// })
-  ///     // Since the filter closure will only enable the `INFO` level and
-  ///     // below, set the max level hint
-  ///     .with_max_level_hint(LevelFilter::INFO);
+  /// // Since the filter closure will only enable the `INFO` level and
+  /// // below, set the max level hint
+  /// .with_max_level_hint(LevelFilter::INFO);
   ///
   /// let my_layer = tracing_subscriber::fmt::layer();
   ///

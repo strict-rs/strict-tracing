@@ -378,7 +378,7 @@ impl Subscriber for CallsiteTrackingSubscriber {
     let _previous_count = self
       .state
       .register_count
-      .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| Some(count.saturating_add(1)));
+      .try_update(Ordering::SeqCst, Ordering::SeqCst, |count| Some(count.saturating_add(1)));
 
     if self.event_on_register {
       emit_reentrant_event();

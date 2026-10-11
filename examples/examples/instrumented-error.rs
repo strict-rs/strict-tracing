@@ -59,10 +59,10 @@ fn do_another_thing(answer: usize, will_succeed: bool) -> Result<&'static str, i
 #[tracing::instrument]
 fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
   tracing_subscriber::registry()
-        .with(fmt_layer())
-        // The `ErrorLayer` subscriber layer enables the use of `SpanTrace`.
-        .with(ErrorLayer::default())
-        .try_init()?;
+    .with(fmt_layer())
+    // The `ErrorLayer` subscriber layer enables the use of `SpanTrace`.
+    .with(ErrorLayer::default())
+    .try_init()?;
   let mut output = stdout().lock();
   let mut errors = stderr().lock();
 

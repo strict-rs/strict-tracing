@@ -93,16 +93,16 @@
 //! # fn main() -> Result<(), ConditionFailure> {
 //! let span = expect::span().named("my_span");
 //! let (layer, handle) = layer::mock()
-//!     // Enter a matching span
-//!     .enter(&span)
-//!     // Record an event with message "collect parting message"
-//!     .event(expect::event().with_fields(expect::msg("say hello")))
-//!     // Exit a matching span
-//!     .exit(&span)
-//!     // Expect no further messages to be recorded
-//!     .only()
-//!     // Return the subscriber and handle
-//!     .run_with_handle();
+//!   // Enter a matching span
+//!   .enter(&span)
+//!   // Record an event with message "collect parting message"
+//!   .event(expect::event().with_fields(expect::msg("say hello")))
+//!   // Exit a matching span
+//!   .exit(&span)
+//!   // Expect no further messages to be recorded
+//!   .only()
+//!   // Return the subscriber and handle
+//!   .run_with_handle();
 //!
 //! drop(layer);
 //! let result = handle.finished();

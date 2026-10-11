@@ -18,7 +18,7 @@ mod tests {
     #[error(transparent)]
     Spawn(#[from] io::Error),
     /// A worker panicked, retaining the thread's original payload.
-    #[error("{context}")]
+    #[error("{context}: {payload:?}")]
     Thread {
       /// Which worker failed.
       context: &'static str,

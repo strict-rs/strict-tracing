@@ -86,9 +86,9 @@ impl Builder {
   /// use tracing_appender::rolling::Rotation;
   ///
   /// let appender = RollingFileAppender::builder()
-  ///     .rotation(Rotation::HOURLY) // rotate log files once every hour
-  ///     // ...
-  ///     .build("/var/log")?;
+  ///   .rotation(Rotation::HOURLY) // rotate log files once every hour
+  ///   // ...
+  ///   .build("/var/log")?;
   ///
   /// # drop(appender);
   /// # Ok(())
@@ -119,9 +119,9 @@ impl Builder {
   ///
   /// # fn docs() -> Result<(), Box<dyn std::error::Error>> {
   /// let appender = RollingFileAppender::builder()
-  ///     .filename_prefix("myapp.log") // log files will have names like "myapp.log.2019-01-01"
-  ///     // ...
-  ///     .build("/var/log")?;
+  ///   .filename_prefix("myapp.log") // log files will have names like "myapp.log.2019-01-01"
+  ///   // ...
+  ///   .build("/var/log")?;
   /// # drop(appender);
   /// # Ok(())
   /// # }
@@ -134,9 +134,9 @@ impl Builder {
   ///
   /// # fn docs() -> Result<(), Box<dyn std::error::Error>> {
   /// let appender = RollingFileAppender::builder()
-  ///     .filename_prefix("") // log files will have names like "2019-01-01"
-  ///     // ...
-  ///     .build("/var/log")?;
+  ///   .filename_prefix("") // log files will have names like "2019-01-01"
+  ///   // ...
+  ///   .build("/var/log")?;
   /// # drop(appender);
   /// # Ok(())
   /// # }
@@ -174,9 +174,9 @@ impl Builder {
   ///
   /// # fn docs() -> Result<(), Box<dyn std::error::Error>> {
   /// let appender = RollingFileAppender::builder()
-  ///     .filename_suffix("myapp.log") // log files will have names like "2019-01-01.myapp.log"
-  ///     // ...
-  ///     .build("/var/log")?;
+  ///   .filename_suffix("myapp.log") // log files will have names like "2019-01-01.myapp.log"
+  ///   // ...
+  ///   .build("/var/log")?;
   /// # drop(appender);
   /// # Ok(())
   /// # }
@@ -189,9 +189,9 @@ impl Builder {
   ///
   /// # fn docs() -> Result<(), Box<dyn std::error::Error>> {
   /// let appender = RollingFileAppender::builder()
-  ///     .filename_suffix("") // log files will have names like "2019-01-01"
-  ///     // ...
-  ///     .build("/var/log")?;
+  ///   .filename_suffix("") // log files will have names like "2019-01-01"
+  ///   // ...
+  ///   .build("/var/log")?;
   /// # drop(appender);
   /// # Ok(())
   /// # }
@@ -248,9 +248,9 @@ impl Builder {
   ///
   /// # fn docs() -> Result<(), Box<dyn std::error::Error>> {
   /// let appender = RollingFileAppender::builder()
-  ///     .max_log_files(5) // only the most recent 5 log files will be kept
-  ///     // ...
-  ///     .build("/var/log")?;
+  ///   .max_log_files(5) // only the most recent 5 log files will be kept
+  ///   // ...
+  ///   .build("/var/log")?;
   /// # drop(appender);
   /// # Ok(())
   /// # }
@@ -274,9 +274,9 @@ impl Builder {
   ///
   /// # fn docs() -> Result<(), Box<dyn std::error::Error>> {
   /// let appender = RollingFileAppender::builder()
-  ///     .latest_symlink("log.latest")
-  ///     // ...
-  ///     .build("/var/log")?;
+  ///   .latest_symlink("log.latest")
+  ///   // ...
+  ///   .build("/var/log")?;
   /// # drop(appender);
   /// # Ok(())
   /// # }

@@ -48,9 +48,9 @@ mod tests {
 
     ensure_ok(
       didnt_hang
-                // Note: 60 seconds is *way* more than enough, but let's be generous in
-                // case of e.g. slow CI machines.
-                .recv_timeout(Duration::from_mins(1)),
+        // Note: 60 seconds is *way* more than enough, but let's be generous in
+        // case of e.g. slow CI machines.
+        .recv_timeout(Duration::from_mins(1)),
       "the thread must not hang",
     )?;
     let send_result = match th.join() {

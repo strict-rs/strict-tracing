@@ -264,12 +264,16 @@ fn test_err_dbg() -> Result<(), TestError> {
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
     .enter(span.clone())
-    .event(expect::event().at_level(Level::ERROR).with_fields(expect::field("error")
-                    // use the actual error value that will be emitted, so
-                    // that this test doesn't break if the standard library
-                    // changes the `fmt::Debug` output from the error type
-                    // in the future.
-                    .with_value(&debug(expected_error))))
+    .event(
+      expect::event().at_level(Level::ERROR).with_fields(
+        expect::field("error")
+          // use the actual error value that will be emitted, so
+          // that this test doesn't break if the standard library
+          // changes the `fmt::Debug` output from the error type
+          // in the future.
+          .with_value(&debug(expected_error)),
+      ),
+    )
     .exit(span.clone())
     .close_span(span)
     .only()
@@ -288,9 +292,13 @@ fn test_err_display_default() -> Result<(), TestError> {
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
     .enter(span.clone())
-    .event(expect::event().at_level(Level::ERROR).with_fields(expect::field("error")
-                    // by default, errors will be emitted with their display values
-                    .with_value(&display(expected_error))))
+    .event(
+      expect::event().at_level(Level::ERROR).with_fields(
+        expect::field("error")
+          // by default, errors will be emitted with their display values
+          .with_value(&display(expected_error)),
+      ),
+    )
     .exit(span.clone())
     .close_span(span)
     .only()
@@ -371,12 +379,16 @@ fn test_err_dbg_info() -> Result<(), TestError> {
   let (subscriber, handle) = subscriber::mock()
     .new_span(span.clone())
     .enter(span.clone())
-    .event(expect::event().at_level(Level::INFO).with_fields(expect::field("error")
-                    // use the actual error value that will be emitted, so
-                    // that this test doesn't break if the standard library
-                    // changes the `fmt::Debug` output from the error type
-                    // in the future.
-                    .with_value(&debug(expected_error))))
+    .event(
+      expect::event().at_level(Level::INFO).with_fields(
+        expect::field("error")
+          // use the actual error value that will be emitted, so
+          // that this test doesn't break if the standard library
+          // changes the `fmt::Debug` output from the error type
+          // in the future.
+          .with_value(&debug(expected_error)),
+      ),
+    )
     .exit(span.clone())
     .close_span(span)
     .only()

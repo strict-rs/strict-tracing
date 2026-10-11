@@ -329,33 +329,33 @@
 //! if cfg.enable_log_file {
 //!   let file = File::create("myapp.log")?;
 //!   let layer = tracing_subscriber::fmt::layer()
-//!         .with_thread_names(true)
-//!         .with_target(true)
-//!         .json()
-//!         .with_writer(file)
-//!         // Box the layer as a type-erased trait object, so that it can
-//!         // be pushed to the `Vec`.
-//!         .boxed();
+//!     .with_thread_names(true)
+//!     .with_target(true)
+//!     .json()
+//!     .with_writer(file)
+//!     // Box the layer as a type-erased trait object, so that it can
+//!     // be pushed to the `Vec`.
+//!     .boxed();
 //!   layers.push(layer);
 //! }
 //!
 //! if cfg.enable_stdout {
 //!   let layer = tracing_subscriber::fmt::layer()
-//!         .pretty()
-//!         .with_filter(LevelFilter::INFO)
-//!         // Box the layer as a type-erased trait object, so that it can
-//!         // be pushed to the `Vec`.
-//!         .boxed();
+//!     .pretty()
+//!     .with_filter(LevelFilter::INFO)
+//!     // Box the layer as a type-erased trait object, so that it can
+//!     // be pushed to the `Vec`.
+//!     .boxed();
 //!   layers.push(layer);
 //! }
 //!
 //! if cfg.enable_stdout {
 //!   let layer = tracing_subscriber::fmt::layer()
-//!         .with_target(false)
-//!         .with_filter(LevelFilter::WARN)
-//!         // Box the layer as a type-erased trait object, so that it can
-//!         // be pushed to the `Vec`.
-//!         .boxed();
+//!     .with_target(false)
+//!     .with_filter(LevelFilter::WARN)
+//!     // Box the layer as a type-erased trait object, so that it can
+//!     // be pushed to the `Vec`.
+//!     .boxed();
 //!   layers.push(layer);
 //! }
 //!
@@ -580,16 +580,16 @@
 //! let layer_c = tracing_subscriber::fmt::layer();
 //!
 //! let info_layers = layer_a
-//!     // Combine `layer_a` and `layer_b` into a `Layered` layer:
-//!     .and_then(layer_b)
-//!     // ...and then add an `INFO` `LevelFilter` to that layer:
-//!     .with_filter(LevelFilter::INFO);
+//!   // Combine `layer_a` and `layer_b` into a `Layered` layer:
+//!   .and_then(layer_b)
+//!   // ...and then add an `INFO` `LevelFilter` to that layer:
+//!   .with_filter(LevelFilter::INFO);
 //!
 //! tracing_subscriber::registry()
-//!     // Add `layer_c` with a `DEBUG` filter.
-//!     .with(layer_c.with_filter(LevelFilter::DEBUG))
-//!     .with(info_layers)
-//!     .try_init()?;
+//!   // Add `layer_c` with a `DEBUG` filter.
+//!   .with(layer_c.with_filter(LevelFilter::DEBUG))
+//!   .with(info_layers)
+//!   .try_init()?;
 //! # Ok(()) }
 //! ```
 //!
@@ -1280,27 +1280,27 @@ where
   ///   LogConfig::File(path) => {
   ///     let file = File::create(path)?;
   ///     tracing_subscriber::fmt::layer()
-  ///             .with_thread_ids(true)
-  ///             .with_thread_names(true)
-  ///             .json()
-  ///             .with_span_list(true)
-  ///             .with_writer(file)
-  ///             // Erase the type by boxing the layer
-  ///             .boxed()
+  ///       .with_thread_ids(true)
+  ///       .with_thread_names(true)
+  ///       .json()
+  ///       .with_span_list(true)
+  ///       .with_writer(file)
+  ///       // Erase the type by boxing the layer
+  ///       .boxed()
   ///   }
   ///
   ///   LogConfig::Stdout => tracing_subscriber::fmt::layer()
-  ///         .pretty()
-  ///         .with_writer(io::stdout)
-  ///         .and_then(tracing_subscriber::EnvFilter::from_default_env())
-  ///         // Erase the type by boxing the layer
-  ///         .boxed(),
+  ///     .pretty()
+  ///     .with_writer(io::stdout)
+  ///     .and_then(tracing_subscriber::EnvFilter::from_default_env())
+  ///     // Erase the type by boxing the layer
+  ///     .boxed(),
   ///
   ///   LogConfig::Stderr => tracing_subscriber::fmt::layer()
-  ///         .with_writer(io::stderr)
-  ///         .with_filter(LevelFilter::WARN)
-  ///         // Erase the type by boxing the layer
-  ///         .boxed(),
+  ///     .with_writer(io::stderr)
+  ///     .with_filter(LevelFilter::WARN)
+  ///     // Erase the type by boxing the layer
+  ///     .boxed(),
   /// };
   ///
   /// tracing_subscriber::registry().with(log_layer).try_init()?;

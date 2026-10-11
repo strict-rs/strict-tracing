@@ -6,11 +6,11 @@ use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
   tracing_subscriber::fmt()
-        .compact()
-        // enable everything
-        .with_max_level(tracing::Level::TRACE)
-        // sets this to be the default, global subscriber for this application.
-        .try_init()?;
+    .compact()
+    // enable everything
+    .with_max_level(tracing::Level::TRACE)
+    // sets this to be the default, global subscriber for this application.
+    .try_init()?;
 
   let number_of_yaks = 3;
   // this creates a new event, outside of any spans.

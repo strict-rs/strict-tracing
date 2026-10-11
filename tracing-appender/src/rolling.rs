@@ -98,10 +98,10 @@ pub use builder::InitError;
 /// let stdout = std::io::stdout.with_max_level(tracing::Level::INFO);
 ///
 /// tracing_subscriber::fmt()
-///     // Combine the stdout and log file `MakeWriter`s into one
-///     // `MakeWriter` that writes to both
-///     .with_writer(stdout.and(logfile))
-///     .try_init()?;
+///   // Combine the stdout and log file `MakeWriter`s into one
+///   // `MakeWriter` that writes to both
+///   .with_writer(stdout.and(logfile))
+///   .try_init()?;
 /// # Ok(())
 /// # }
 /// ```

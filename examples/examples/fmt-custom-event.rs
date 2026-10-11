@@ -10,9 +10,9 @@ fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
 
   // Configure a custom event formatter
   let format = fmt::format()
-        .compact() // use an abbreviated format for logging spans
-        .with_level(false) // don't include levels in formatted output
-        .with_target(false); // don't include targets
+    .compact() // use an abbreviated format for logging spans
+    .with_level(false) // don't include levels in formatted output
+    .with_target(false); // don't include targets
 
   // Create a `fmt` subscriber that uses our custom event format, and set it
   // as the default.

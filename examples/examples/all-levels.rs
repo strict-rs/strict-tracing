@@ -6,11 +6,11 @@ use tracing::Level;
 
 fn main() -> Result<(), Box<dyn Error + Send + Sync>> {
   tracing_subscriber::fmt()
-        // all spans/events with a level higher than TRACE (e.g, info, warn, etc.)
-        // will be written to stdout.
-        .with_max_level(Level::TRACE)
-        // sets this to be the default, global subscriber for this application.
-        .try_init()?;
+    // all spans/events with a level higher than TRACE (e.g, info, warn, etc.)
+    // will be written to stdout.
+    .with_max_level(Level::TRACE)
+    // sets this to be the default, global subscriber for this application.
+    .try_init()?;
 
   tracing::error!("SOMETHING IS SERIOUSLY WRONG!!!");
   tracing::warn!("important informational messages; might indicate an error");

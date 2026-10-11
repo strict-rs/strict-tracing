@@ -92,24 +92,26 @@ where
     // skipping `log` diagnostics much faster.
     #[cfg(feature = "tracing-log")]
     tracing_log::LogTracer::builder()
-            // Note that we must call this *after* setting the global default
-            // subscriber, so that we get its max level hint.
-            .with_max_level(tracing_core::LevelFilter::current().as_log())
-            .init()
-            .map_err(|error| {
-                #[cfg(feature = "std")]
-                {
-                    TryInitError {
-                        inner: error.into(),
-                    }
-                }
+      // Note that we must call this *after* setting the global default
+      // subscriber, so that we get its max level hint.
+      .with_max_level(tracing_core::LevelFilter::current().as_log())
+      .init()
+      .map_err(|error| {
+        #[cfg(feature = "std")]
+        {
+          TryInitError {
+            inner: error.into()
+          }
+        }
 
-                #[cfg(not(feature = "std"))]
-                {
-                    let _ = error;
-                    TryInitError { _p: () }
-                }
-            })?;
+        #[cfg(not(feature = "std"))]
+        {
+          let _ = error;
+          TryInitError {
+            _p: ()
+          }
+        }
+      })?;
 
     Ok(())
   }

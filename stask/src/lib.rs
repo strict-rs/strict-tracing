@@ -15,36 +15,34 @@ pub fn run() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+  use std::ops::ControlFlow;
 
-  /// Native failures from these behavioral checks.
-  #[derive(Debug, thiserror::Error)]
-  enum TestError {
-    /// A boolean expectation failed.
-    #[error(transparent)]
-    Condition(#[from] strict_test_support::ConditionFailure),
-    /// Retains the native registry failure.
-    #[error(transparent)]
-    Registry(#[from] strict_test_support::ResultFailure<template_stask::StaskError>),
-  }
-
-  use strict_test_support::ensure;
-  use strict_test_support::ensure_ok;
+  use strict_test_support::PredicateFailure;
+  use strict_test_support::ensure_that;
+  use template_core::cli::command::CommandSet;
   use template_core::cli::command::CommandSurface;
+  use template_core::cli::parse::ParseReport;
 
   use super::extensions;
 
+  /// Complete native extension registration result retained by assertions.
+  type Registration = template_stask::Result<CommandSet<ControlFlow<ParseReport>>>;
+
   #[test]
-  fn extension_registry_exposes_only_the_local_x_router() -> Result<(), TestError> {
-    let command_set = ensure_ok(extensions::commands(), "the local extension registry must build")?;
-    let descriptors = command_set.descriptors();
-    ensure(
-      descriptors.len() == 1
-        && descriptors
-          .first()
-          .is_some_and(|descriptor| descriptor.name() == "x" && descriptor.surface() == CommandSurface::StaskExtension),
-      "the consumer runner must expose only the local x extension surface",
+  fn extension_registry_exposes_only_the_local_x_router() -> Result<(), PredicateFailure<Registration>> {
+    ensure_that(
+      extensions::commands(),
+      "the local extension registry must build and expose only the local x extension surface",
+      |registration| {
+        registration.as_ref().is_ok_and(|command_set| {
+          let descriptors = command_set.descriptors();
+          descriptors.len() == 1
+            && descriptors
+              .first()
+              .is_some_and(|descriptor| descriptor.name() == "x" && descriptor.surface() == CommandSurface::StaskExtension)
+        })
+      },
     )
     .map(drop)
-    .map_err(TestError::from)
   }
 }

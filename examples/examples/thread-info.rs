@@ -36,12 +36,12 @@ fn wait_for_thread(handle: JoinHandle<()>) -> Result<(), Box<dyn Error + Send + 
 
 fn main() -> Result<(), Box<dyn Error + Send + Sync + 'static>> {
   tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        // enable thread id to be emitted
-        .with_thread_ids(true)
-        // enabled thread name to be emitted
-        .with_thread_names(true)
-        .try_init()?;
+    .with_max_level(tracing::Level::DEBUG)
+    // enable thread id to be emitted
+    .with_thread_ids(true)
+    // enabled thread name to be emitted
+    .with_thread_names(true)
+    .try_init()?;
 
   let do_work = || {
     for i in 1..10 {
